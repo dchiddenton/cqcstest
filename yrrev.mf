@@ -1,0 +1,493 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Year to Year Revenue Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/11/2016
+Modified:
+
+Notes:
+$Workfile: yrrev.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/yrrev.mf $
+$Revision: 2 $
+$History: yrrev.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtedate = parameter prompt "Enter Run Date" default todaysdate;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+
+;
+replace yrrev_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+
+include "yrrev_i1.inc"
+
+date dtSdate = dtEdate-day(dtEdate)+1
+
+  
+list/nodefaults/domain="dummy"
+  dtEdate/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "MTD"/newline
+
+;
+replace yrrev_1.eq
+run/setparameter yrrev_1.eq
+
+run/parameterfile=yrrev_1 yrrev_1.eq
+rrepl parameters
+
+/*------------------------------------------------------------------------
+ Summarize misc charges for time frame    1
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "yrrev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rcmift:rptloccode,
+    null fill on failure
+
+  date dtSdate = parameter
+
+  where 
+  ( rcmift:rptdate >= 
+    dtSdate
+  and rcmift:rptdate <= 
+    dtEdate )
+  and rcmift:type < 51
+  and rcmift:rev = 1
+  and (rcmift:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rcmift:Product = cProduct or cProduct = "ALL" )
+
+
+
+sum/domain="rcmift"/hold = "rcmift_hf"
+  rcmift:total
+
+by
+  rcmift:rptloccode/keyelement=1.1
+
+;
+replace yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_2.eq
+
+/*------------------------------------------------------------------------
+ Calculate total revenue for time frame - inital    2
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "yrrev_i1.inc"
+  date dtSdate = parameter
+  string time_frame = parameter
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+define
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one, zero fill on failure
+
+  file rcm_link = access rcmift_hf,
+   set rcmift_hf:rptloccode=rrm:rptloccode,
+   one to one, zero fill on failure
+
+  number net_rev = rental_link:totaltpm - rental_link:rentaldiscountamt
+
+
+where 
+  ( rrm:rptdate >= 
+    dtSdate
+  and rrm:rptdate <= 
+    dtEdate )
+  and rrm:rastatus=3
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+
+list/domain="rrm"/nodetail/noheadings/hold="yrrev_hf"
+
+sorted by
+  rrm:rptloccode
+
+end of rptloccode
+  rrm:rptloccode/width=20
+  time_frame/width=10
+  total[net_rev] + rcm_link:total/width=10/decimalplaces=2/name="tot_rev"
+
+;
+replace yrrev_3.eq
+run/parameterfile=parameters.cq yrrev_3.eq
+
+/*------------------------------------------------------------------------
+ Calculate total revenue for time frame - append    2a
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "yrrev_i1.inc"
+  date dtSdate = parameter
+  string time_frame = parameter
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+define
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one, zero fill on failure
+
+  file rcm_link = access rcmift_hf,
+   set rcmift_hf:rptloccode=rrm:rptloccode,
+   one to one, zero fill on failure
+
+  number net_rev = rental_link:totaltpm - rental_link:rentaldiscountamt
+
+
+where 
+  ( rrm:rptdate >= 
+    dtSdate
+  and rrm:rptdate <= 
+    dtEdate )
+  and rrm:rastatus=3
+  and (rrm:rptloccode  = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+
+list/domain="rrm"/nodetail/noheadings/hold="yrrev_hf"/append
+
+sorted by
+  rrm:rptloccode
+
+end of rptloccode
+  rrm:rptloccode/width=20
+  time_frame/width=10
+  total[net_rev] + rcm_link:total/width=10/decimalplaces=2/name="tot_rev"
+
+;
+replace yrrev_4.eq
+
+/*------------------------------------------------------------------------
+ Run for current month -12 months
+------------------------------------------------------------------------*/
+
+include "yrrev_i1.inc"
+
+date dtEdate2 = dateadd(dtEdate,0,-1)
+date dtSdate = dtEdate2-day(dtEdate2)+1
+
+list/nodefaults/domain="dummy"
+  dtEdate2/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "MTD-12"/newline
+;
+run/parameterfile=yrrev_1 
+rrepl parameters
+
+run/parameterfile=parameters.cq yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_4.eq
+
+/*------------------------------------------------------------------------
+ Run for YTD -24 months
+------------------------------------------------------------------------*/
+
+include "yrrev_i1.inc"
+
+date dtEdate2 = dateadd(dtEdate,0,-2)
+date dtSdate = dateadd((dtEdate2-day(dtEdate2)+1),-month(dtEdate2)+1)
+ 
+
+list/nodefaults/domain="dummy"
+  dtEdate2/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "YTD-24"/newline
+;
+
+run/parameterfile=yrrev_1 
+rrepl parameters
+
+run/parameterfile=parameters.cq yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_4.eq
+
+/*------------------------------------------------------------------------
+ Run for YTD
+------------------------------------------------------------------------*/
+include "yrrev_i1.inc"
+
+date dtSdate = dateadd((dtEdate-day(dtEdate)+1),-month(dtEdate)+1)
+ 
+
+list/nodefaults/domain="dummy"
+  dtEdate/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "YTD"/newline
+;
+run/parameterfile=yrrev_1 
+rrepl parameters
+
+run/parameterfile=parameters.cq yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_4.eq
+
+/*------------------------------------------------------------------------
+ Run for YTD -12 months
+------------------------------------------------------------------------*/
+
+include "yrrev_i1.inc"
+
+date dtEdate2 = dateadd(dtEdate,0,-1)
+date dtSdate = dateadd((dtEdate2-day(dtEdate2)+1),-month(dtEdate2)+1)
+ 
+
+list/nodefaults/domain="dummy"
+  dtEdate2/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "YTD-12"/newline
+;
+run/parameterfile=yrrev_1 
+rrepl parameters
+
+run/parameterfile=parameters.cq yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_4.eq
+
+
+/*------------------------------------------------------------------------
+ Run for YTD -24 months
+------------------------------------------------------------------------*/
+
+include "yrrev_i1.inc"
+
+date dtEdate2 = dateadd(dtEdate,0,-2)
+date dtSdate = dateadd((dtEdate2-day(dtEdate2)+1),-month(dtEdate2)+1)
+ 
+
+list/nodefaults/domain="dummy"
+  dtEdate2/newline
+  str(cloc)/newline
+  clocgroup/newline
+  str(cProduct)/newline
+  dtSDate/newline 
+  "YTD-24"/newline
+;
+run/parameterfile=yrrev_1 
+rrepl parameters
+
+run/parameterfile=parameters.cq yrrev_2.eq
+run/parameterfile=parameters.cq yrrev_4.eq
+
+/*------------------------------------------------------------------------
+ Setup dummy records for missing historical data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "yrrev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = location:locationcode,
+    null fill on failure
+
+  date dtSdate = parameter
+
+  where 
+  (location:locationcode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="location"/hold="yrrev_hf"/append
+
+  location:locationcode/name="rptloccode"/width=20
+  "MTD"/name="time_frame"/width=10
+  0/name="tot_rev"/width=10/decimalplaces=2
+followed by
+  location:locationcode/width=20
+  "MTD-12"/width=10
+  0/width=10/decimalplaces=2
+followed by
+  location:locationcode/width=20
+  "MTD-24"/width=10
+  0/width=10/decimalplaces=2
+followed by
+  location:locationcode/width=20
+  "YTD"/width=10
+  0/width=10/decimalplaces=2
+followed by
+  location:locationcode/width=20
+  "YTD-12"/width=10
+  0/width=10/decimalplaces=2
+followed by
+  location:locationcode/width=20
+  "YTD-24"/width=10
+  0/width=10/decimalplaces=2
+
+;
+run/parameterfile=parameters.cq 
+
+/*------------------------------------------------------------------------
+ Summarize revenue by time frame
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="yrrev_hf"/hold="yrrev_sum_hf"
+  yrrev_hf:tot_rev
+
+across
+  yrrev_hf:time_frame
+
+by
+  yrrev_hf:rptloccode
+
+;
+run/parameterfile=yrrev_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "yrrev_i1.inc"
+
+list/domain="yrrev_sum_hf"/noheadings/nototals/title="Year-To-Date & Month-To-Date Revenue Report"
+  yrrev_sum_hf:rptloccode /name="a"
+  yrrev_sum_hf:tot_rev_mtd /name="b"
+  yrrev_sum_hf:tot_rev_mtd_12 /name="c"
+  ((yrrev_sum_hf:tot_rev_mtd - yrrev_sum_hf:tot_rev_mtd_12) divide yrrev_sum_hf:tot_rev_mtd_12) * 100/mask="zz9.9%"/name="d"
+  yrrev_sum_hf:tot_rev_mtd_24 /name="e"
+  ((yrrev_sum_hf:tot_rev_mtd - yrrev_sum_hf:tot_rev_mtd_24) divide yrrev_sum_hf:tot_rev_mtd_24) * 100/mask="zz9.9%"/name="f"
+  yrrev_sum_hf:tot_rev_ytd /name="g" 
+  yrrev_sum_hf:tot_rev_ytd_12  /name="h"
+  ((yrrev_sum_hf:tot_rev_ytd - yrrev_sum_hf:tot_rev_ytd_12) divide yrrev_sum_hf:tot_rev_ytd_12) * 100/mask="zz9.9%"/name="i"
+  yrrev_sum_hf:tot_rev_ytd_24 /name="j"
+  ((yrrev_sum_hf:tot_rev_ytd - yrrev_sum_hf:tot_rev_ytd_24) divide yrrev_sum_hf:tot_rev_ytd_24) * 100/mask="zz9.9%"/name="k"
+
+top of page
+  "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Run Date: " + str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct)
+  end box /newlines=4
+
+
+  "------ Monthly Figures ------"/align=d
+  "------ Yearly Figures ------"/align=i/newline
+
+  "Location"/align=a
+  "Current"/align=b
+  "-12 Months"/align=c
+  "% +/-"/align=d
+  "-24 Months"/align=e
+  "% +/-"/align=f
+    "Current"/align=g
+  "-12 Months"/align=h
+  "% +/-"/align=i
+  "-24 Months"/align=j
+  "% +/-"/align=k/newline
+
+end of report
+
+  "   REPORT TOTAL"/align=a
+  total[yrrev_sum_hf:tot_rev_mtd,report] /align=b
+  total[yrrev_sum_hf:tot_rev_mtd_12,report] /align=c
+  ((total[yrrev_sum_hf:tot_rev_mtd,report] - total[yrrev_sum_hf:tot_rev_mtd_12,report]) divide total[yrrev_sum_hf:tot_rev_mtd_12,report]) * 100/mask="zz9.9%"/align=d
+  total[yrrev_sum_hf:tot_rev_mtd_24,report] /align=e
+  ((total[yrrev_sum_hf:tot_rev_mtd,report] - total[yrrev_sum_hf:tot_rev_mtd_24,report]) divide total[yrrev_sum_hf:tot_rev_mtd_24,report]) * 100/mask="zz9.9%"/align=f
+  total[yrrev_sum_hf:tot_rev_ytd,report] /align=g
+  total[yrrev_sum_hf:tot_rev_ytd_12,report]  /align=h
+  ((total[yrrev_sum_hf:tot_rev_ytd,report] - total[yrrev_sum_hf:tot_rev_ytd_12,report]) divide total[yrrev_sum_hf:tot_rev_ytd_12,report]) * 100/mask="zz9.9%"/align=i
+  total[yrrev_sum_hf:tot_rev_ytd_24,report] /align=j
+  ((total[yrrev_sum_hf:tot_rev_ytd,report] - total[yrrev_sum_hf:tot_rev_ytd_24,report]) divide total[yrrev_sum_hf:tot_rev_ytd_24,report]) * 100/mask="zz9.9%"/align=k
+
+;
+replace yrrev.eq
+run/parameterfile=yrrev_1 yrrev.eq
+rrepl yrrev
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view yrrev
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Year to Year Revenue Report" -- Report Title
+   string rptname1    = "yrrev" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "yrrev_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

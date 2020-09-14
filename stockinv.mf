@@ -1,0 +1,702 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Stock Inventory Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/12/2017
+Modified:
+
+Notes:
+$Workfile: stockinv.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/stockinv.mf $
+$Revision: 2 $
+$History: stockinv.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cloctype = parameter prompt "Location Selection: " valid "Owned","Current" default "Owned"
+  include "param_invclass.cq"
+  string crangetype = parameter prompt "List by: " valid "Unit Number","Make","License Number","Serial Number","Exp OS Date","Bank","Class" default "Unit Number"
+  string crange = range parameter prompt "Enter Range (Start..End or ALL): " default ALL
+  include "param_invstatus.cq"
+  string cvehicles[1024] = multivalue parameter prompt "Vehicles to Include: " valid  "In Fleet","Unavailable","On Order","Sold" default "In Fleet"
+  string lforeign = parameter/uppercase prompt "Include Foreign Vehicles? " Valid "Y","N" default "N"
+  string cdetail[1024] = multivalue parameter prompt "Information to Include: " valid "General","Depreciation","Amortization" default "General"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+
+;
+replace stockinv_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve inventory records  - setup parameters
+------------------------------------------------------------------------*/
+
+include "stockinv_i1.inc"
+define
+  string lonorder = if (cvehicles contains "On Order" or cvehicles = "ALL") then "Yes" else "No"
+  string linfleet = if (cvehicles contains "In Fleet" or cvehicles = "ALL")then "Yes" else "No"
+  string lunavail = if (cvehicles contains "Unavailable" or cvehicles = "ALL")then "Yes" else "No"
+  string lsold = if (cvehicles contains "Sold" or cvehicles = "ALL") then "Yes" else "No"
+
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=inv:vehiclestatusowned,
+   one to one, null fill on failure
+
+  file ownedloc_link = access location,
+   set location:locationcode=inv:ownedlocationcode,
+   one to one, null fill on failure
+
+  file currentloc_link = access location,
+   set location:locationcode=inv:locationcode,
+   one to one, null fill on failure
+
+  number owned_loc = if cloctype = "Owned" then ownedloc_link:owned else currentloc_link:owned
+
+  number veh_residual = inv:acquisitionprice - inv:opaccumdep
+  number lic_residual = inv:licenseamount - inv:opaccumdeplic
+
+define cInvType[8] = "Active"
+define lUAStatus = switch(invstat_link:statustype)
+   case 5 : "Yes"
+   default : "No"
+define iStatusCat = switch(lUAStatus+lInFleet+lUnavail)
+   case "NoYesNo" : 2
+   case "NoYesYes" : 2
+   case "YesNoYes" : 3
+   case "YesYesYes" : 3
+   default : 0
+
+   string comp_range = switch(crangetype)
+    case "Unit Number"    : inv:unitnumber
+    case "Make"           : inv:make
+    case "License Number" : inv:licensenumber
+    case "Serial Number"  : inv:serialnumber
+    case "Exp OS Date"    : str(inv:expectedoutservicedate)
+    case "Bank"           : inv:bankid
+    case "Class"          : inv:invclass
+    default               : "ALL"
+
+
+where 
+  (inv:Product = cProduct)
+  and
+  (comp_range = crange)
+  and (inv:invclass = cClass)
+  and 
+  ((cloctype = "Owned" and (inv:ownedlocationcode = cLoc)) or
+       (cloctype = "Current" and (inv:locationcode = cLoc)))
+  and ((cloctype = "Owned" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+  and (invstat_link:description = cstatus)
+  and ((owned_loc = 1 and lforeign = "N" ) or lforeign = "Y")
+
+      
+list/domain="inv"/hold="stockinv_hf"
+if istatuscat > 0 then { 
+  inv:product 
+  inv:unitnumber/heading="Unit" 
+  inv:serialnumber 
+  inv:invclass/heading="Class" 
+  inv:year/mask="9999"
+  inv:make
+  inv:model
+  inv:unitcolor
+  inv:odometer 
+  inv:licensenumber/heading="License"
+  inv:licensest/heading="St" 
+  invstat_link:description
+  inv:ranumber/heading="RA/RO/NR #"
+  inv:expectedoutservicedate/heading="Exp OS Date"/mask="MM-DD-YYYY"
+  inv:ownedlocationcode/heading="Owned " 
+  inv:locationcode/heading="Current"
+  owned_loc
+  cInvType
+  iStatusCat
+
+  inv:inspectiondate
+  inv:inservicedate
+  inv:lastmovementdate
+  inv:datedue
+  
+--amort info
+  inv:bankid
+  inv:loannumber
+  inv:amountfinanced
+  inv:financeterm
+  inv:datefinanced
+  inv:paymentamount
+  inv:interestrate
+  inv:firstpaymentdate
+  inv:remainingbalance
+  inv:remainingpayments
+  inv:payoffdate
+  inv:lastamortdate
+
+--Depr info
+  inv:acquisitionprice
+  veh_residual
+  inv:opaccumdep
+  inv:opdailydeppct
+  inv:opmonthlydepamt
+  inv:opdepdate
+  inv:licenseamount
+  inv:opaccumdeplic
+  lic_residual
+  inv:opdepdatelic
+  inv:opaccumdeplic  
+  inv:vlfamount
+  inv:licenseexpdate
+}
+
+;
+replace stockinv_1.eq
+run/setparameter stockinv_1.eq
+
+run/parameterfile=stockinv_1 stockinv_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve onOrder inventory
+------------------------------------------------------------------------*/
+
+
+include "stockinv_i1.inc"
+define
+  string lonorder = if (cvehicles contains "On Order" or cvehicles = "ALL") then "Yes" else "No"
+  string linfleet = if (cvehicles contains "In Fleet" or cvehicles = "ALL")then "Yes" else "No"
+  string lunavail = if (cvehicles contains "Unavailable" or cvehicles = "ALL")then "Yes" else "No"
+  string lsold = if (cvehicles contains "Sold" or cvehicles = "ALL") then "Yes" else "No"
+
+
+  file alt_locgroupE = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invnew:ownedlocationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invnew:expecteddeliveryloc,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=invnew:vehiclestatusowned,
+   one to one, null fill on failure
+
+define cinvType[8] = "New"
+define istatuscat = 1
+
+   string comp_range = switch(crangetype)
+    case "Unit Number"    : invnew:unitnumber
+    case "Make"           : invnew:make
+    case "License Number" : invnew:licensenumber
+    case "Serial Number"  : invnew:serialnumber
+    case "Exp OS Date"    : str(invnew:expectedoutservicedate)
+    case "Bank"           : invnew:bankid
+    case "Class"          : invnew:invclass
+    default               : "ALL"
+
+  number veh_residual = invnew:acquisitionprice - invnew:opaccumdep
+  number lic_residual = invnew:licenseamount - invnew:opaccumdeplic
+
+
+where 
+  (invnew:Product = cProduct)
+  and
+  (comp_range = crange)
+  and (invnew:invclass = cClass)
+  and 
+  (invnew:expecteddeliveryloc = cLoc OR invnew:ownedlocationcode  = cLoc) 
+ 
+  and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname or cLocGroup = alt_locgroupe:groupname)
+  and (invstat_link:description = cstatus)
+
+      
+list/domain="invnew"/hold="stockinv_hf"/append
+  invnew:product/displaywidth=7 
+  invnew:unitnumber/heading="Unit"/displaywidth=5 
+  invnew:serialnumber/displaywidth=18 
+  invnew:invclass/heading="Class"/displaywidth=5 
+  invnew:year/mask="9999"
+  invnew:make/displaywidth=8 
+  invnew:model/displaywidth=9 
+  invnew:unitcolor/displaywidth=9 
+  invnew:odometer 
+  invnew:licensenumber/heading="License"
+  invnew:licensest/heading="St"/displaywidth=2 
+  invstat_link:description/displaywidth=7 
+  invnew:ranumber/heading="RA/RO/NR #"/displaywidth=12 
+  invnew:expectedoutservicedate/heading="Exp OS Date"/mask="MM-DD-YYYY"
+  if invnew:ownedlocationcode = "" then invnew:expecteddeliveryloc else invnew:ownedlocationcode/name="ownedlocationcode"/heading="Owned " 
+  if invnew:locationcode  = "" then invnew:expecteddeliveryloc else invnew:locationcode/name="locationcode"/heading="Current"
+  0/name="owned_loc"
+  cinvType
+  iStatusCat
+
+  invnew:inspectiondate
+  invnew:inservicedate
+  invnew:lastmovementdate
+  invnew:datedue
+  
+--amort info
+  invnew:bankid
+  invnew:loannumber
+  invnew:amountfinanced
+  invnew:financeterm
+  invnew:datefinanced
+  invnew:paymentamount
+  invnew:interestrate
+  invnew:firstpaymentdate
+  invnew:remainingbalance
+  invnew:remainingpayments
+  invnew:payoffdate
+  invnew:lastamortdate
+
+--Depr info
+  invnew:acquisitionprice
+  veh_residual
+  invnew:opaccumdep
+  invnew:opdailydeppct
+  invnew:opmonthlydepamt
+  invnew:opdepdate
+  invnew:licenseamount
+  invnew:opaccumdeplic
+  lic_residual
+  invnew:opdepdatelic
+  invnew:opaccumdeplic
+  invnew:vlfamount
+  invnew:licenseexpdate
+
+;
+run/parameterfile=stockinv_1 
+
+/*------------------------------------------------------------------------
+ Retrieve sold inventory records
+------------------------------------------------------------------------*/
+
+include "stockinv_i1.inc"
+define
+  string lonorder = if (cvehicles contains "On Order" or cvehicles = "ALL") then "Yes" else "No"
+  string linfleet = if (cvehicles contains "In Fleet" or cvehicles = "ALL")then "Yes" else "No"
+  string lunavail = if (cvehicles contains "Unavailable" or cvehicles = "ALL")then "Yes" else "No"
+  string lsold = if (cvehicles contains "Sold" or cvehicles = "ALL") then "Yes" else "No"
+
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:ownedlocationcode,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=invsold:vehiclestatusowned,
+   one to one, null fill on failure
+
+  file ownedloc_link = access location,
+   set location:locationcode=invsold:ownedlocationcode,
+   one to one, null fill on failure
+
+  file currentloc_link = access location,
+   set location:locationcode=invsold:locationcode,
+   one to one, null fill on failure
+
+  number owned_loc = if cloctype = "Owned" then ownedloc_link:owned else currentloc_link:owned
+
+  number veh_residual = invsold:acquisitionprice - invsold:opaccumdep
+  number lic_residual = invsold:licenseamount - invsold:opaccumdeplic
+
+define cInvType[8] = "Sold"
+define iStatusCat = 4
+
+   string comp_range = switch(crangetype)
+    case "Unit Number"    : invsold:unitnumber
+    case "Make"           : invsold:make
+    case "License Number" : invsold:licensenumber
+    case "Serial Number"  : invsold:serialnumber
+    case "Exp OS Date"    : str(invsold:expectedoutservicedate)
+    case "Bank"           : invsold:bankid
+    case "Class"          : invsold:invclass
+    default               : "ALL"
+
+
+where 
+  (invsold:Product  = cProduct)
+  and
+  (comp_range = crange)
+  and (invsold:invclass = cClass)
+  and 
+  ((cloctype = "Owned" and (invsold:ownedlocationcode = cLoc)) or
+       (cloctype = "Current" and (invsold:locationcode = cLoc)))
+  and ((cloctype = "Owned" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+  and (invstat_link:description = cstatus)
+  and ((owned_loc = 1 and lforeign = "N") or lforeign = "Y")
+
+
+
+list/domain="invsold"/append/hold="stockinv_hf"
+  invsold:product/displaywidth=7 
+  invsold:unitnumber/heading="Unit"/displaywidth=5 
+  invsold:serialnumber/displaywidth=18 
+  invsold:invclass/heading="Class"/displaywidth=5 
+  invsold:year/mask="9999"
+  invsold:make/displaywidth=8 
+  invsold:model/displaywidth=9 
+  invsold:unitcolor/displaywidth=9 
+  invsold:odometer 
+  invsold:licensenumber/heading="License" 
+  invsold:licensest/heading="St"/displaywidth=2 
+  invstat_link:description/displaywidth=7 
+  invsold:ranumber/heading="RA/RO/NR #"/displaywidth=12 
+  invsold:expectedoutservicedate/heading="Exp OS Date"/mask=
+"MM-DD-YYYY"
+  invsold:ownedlocationcode/heading="Owned " 
+  invsold:locationcode/heading="Current"
+  owned_loc
+  cInvType
+  iStatusCat
+
+
+  invsold:inspectiondate
+  invsold:inservicedate
+  invsold:lastmovementdate
+  invsold:datedue
+  
+--amort info
+  invsold:bankid
+  invsold:loannumber
+  invsold:amountfinanced
+  invsold:financeterm
+  invsold:datefinanced
+  invsold:paymentamount
+  invsold:interestrate
+  invsold:firstpaymentdate
+  invsold:remainingbalance
+  invsold:remainingpayments
+  invsold:payoffdate
+  invsold:lastamortdate
+
+--Depr info
+  invsold:acquisitionprice
+  veh_residual
+  invsold:opaccumdep
+  invsold:opdailydeppct
+  invsold:opmonthlydepamt
+  invsold:opdepdate
+  invsold:licenseamount
+  invsold:opaccumdeplic
+  lic_residual
+  invsold:opdepdatelic
+  invsold:opaccumdeplic
+  invsold:vlfamount
+  invsold:licenseexpdate
+
+;
+run/parameterfile=stockinv_1 
+
+
+/*------------------------------------------------------------------------
+ Create report header 
+------------------------------------------------------------------------*/
+
+include "stockinv_i1.inc"
+
+
+list/domain="dummy"/nodefaults/nobanner/noheadings/squeeze
+
+ --general
+if ("General" = cdetail) then {
+  '"Product"/align=ga'
+  '"Color"/align=gb'
+  '"Odometer"/align=gc'
+  '"License"/align=gd'
+  '"St"/align=ge'
+  '"Status"/align=gf'
+  '"RA/RO/NR#"/align=gg'
+  '"InService Date"/align=gh'
+  '"Exp OS Date"/align=gi'
+  '"Lic  Exp Date"/align=gj'
+  '"Owned"/align=gk'
+  '"Current"/align=gl'
+} 
+--Depr
+if ("Depreciation" = cdetail) then {
+  '"Purchase Amt"/align=da'
+  '"Accum Dep"/align=db'
+  '"Dep Rate"/align=dc'
+  '"Monthly Dep Amt"/align=dd'
+  '"Book Value"/align=de'
+  '"Last Dep Date"/align=df'
+  '"License Amt"/align=dg'
+  '"Lic Accum Dep"/align=dh'
+  '"Lic Book Value"/align=di'
+  '"VLF Amount"/align=dj'
+}
+--Amort
+if ("Amortization" = cdetail) then {
+  '"Bank ID"/align=aa'
+  '"Loan Number"/align=ab'
+  '"Amount Financed"/align=ac'
+  '"Term"/align=ad'
+  '"Date Financed"/align=ae'
+  '"Principal Amt"/align=af'
+  '"Interest Rate"/align=ag'
+  '"First Payment"/align=ah'
+  '"Remaining Balance"/align=ai'
+  '"Remaining Payments"/align=aj'
+  '"Payoff Date"/align=ak'
+  '"Last Amort Date"/align=al'
+}
+
+;
+run/parameterfile=stockinv_1 
+rrepl stockinv_header
+
+/*------------------------------------------------------------------------
+ Create report columns
+------------------------------------------------------------------------*/
+
+include "stockinv_i1.inc"
+
+list/domain="dummy"/nodefaults/nobanner/noheadings/squeeze
+
+ --general
+if ("General" = cdetail) then {
+  'stockinv_hf:product/displaywidth=7/name="ga"'
+  'stockinv_hf:unitcolor/displaywidth=8/name="gb"'
+  'stockinv_hf:odometer/name="gc"'
+  'stockinv_hf:licensenumber/name="gd"'
+  'stockinv_hf:licensest/displaywidth=2/name="ge"'
+  'stockinv_hf:description/displaywidth=10/duplicates/name="gf"'
+  'stockinv_hf:ranumber/displaywidth=12/name="gg"'
+  'stockinv_hf:inservicedate/mask="MM-DD-YYYY"/name="gh"'
+  'stockinv_hf:expectedoutservicedate/mask="MM-DD-YYYY"/name="gi"'
+  'stockinv_hf:licenseexpdate/mask="MM-DD-YYYY"/name="gj"'
+  'stockinv_hf:ownedlocationcode/name="gk"'
+  'stockinv_hf:locationcode/name="gl"'
+}
+ 
+ 
+-- deprec info
+if ("Depreciation" = cdetail) then {
+  'stockinv_hf:acquisitionprice/name="da"'
+  'stockinv_hf:opaccumdep/name="db"'
+  'stockinv_hf:opdailydeppct/name="dc"'
+  'stockinv_hf:opmonthlydepamt/name="dd"'
+  'stockinv_hf:veh_residual/name="de"'
+  'stockinv_hf:opdepdate/name="df"'
+  'stockinv_hf:licenseamount/name="dg"'
+  'stockinv_hf:opaccumdeplic/name="dh"'
+  'stockinv_hf:lic_residual/name="di"'
+  'stockinv_hf:vlfamount/name="dj"'
+}  
+--amort info
+if ("Amortization" = cdetail) then {
+  'stockinv_hf:bankid/name="aa"'
+  'stockinv_hf:loannumber/displaywidth=10/name="ab"'
+  'stockinv_hf:amountfinanced/name="ac"'
+  'stockinv_hf:financeterm/name="ad"'
+  'stockinv_hf:datefinanced/name="ae"'
+  'stockinv_hf:paymentamount/name="af"'
+  'stockinv_hf:interestrate/name="ag"'
+  'stockinv_hf:firstpaymentdate/name="ah"'
+  'stockinv_hf:remainingbalance/name="ai"'
+  'stockinv_hf:remainingpayments/name="aj"'
+  'stockinv_hf:payoffdate/name="ak"'
+  'stockinv_hf:lastamortdate/name="al"'
+}
+
+;
+run/parameterfile=stockinv_1
+rrepl stockinv_col
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+include "stockinv_i1.inc"
+define
+  string lonorder = if (cvehicles contains "On Order" or cvehicles = "ALL") then "Yes" else "No"
+  string linfleet = if (cvehicles contains "In Fleet" or cvehicles = "ALL")then "Yes" else "No"
+  string lunavail = if (cvehicles contains "Unavailable" or cvehicles = "ALL")then "Yes" else "No"
+  string lsold = if (cvehicles contains "Sold" or cvehicles = "ALL") then "Yes" else "No"
+
+
+  string key_str = str(inv:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure;
+
+define cbrkTitle = switch(stockinv_hf:istatuscat)
+   case 1 : "On Order Units"
+   case 2 : "In Fleet Units"
+   case 3 : "Unavailable Units"
+   case 4 : "Sold Units"
+
+
+where ((linfleet = "Yes" or lunavail = "Yes") and stockinv_hf:cInvType = "Active")
+  or (lonorder = "Yes" and stockinv_hf:cInvType = "New")
+  or (lsold = "Yes" and stockinv_hf:cInvType = "Sold")
+
+list/domain="stockinv_hf"/title="Stock Inventory Report"/nobanner/noheadings/pageof/pagelength=85
+
+  stockinv_hf:unitnumber/displaywidth=10/name="a"
+  stockinv_hf:serialnumber/displaywidth=18/name="b"
+  stockinv_hf:invclass/displaywidth=8/name="c" 
+  stockinv_hf:year/mask="9999"/name="d"
+  stockinv_hf:make/displaywidth=8/name="e"
+  stockinv_hf:model/displaywidth=9/name="f"
+  include "stockinv_col.cq"
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/displaywidth=100/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+
+sorted by stockinv_hf:istatuscat/page/total
+  switch(crangetype)
+  case "Unit Number" : stockinv_hf:Unitnumber --+ Product
+  case "Make" : stockinv_hf:Make --+ Model
+  case "License Number" : stockinv_hf:Licensenumber --+ Licensest
+  case "Exp OS Date" : str( stockinv_hf:expectedoutservicedate, "YYYY-MM-DD" )
+  case "Class" : stockinv_hf:invclass
+  case "Serial Number" : stockinv_hf:Serialnumber
+  case "Bank" : inv:bankid
+  default : stockinv_hf:Unitnumber --+ Product
+  switch(crangetype)
+  case "Unit Number" : stockinv_hf:Product
+  case "Make" : stockinv_hf:Model
+  case "License Number" : stockinv_hf:Licensest
+  case "Exp OS Date" : ""
+  case "Class " : ""
+  case "Serial Number" : ""
+  case "Bank" : ""
+  default : Product
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Unit Range: " + str(crange)/displaywidth=100/newline
+   "Product(s): " + str(cProduct)+ "   Vehicle Classes: "+str(cclass)/displaywidth=100/newline
+  if cLocgroup <> "" then str(cloctype) +" Location group: " + str(cLocGroup) else str(cloctype) + " Locations: " + str(cLoc)/displaywidth=100/newline
+  end box/newline=4
+
+
+
+  "Unit"/align=a
+  "Serial Number"/align=b
+  "Class"/align=c
+  "Year"/align=d
+  "Make"/align=e
+  "Model"/align=f
+  include "stockinv_header.cq"
+""/newline=2
+  cbrktitle/noheading/newline=2
+ 
+--#top of stockinv_hf:istatuscat
+--#  cbrktitle/noheading/newline=2
+
+end of stockinv_hf:istatuscat
+  ""/newline
+  str(count[stockinv_hf:unitnumber])+" "+cbrktitle/newline
+
+
+end of report
+  ""/newline
+  str(count[stockinv_hf:unitnumber])+" Total Units"/newline
+
+;
+replace stockinv.eq
+run/parameterfile=stockinv_1 stockinv.eq
+rrepl stockinv
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view stockinv
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Stock Inventory Report" -- Report Title
+   string rptname1    = "stockinv" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "stockinv_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

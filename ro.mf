@@ -1,0 +1,362 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Repair Orders Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/15/2017
+Modified:
+
+Notes:
+$Workfile: ro.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ro.mf $
+$Revision: 2 $
+$History: ro.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invmaint"
+if itemnumber=1 then '"'+invmaint:description+'"' else
+   ',"'+invmaint:description+'"'
+
+sorted by
+   invmaint:description
+top of report
+'string crepairtype[8192] = multivalue parameter prompt "Repair Types:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_repairtype"
+
+where company:type = "R"
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="company"
+if itemnumber=1 then '"'+company:company+'"' else
+   ',"'+company:company+'"'
+
+sorted by
+   company:company
+top of report
+'string cshop[8192] = multivalue parameter prompt "Repair Shops:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_shop"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="inv"
+if itemnumber=1 then '"'+inv:model+'"' else
+   ',"'+inv:model+'"'
+
+sorted by
+   inv:model
+top of report
+'string cmodel[8192] = multivalue parameter prompt "Models:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_model"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default dateadd(todaysdate,-1)
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  string cdateselect = parameter prompt "Select by Date: " valid "Date Out","Date Due/In" default "Date Out"
+  include "param_loc.cq"
+  string cloctype = parameter prompt "Location Selection: " valid "Owned","Current" default "Owned"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_repairtype.cq"
+  include "param_shop.cq"
+  include "param_model.cq"
+  string cinvnum = range parameter prompt "Enter Unit# Range (Start..End or ALL): " default ALL
+  string cstatus = parameter prompt "Repair Order Status: " valid "Open","Closed","ALL" default "ALL"
+  string csort = parameter prompt "Sort by: " valid "Repair Shop","Repair Type","Vehicle" default "Vehicle"
+
+;
+replace ro_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve reapir orders - setup parameters
+------------------------------------------------------------------------*/
+include "ro_i1.inc"
+
+define
+
+   file inv_link = access inv,
+    set inv:invid=invro:invid,
+    one to one, zero fill on failure
+
+   file invsold_link = access invsold,
+    set invsold:invid=invro:invid,
+    one to one, zero fill on failure
+
+   file mtn_proc = access invmaint,
+    set invmaint:typeid=invro:typeid,
+    one to one,null fill on failure
+
+   number sold_flag = if (inv_link:invid <> 0) then 0 else 1
+
+   string cur_loc = if sold_flag=0 then if (inv:ranumber = "") then inv:locationcode else inv:locationcodedue
+     else invsold:locationcode
+   string own_loc = if sold_flag=0 then inv:ownedlocationcode else invsold:ownedlocationcode
+   string loc_code = if cloctype = "Owned" then own_loc else cur_loc
+
+   string inv_class = if sold_flag=0 then inv_link:invclass else invsold_link:invclass
+   string inv_model = if sold_flag=0 then inv_link:model else invsold_link:model
+   string inv_make = if sold_flag=0 then inv_link:make else invsold_link:make
+   string inv_year = if sold_flag=0 then str(inv_link:year) else str(invsold_link:year)
+   
+
+where ((invro:dateout >= dtsdate and cdateselect = "Date Out") or
+       (invro:datein <> null and invro:datein >= dtsdate and cdateselect = "Date Due/In") or
+       (invro:datein = null and invro:datedue >= dtsdate and cdateselect = "Date Due/In")) and
+      ((invro:dateout <= dtedate and cdateselect = "Date Out") or
+       (invro:datein <> null and invro:datein <= dtedate and cdateselect = "Date Due/In") or
+       (invro:datein = null and invro:datedue <= dtedate and cdateselect = "Date Due/In")) and
+      (mtn_proc:description = crepairtype or crepairtype = "ALL") and
+      (invro:company = cshop or cshop = "ALL") and
+      (invro:unitnumber = cinvnum or cinvnum = "ALL") and
+      ((invro:datein = null and cstatus = "Open") or (invro:datein <> null and cstatus = "Closed") or cstatus = "ALL")
+
+
+list/domain="invro"/hold="invro_hf"
+if (loc_code = cloc or cloc = "ALL")
+    and (inv_class = cclass or cclass = "ALL")
+    and (inv_model = cmodel or cmodel = "ALL") then {
+  invro:roid 
+  invro:product
+  invro:unitnumber
+  inv_class
+  inv_make
+  inv_model
+  inv_year
+  invro:dateout
+  invro:timeout
+  invro:datedue
+  invro:timedue
+  invro:datein
+  invro:timein
+  invro:repairsummary
+  invro:company
+  invro:partscost
+  invro:laborcost
+  invro:partscost+invro:laborcost/name="total_cost"
+}
+
+;
+replace ro_1.eq
+run/setparameter ro_1.eq
+
+run/parameterfile=ro_1 ro_1.eq
+
+/*------------------------------------------------------------------------
+ Dynamically create report layout
+------------------------------------------------------------------------*/
+include "ro_i1.inc"
+
+
+list/domain="dummy"/nodefaults/noreporttotals
+if csort = "Vehicle" then {
+  "invro_hf:roid/name='a'"/newline
+  "invro_hf:dateout/name='d'"/newline
+  "invro_hf:timeout/nototal/name='e'"/newline
+  "if invro_hf:datein = null then invro_hf:datedue else invro_hf:datein/name='f'"/newline
+  "if invro_hf:datein = null then invro_hf:timedue else invro_hf:timein/nototal/name='g'"/newline
+  "invro_hf:repairsummary/displaywidth=30/name='h'"/newline
+  "invro_hf:company/name='i'"/newline
+  "invro_hf:partscost/name='j'"/newline
+  "invro_hf:laborcost /name='k'"/newline
+  "invro_hf:total_cost/name='l'"/newline
+
+"sorted by invro_hf:unitnumber/total/heading='@'"/newline
+"invro_hf:roid"/newline
+"top of invro_hf:unitnumber"/newline
+"'Product: '+str(invro_hf:product)"/newline
+"'Unit: '+str(invro_hf:unitnumber)+'      '+str(invro_hf:inv_year)+' '+str(invro_hf:inv_make)+' '+str(invro_hf:inv_model)/column=30/displaywidth=100/newline"/newline
+
+
+"top of page"/newline
+  "'company_logo.jpg'/image/width=30/left/newline"/newline
+  "box/center/column=1"/newline
+  "'Dates: '+str(dtsdate)+' to '+str(dtedate)/newline"/newline
+  "'Locations: ' + str(cLoc)/displaywidth=100/newline"/newline
+  "'Product: ' + str(cProduct)+'   Car Class: ' + str(cClass)/newline"/newline
+  "'Sorted by: '+str(csort)"/newline
+  "end box/newlines=4"/newline
+
+  "'RO#' /align=a"/newline
+  "'Date Out' /align=d"/newline
+  "'Time Out' /align=e"/newline
+  "'Date In/Due' /align=f"/newline
+  "'Time In/Due' /align=g"/newline
+  "'Repair Summary' /align=h"/newline
+  "'Repair Shop'/align=i"/newline
+  "'Total Parts' /align=j"/newline
+  "'Total Labor' /align=k"/newline
+  "'Total' /align=l/newline"/newline
+}  else
+if csort = "Repair Shop" then {
+  "invro_hf:roid/name='a'"/newline
+  "invro_hf:product/name='b'"/newline
+  "invro_hf:unitnumber/name='c'"/newline
+  "invro_hf:dateout/name='d'"/newline
+  "invro_hf:timeout/nototal/name='e'"/newline
+  "if invro_hf:datein = null then invro_hf:datedue else invro_hf:datein/name='f'"/newline
+  "if invro_hf:datein = null then invro_hf:timedue else invro_hf:timein/nototal/name='g'"/newline
+  "invro_hf:repairsummary/displaywidth=30/name='h'"/newline
+  "invro_hf:partscost/name='j'"/newline
+  "invro_hf:laborcost /name='k'"/newline
+  "invro_hf:total_cost/name='l'"/newline
+ 
+
+"sorted by invro_hf:company/total/heading='@'"/newline
+"invro_hf:roid"/newline
+"top of invro_hf:company"/newline
+"'Company: '+str(invro_hf:company)"/newline
+
+
+"top of page"/newline
+  "'company_logo.jpg'/image/width=30/left/newline"/newline
+  "box/center/column=1"/newline
+  "'Dates: '+str(dtsdate)+' to '+str(dtedate)/newline"/newline
+  "'Locations: ' + str(cLoc)/displaywidth=100/newline"/newline
+  "'Product: ' + str(cProduct)+'   Car Class: ' + str(cClass)/newline"/newline
+  "'Sorted by: '+str(csort)"/newline
+  "end box/newlines=4"/newline
+
+  "'RO#' /align=a"/newline
+  "'Product' /align=b"/newline
+  "'Unit#' /align=c"/newline
+  "'Date Out' /align=d"/newline
+  "'Time Out' /align=e"/newline
+  "'Date In/Due' /align=f"/newline
+  "'Time In/Due' /align=g"/newline
+  "'Repair Summary' /align=h"/newline
+  "'Total Parts' /align=j"/newline
+  "'Total Labor' /align=k"/newline
+  "'Total' /align=l/newline"/newline
+}  else
+if csort = "Repair Type" then {
+  "invro_hf:roid/name='a'"/newline
+  "invro_hf:product/name='b'"/newline
+  "invro_hf:unitnumber/name='c'"/newline
+  "invro_hf:dateout/name='d'"/newline
+  "invro_hf:timeout/nototal/name='e'"/newline
+  "if invro_hf:datein = null then invro_hf:datedue else invro_hf:datein/name='f'"/newline
+  "if invro_hf:datein = null then invro_hf:timedue else invro_hf:timein/nototal/name='g'"/newline
+  "invro_hf:company/name='i'"/newline
+  "invro_hf:partscost/name='j'"/newline
+  "invro_hf:laborcost /name='k'"/newline
+  "invro_hf:total_cost/name='l'"/newline
+
+"sorted by invro_hf:repairsummary/total/heading='@'"/newline
+"invro_hf:roid"/newline
+"top of invro_hf:repairsummary"/newline
+"'Repair Type: '+str(invro_hf:repairsummary)"/newline
+ 
+
+"top of page"/newline
+  "'company_logo.jpg'/image/width=30/left/newline"/newline
+  "box/center/column=1"/newline
+  "'Dates: '+str(dtsdate)+' to '+str(dtedate)/newline"/newline
+  "'Locations: ' + str(cLoc)/displaywidth=100/newline"/newline
+  "'Product: ' + str(cProduct)+'   Car Class: ' + str(cClass)/newline"/newline
+  "'Sorted by: '+str(csort)"/newline
+  "end box/newlines=4"/newline
+
+  "'RO#' /align=a"/newline
+  "'Product' /align=b"/newline
+  "'Unit#' /align=c"/newline
+  "'Date Out' /align=d"/newline
+  "'Time Out' /align=e"/newline
+  "'Date In/Due' /align=f"/newline
+  "'Time In/Due' /align=g"/newline
+  "'Repair Shop'/align=i"/newline
+  "'Total Parts' /align=j"/newline
+  "'Total Labor' /align=k"/newline
+  "'Total' /align=l/newline"/newline
+}
+;
+run/parameterfile=ro_1
+rreplac ro_2
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "ro_i1.inc"
+
+list/domain="invro_hf"/nobanner/noheadings/pageof/pagelength=75/title="Repair Orders Report"
+  include "ro_2.cq"
+;
+replace ro.eq
+run/parameterfile=ro_1 ro.eq
+rrepl ro
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view ro
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Repair Orders Report" -- Report Title
+   string rptname1    = "ro" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "ro_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

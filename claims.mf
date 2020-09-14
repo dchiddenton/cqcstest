@@ -1,0 +1,531 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Claims List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/17/2018
+Modified:
+
+Notes:
+$Workfile: claims.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/claims.mf $
+$Revision: 2 $
+$History: claims.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:explist,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if i_counter:position <= num_params then
+  if i_counter:position=1 then '"'+subfield(claimsetup:explist,",",i_counter:position)+'"' else
+   ',"'+subfield(claimsetup:explist,",",i_counter:position)+'"'
+
+top of report
+'string cexp[8192] = multivalue parameter prompt "Expense Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_exp"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="paymentstype"
+if itemnumber=1 then '"'+paymentstype:paymenttype+'"' else
+   ',"'+paymentstype:paymenttype+'"'
+
+sorted by
+   paymentstype:paymenttype
+top of report
+'string cpmt[8192] = multivalue parameter prompt "Payment Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_paytype"
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:recoverysource,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if i_counter:position <= num_params then
+  if i_counter:position=1 then '"'+subfield(claimsetup:recoverysource,",",i_counter:position)+'"' else
+   ',"'+subfield(claimsetup:recoverysource,",",i_counter:position)+'"'
+
+top of report
+'string crecovery[8192] = multivalue parameter prompt "Recovery Codes: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_recovery"
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:typelist,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if i_counter:position <= num_params then
+   if i_counter:position=1 then '"'+subfield(claimsetup:typelist,",",i_counter:position)+'"' else
+   ',"'+subfield(claimsetup:typelist,",",i_counter:position)+'"'
+
+top of report
+'string ctype[8192] = multivalue parameter prompt "Claim Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_ctype"
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:statlist,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if i_counter:position <= num_params then
+   if i_counter:position=1 then '"'+subfield(claimsetup:statlist,",",i_counter:position)+'"' else
+   ',"'+subfield(claimsetup:statlist,",",i_counter:position)+'"'
+
+top of report
+'string ccstatus[8192] = multivalue parameter prompt "Claim Statuses: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_cstatus"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cunits = range parameter prompt "Enter Unit Range (Start..End or ALL): " default ALL
+  include "param_emps.cq"
+  include "param_ctype.cq"
+  include "param_cstatus.cq"
+  include "param_recovery.cq"
+  include "param_exp.cq"
+  include "param_paytype.cq"
+  string cpositive = parameter/uppercase prompt "Print Positive Balance Claims: " valid "Y","N" default "Y"
+  string czero = parameter/uppercase prompt "Print Zero Balance Claims: " valid "Y","N" default "Y"
+  string cclosed = parameter/uppercase prompt "Print Closed Claims: " valid "Y","N" default "N"
+  string cnotes = parameter valid "None","Summary","Detail" prompt "Print Note Detail?" default "None"
+  string ccalculation = parameter valid "Use Expenses","Use Subrogation" prompt "Net Calculation?" default "Use Expenses"
+  string cselectdate = parameter prompt "Select by: " valid "Date of Loss","Close Date" default "Date of Loss"
+  string crpttype = parameter prompt "Report type: " valid "Standard Report","Aged Report" default "Standard Report"
+  string creminders = multivalue parameter prompt "Print Reminders?" valid "Active","Inactive","None" default "Active"
+;
+replace claims_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve claim records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "claims_i1.inc"
+define
+   number itemp = (todaysdate - claim:dateentered)
+   string claim_age = if itemp < 30 then "30" else
+                      if itemp >= 30 and itemp < 60 then "60" else
+                      if itemp >= 60 and itemp < 90 then "90" else
+                      if itemp >= 90 then "Over 90"
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = claim:rentingloc,
+    null fill on failure
+
+   file contact_link = access claimcontact,
+    set claimcontact:commonid=claim:commonid,
+    with claimcontact:type = "Renter",
+    one to one, generic, null fill on failure
+
+   file rrm_link = access rrm,
+    set rrm:ranumber=claim:ranumber,
+    one to one, null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_link:commonid,
+    one to one, null fill on failure
+
+  file vehicle_link = access claimvehicle,
+   set claimvehicle:commonid=claim:commonid,
+   one to one, generic, null fill on failure
+
+where (claim:type = ctype or ctype = "ALL") and
+      (claim:stat = ccstatus or ccstatus = "ALL") and
+      (claim:recoverysource = crecovery or crecovery = "ALL") and 
+      (claim:rentingloc = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and
+      (claim:workingemp = cemps or cemps = "ALL") and
+      ((((claim:dol >= dtsdate and claim:dol <= dtedate) or claim:dol = null) and cselectdate = "Date of Loss")or
+       (((claim:closedate >= dtsdate and claim:closedate <= dtedate)) and cselectdate = "Close Date")) and
+      (vehicle_link:unitnumber = cunits or cunits = "ALL") and
+      (vehicle_link:product = cproduct or cproduct = "ALL")
+  
+
+list/domain="claim"/hold="claim_hf"
+  claim:commonid/keyelement=1.1
+  claim:claimnumdol 
+  claim:claimnumseq 
+  claim:claimnumunit
+  claim:ranumber
+  claim:type
+  claim:stat
+  claim:recoverysource
+  claim:dol
+  claim:dateentered
+  claim:closedate
+  claim:datemodified
+  claim:ldw
+  claim:subroamt
+  claim:estimateamt
+  claim:workingemp
+  claim:enteringemp
+  claim_age
+  contact_link:lastname/name="renter"
+  rental_link:ratecode/name="rate_code"
+  vehicle_link:unitnumber
+
+;
+replace claims_1.eq
+run/setparameter claims_1.eq
+
+run/parameterfile=claims_1 claims_1.eq
+
+/*------------------------------------------------------------------------
+ Setup sort criteria
+------------------------------------------------------------------------*/
+include "claims_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if crpttype = "Aged Report" then {
+'sorted by claim_hf:claim_age'/newline
+'end of claim_hf:claim_age'/newline
+'""/newline'/newline
+'"Subtotals for "+str(claim_hf:claim_age)+" days -- Total claims: "+str(count[claim_num,claim_hf:claim_age])'/newline
+'total[claim_hf:estimateamt,claim_hf:claim_age]/align=claim_hf:estimateamt'/newline
+'total[claimstot_link:exptot,claim_hf:claim_age]/align=claimstot_link:exptot'/newline
+'total[claimstot_link:pmttot,claim_hf:claim_age]/align=claimstot_link:pmttot'/newline
+'total[claim_net,claim_hf:claim_age]/align=claim_net'/newline
+} else {
+'sorted by claim_hf:dol'/newline
+}
+;
+run/parameterfile=claims_1
+rrepl claims_i2
+
+/*------------------------------------------------------------------------
+ Gather claim expenses
+------------------------------------------------------------------------*/
+
+viewpoint native;
+include "claims_i1.inc"
+
+define
+   file claim_exp = access claimexp,
+    set claimexp:commonid=claim_hf:commonid,
+    one to many, zero fill on failure
+
+
+list/domain="claim_hf"/hold="claimexp_hf"
+if claim_exp:type = cexp or cexp = "ALL" then {
+  claim_hf:commonid/keyelement=1.1
+  claim_exp:datecharged
+  claim_exp:invid
+  claim_exp:type
+  claim_exp:roid
+  claim_exp:paidto
+  claim_exp:amount
+}
+
+;
+run/parameterfile=claims_1 
+
+/*------------------------------------------------------------------------
+ Gather claim payments
+------------------------------------------------------------------------*/
+
+viewpoint native;
+include "claims_i1.inc"
+
+define
+   file claim_pmt = access claimpmt,
+    set claimpmt:commonid=claim_hf:commonid,
+    one to many, zero fill on failure
+
+list/domain="claim_hf"/hold="claimpmt_hf"
+if claim_pmt:type = cpmt or cpmt = "ALL" then {
+  claim_hf:commonid/keyelement=1.1
+  claim_pmt:daterec
+  claim_pmt:type
+  claim_pmt:recfrom
+  claim_pmt:amount
+}
+
+;
+run/parameterfile=claims_1 
+
+/*------------------------------------------------------------------------
+ Total claim expenses/payments
+------------------------------------------------------------------------*/
+
+viewpoint native;
+
+define
+   file claim_pmt = access claimpmt_hf,
+    set claimpmt_hf:commonid=claim_hf:commonid,
+    one to many, zero fill on failure
+
+   file claim_exp = access claimexp_hf,
+    set claimexp_hf:commonid=claim_hf:commonid,
+    one to many, zero fill on failure
+
+
+list/domain="claim_hf"/nodetail/hold="claimtot_hf"
+  claim_hf:commonid
+  claim_exp:amount
+  claim_pmt:amount
+
+sorted by claim_hf:commonid
+
+end of claim_hf:commonid
+  claim_hf:commonid/keyelement=1.1
+  total[claim_exp:amount]/name="exptot"
+  total[claim_pmt:amount]/name="pmttot"
+
+;
+run/parameterfile=claims_1 
+
+/*------------------------------------------------------------------------
+ Allocate exp/pmt to claims
+------------------------------------------------------------------------*/
+viewpoint native;
+define
+   file exp_link = access claimexp_hf,
+    set claimexp_hf:commonid=claim_hf:commonid,
+    one to many, zero fill on failure
+
+  file pmt_link = access claimpmt_hf,
+    set claimpmt_hf:commonid=claimpmt_hf:commonid,
+    one to many, zero fill on failure
+
+list/domain="claim_hf"/hold="claimprt_hf"
+if exp_link:commonid <> 0 and pmt_link:commonid <> 0 then {
+  claim_hf:commonid/keyelement=1.1
+  exp_link:commonid
+  pmt_link:commonid
+}
+;
+run/parameterfile=claims_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "claims_i1.inc"
+ 
+  file iprint = access claimprt_hf,
+   set claimprt_hf:commonid=claim_hf:commonid,
+   one to one, zero fill on failure
+
+  file claimstot_link = access claimtot_hf,
+   set claimtot_hf:commonid=claim_hf:commonid,
+   one to one, zero fill on failure
+
+  string commid = str(claim_hf:commonid)
+
+  file reminder_link = access reminder,
+   set reminder:parentid=commid,
+   one to many, null fill on failure
+
+  string key_str = str(claim_hf:commonid)
+
+  file notes_link = access dialogue,
+   set type = 7,dialogue:key = key_str,
+   one to many,reverse, null fill on failure
+
+ 
+  string claim_num = str(claim_hf:claimnumdol)+"-"+str(claim_hf:claimnumunit)+"-"+str(claim_hf:claimnumseq)
+
+  number claim_net = claimstot_link:pmttot - claimstot_link:exptot
+
+where (iprint:commonid <> 0) and
+      (claim_net <> 0 or czero = "Y") and
+      (claim_net < 0 or cpositive = "Y") and
+      (claim_hf:stat <> "Closed" or cclosed = "Y")
+
+list/domain="claim_hf"/nobanner/pageof/title="Claims Report"/duplicates/noreporttotals/noheadings   
+
+claim_num/displaywidth=30
+claim_hf:renter/displaywidth=25
+claim_hf:stat/displaywidth=15
+claim_hf:type/displaywidth=15
+claim_hf:recoverysource/displaywidth=15
+claim_hf:datemodified/displaywidth=10
+claim_hf:closedate/displaywidth=10
+claim_hf:ldw/displaywidth=5
+claim_hf:estimateamt/displaywidth=12
+claimstot_link:exptot/displaywidth=12
+claimstot_link:pmttot/displaywidth=12
+claim_net/newline/displaywidth=12
+
+
+followed by if (cnotes = "Summary" and notes_link:summary <> "") then {
+  "Notes: " +str(notes_link:datetaken) + " " +str(notes_link:timetaken) + " "+str(notes_link:summary)/displaywidth=100/newline
+  }
+followed by if (cnotes = "Detail" and (notes_link:summary <> "" or notes_link:notes <> "")) then {
+  "Notes: " +str(notes_link:datetaken) + " " +str(notes_link:timetaken,"99.99")/width=30 
+  notes_link:summary/column=30/displaywidth=100/newline
+  box/width=100/fill/noblanklines/column=30
+  notes_link:notes
+  end box/newline
+  }
+
+followed by if ((creminders = "Active" and reminder_link:completed = 0) or (creminders = "Inactive" and reminder_link:completed = 1)) then {
+  if reminder_link:completed = 1 then "Completed Reminder:" else if reminder_link:completed = 0 then "Open Reminder: " else ""
+  str(reminder_link:startdate)+" "+str(reminder_link:starttime,"99.99")+" "+str(reminder_link:employeenumber)/width=30
+  reminder_link:action/column=30/displaywidth=100/newline
+  box/width=100/fill/noblanklines/column=30
+  reminder_link:detail
+  end box/newline
+}
+
+include "claims_i2.cq"
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cunits = "ALL" then {"Product(s): " + str(cproduct)+"  All Units"/newline} else {"Product(s): " + str(cproduct)+"  Unit Range: "+str(cunits)/displaywidth=100/newline}
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Selected by "+lowercase(cselectdate)/newline
+  "Type: "+str(ctype) + "  Status: "+str(ccstatus)/displaywidth=100/newline
+  end box/newlines=4
+
+"Claim #"/align=claim_num
+"Renter"/align=claim_hf:renter
+"Status"/align=claim_hf:stat
+"Type"/align=claim_hf:type
+"Recovery"/align=claim_hf:recoverysource
+"Last Mod"/align=claim_hf:datemodified
+"Close Date"/align=claim_hf:closedate
+"LDW"/align=claim_hf:ldw
+"Estimate"/align=claim_hf:estimateamt
+"Expenses"/align=claimstot_link:exptot
+"Payments"/align=claimstot_link:pmttot
+"Net"/align=claim_net/newline
+
+
+end of report
+""/newline
+"Total Claims: "+str(count[claim_num,report])
+total[claim_hf:estimateamt,report]/align=claim_hf:estimateamt
+total[claimstot_link:exptot,report]/align=claimstot_link:exptot
+total[claimstot_link:pmttot,report]/align=claimstot_link:pmttot
+total[claim_net,report]/align=claim_net
+
+;
+replace claims.eq
+run/parameterfile=claims_1 claims.eq
+rrepl claims
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view claims
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "claims" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "claims_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

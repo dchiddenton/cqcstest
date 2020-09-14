@@ -1,0 +1,312 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Summary Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/15/2017
+Modified:
+
+Notes:
+$Workfile: fltsumm.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltsumm.mf $
+$Revision: 2 $
+$History: fltsumm.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cdetail = parameter prompt "Print?" valid "Summary","Detail" default "Detail"
+
+;
+replace fltsumm_i1.inc
+
+
+/*------------------------------------------------------------------------
+ Retrieve inv records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "fltsumm_i1.inc"
+
+   file stat_desc = access invstatus,
+   set invstatus:invstatus=inv:vehiclestatusowned,
+   null fill on failure
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+   string invstat = if inv:vehiclestatusowned = 0 then "N/A" else stat_desc:description;
+
+   number stat_order = if inv:vehiclestatusowned = 0 then 9999 else inv:vehiclestatusowned
+
+   string avail_flag = if stat_desc:statustype >= 5 then "Unavailable" else "Available"
+
+where (inv:Product  = cProduct or cProduct = 'ALL' )
+  and (inv:locationcode = cLoc or cLoc = 'ALL' )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (inv:invclass = cClass or cClass = 'ALL')
+
+list/domain="inv"/hold="fltsumm1"
+  avail_flag/width=12
+  inv:invclass
+  inv:locationcode/width=22
+  invstat/name="description"/width=62
+  stat_order
+
+;
+replace fltsumm_1.eq
+run/setparameter fltsumm_1.eq
+
+run/parameterfile=fltsumm_1 fltsumm_1.eq
+
+/*------------------------------------------------------------------------
+ Summary or Detail
+------------------------------------------------------------------------*/
+include "fltsumm_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cdetail = "Summary" then 
+"" else "/page"
+;
+run/parameterfile=fltsumm_1
+rrepl "fltsumm_i2"
+
+/*------------------------------------------------------------------------
+ Calculate status summary by inv class
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="fltsumm1"/hold="fltsumm2"
+  0/name="loc_units"
+  0.000/name="loc_per"
+  fltsumm1:units /name="class_units"
+  %fltsumm1:units of sub column total
+   /decimalplaces=3 /name="class_per"
+
+across
+  fltsumm1:avail_flag/total/singletotals
+by
+
+  fltsumm1:invclass
+  stat_order
+  fltsumm1:description/name="descrip"/width=62
+  "inv"/name="stat_type"/width=8
+;
+run/parameterfile=fltsumm_1 
+
+
+/*------------------------------------------------------------------------
+ Calculate lcoation summary by inv class
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="fltsumm1"/hold="fltsumm2"/append
+  fltsumm1:units /name="loc_units"
+  %fltsumm1:units of sub column total
+  /decimalplaces=3/name="loc_per"
+  0/name="class_units"
+  0.000/name="class_per"
+
+
+across
+  fltsumm1:avail_flag/total/singletotals
+
+by
+
+  fltsumm1:invclass
+  0/width=19/name="stat_order"
+  fltsumm1:locationcode/name="descrip"/width=62
+  "loc"/name="stat_type"/width=8
+;
+run/parameterfile=fltsumm_1 
+
+/*------------------------------------------------------------------------
+ Calculate status summary total
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="fltsumm1"/hold="fltsumm2" /append
+  0/name="loc_units"
+  0.000/name="loc_per"
+  fltsumm1:units /name="class_units"
+  %fltsumm1:units of column
+   /decimalplaces=3 /name="class_per"
+
+across
+  fltsumm1:avail_flag/total/singletotals
+by
+
+  'ALL'/width=16/name='invclass'
+  stat_order
+  fltsumm1:description/name="descrip"/width=62
+  "inv"/name="stat_type"/width=8
+;
+run/parameterfile=fltsumm_1 
+
+
+/*------------------------------------------------------------------------
+ Calculate location summary total
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="fltsumm1"/hold="fltsumm2"/append
+  fltsumm1:units /name="loc_units"
+  %fltsumm1:units of column
+  /decimalplaces=3/name="loc_per"
+  0/name="class_units"
+  0.000/name="class_per"
+
+
+across
+  fltsumm1:avail_flag/total/singletotals
+
+by
+
+  'ALL'/width=16/name='invclass'
+  0/width=19/name="stat_order"
+  fltsumm1:locationcode/name="descrip"/width=62
+  "loc"/name="stat_type"/width=8
+;
+run/parameterfile=fltsumm_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "fltsumm_i1.inc"
+
+define
+  number sort_order = switch(fltsumm2:invclass)
+    case "ALL" : 2
+    default    : 1
+
+  string sort_label = switch(fltsumm2:invclass)
+    case "ALL" : "ALL - " + str(cClass)
+    default    : fltsumm2:invclass
+
+
+list/domain="fltsumm2"/nobanner/noreporttotals/zerosuppress/pageof/title="Fleet Summary Report"
+
+if ((cDetail = "Summary" and fltsumm2:invclass = "ALL") or cDetail = "Detail") then {
+if fltsumm2:stat_type = "inv" then {
+box/column=1/line=3/noblanklines
+  fltsumm2:descrip/heading="Status" /width=20 
+  fltsumm2:class_units_total/heading="Qty"/name="a"
+  fltsumm2:class_per_total divide 10000000/mask="ZZ9.99%"/heading="% of Gross"/name="b"    --divide by 10,000,000 due to CQ bug when data sent to hold file
+  fltsumm2:class_per_available/mask="ZZ9.99%"/heading="% of Avail"/name="c"
+ end box
+}
+if fltsumm2:stat_type = "loc" then {
+box/column=70/line=3/noblanklines
+  fltsumm2:descrip/heading="Location"/width=20  
+  fltsumm2:loc_units_total/heading="Qty"/name="aa"
+  fltsumm2:loc_per_total divide 10000000/mask="ZZ9.99%"/heading="% of Total"/name="bb"  --divide by 10,000,000 due to CQ bug when data sent to hold file
+end box
+}
+}
+sorted by
+  sort_order
+  fltsumm2:invclass include "fltsumm_i2.cq"
+  fltsumm2:stat_type
+  fltsumm2:stat_order
+  fltsumm2:descrip
+
+top of fltsumm2:invclass
+if ((cDetail = "Summary" and fltsumm2:invclass = "ALL") or cDetail = "Detail") then {
+  sort_label/column=1/heading="Class"/left
+}
+end of fltsumm2:invclass
+if ((cDetail = "Summary" and fltsumm2:invclass = "ALL") or cDetail = "Detail") then {
+  ""/newline
+  "Totals:"
+  running total[fltsumm2:class_units_total]/align=a
+  running total[fltsumm2:loc_per_total] divide 10000000/mask="ZZ9.99%"/align=b  --divide by 10,000,000 due to CQ bug when data sent to hold file
+  running total[fltsumm2:loc_per_available]/mask="ZZ9.99%"/align=c
+
+  running total[fltsumm2:loc_units_total]/align=aa
+  running total[fltsumm2:loc_per_total] divide 10000000/mask="ZZ9.99%"/align=bb/newline  --divide by 10,000,000 due to CQ bug when data sent to hold file
+}
+top of page
+if ((cDetail = "Summary" and fltsumm2:invclass = "ALL") or cDetail = "Detail") then {
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct)
+  end box /newlines=4
+}
+;
+replace fltsumm.eq
+run/parameterfile=fltsumm_1 fltsumm.eq
+rrepl fltsumm
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltsumm
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Summary Report" -- Report Title
+   string rptname1    = "fltsumm" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltsumm_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

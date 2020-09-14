@@ -1,0 +1,223 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Extension Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/8/2018
+Modified:
+
+Notes:
+$Workfile: insext.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/insext.mf $
+$Revision: 2 $
+$History: insext.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string csort = parameter prompt "Sort by:" valid "Adjuster","Body Shop","Renter","Bill to Ins Co" default "Adjuster"
+;
+replace insext_i1.inc
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "insext_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodedue,
+    null fill on failure
+
+   file ins_link = access ins,
+    set ins:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   file renter_link = access renterra,
+    set renterra:commonid=rrm:commonid,
+    one to one,null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   file inv_link = access invtrx,
+    set invtrx:invtrxid=rrm:invtrxid,
+    one to one, null fill on failure
+
+   string cbillto = if ins_link:billto4<>"" then ins_link:billto4 else
+                    if ins_link:billto3<>"" then ins_link:billto3 else
+                    if ins_link:billto2<>"" then ins_link:billto2 else
+                    if ins_link:billto1<>"" then ins_link:billto1 else ""
+
+   string cclaimnum = if ins_link:billto4<>"" then ins_link:claimnum4 else
+                      if ins_link:billto3<>"" then ins_link:claimnum3 else
+                      if ins_link:billto2<>"" then ins_link:claimnum2 else
+                      if ins_link:billto1<>"" then ins_link:claimnum1 else ""
+
+   string cadjuster = if ins_link:billto4<>"" then ins_link:adjuster4 else
+                      if ins_link:billto3<>"" then ins_link:adjuster3 else
+                      if ins_link:billto2<>"" then ins_link:adjuster2 else
+                      if ins_link:billto1<>"" then ins_link:adjuster1 else ""
+
+   string cadjusterphone = if ins_link:billto4<>"" then ins_link:adjusterphone4 else
+                           if ins_link:billto3<>"" then ins_link:adjusterphone3 else
+                           if ins_link:billto2<>"" then ins_link:adjusterphone2 else
+                           if ins_link:billto1<>"" then ins_link:adjusterphone1 else ""
+
+   number iapprovedlength = if ins_link:billto4<>"" then ins_link:approvedlength4 else
+                            if ins_link:billto3<>"" then ins_link:approvedlength3 else
+                            if ins_link:billto2<>"" then ins_link:approvedlength2 else
+                            if ins_link:billto1<>"" then ins_link:approvedlength1 else 0
+
+
+where 
+  ( rrm:rastatus >=  1 and rrm:rastatus <=  2 )
+  and (rrm:Product  = cProduct or cProduct = 'ALL' )
+  and (rrm:locationcodedue = cLoc or cLoc = 'ALL' )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/inline/nobanner/pageof/noreporttotals/title="Extension Report"
+if ins_link:extdate >= dtsdate and ins_link:extdate <= dtedate then {
+
+  rrm:ranumber/heading="RA Number"/displaywidth=10
+
+  cbillto/displaywidth=30/heading="Bill To"
+  str(renter_link:customerlastname)+", "+str(renter_link:customerfirstname)/displaywidth=30/heading="Renter"
+  inv_link:unitnumber/displaywidth=10/column=117/heading="Vehicle"/newline=2
+ 
+box/column=3/inline/width=35
+  cclaimnum/displaywidth=20/heading="  Claim #"/newline
+  cadjuster/displaywidth=20/heading=" Adjuster"/newline
+  cadjusterphone/displaywidth=20/heading="  Phone #" include "phone_mask.cq"/newline
+  ins_link:bodyshop/displaywidth=20/heading="Body Shop"/newline
+  ins_link:bodyshopphone/displaywidth=20/heading="  Phone #" include "phone_mask.cq"/newline 
+end box
+
+box/column=45/inline/width=35
+  ins_link:custyear/displaywidth=4/heading="     Year"/newline
+  ins_link:custmake/displaywidth=20/heading="     Make"/newline
+  ins_link:custmodel/displaywidth=20/heading="    Model"/newline
+  ins_link:lossdate/displaywidth=20/heading="Loss Date"/newline
+  ins_link:claimant/displaywidth=20/heading="  Claimant"/newline
+end box
+
+box/column=70/inline/width=35
+  ins_link:renterinsco/displaywidth=20/heading="Ins. Co."/newline
+  ins_link:policynum/displaywidth=20/heading="Policy #"/newline
+  ins_link:policyexpdate/displaywidth=20/heading=" Expires"/newline
+  ins_link:agentname/displaywidth=20/heading="   Agent"/newline
+  ins_link:agentphone/displaywidth=20/heading=" Phone #" include "phone_mask.cq"/newline 
+end box
+
+box/column=120/inline/width=35
+  rental_link:dateout/heading="Out"/newline
+  rental_link:timeout/mask="Z9.99"/heading="   "/newline
+  rental_link:datedue/heading="Due"/newline
+  rental_link:timedue/mask="Z9.99"/heading="   "/newline
+  iapprovedlength/mask="-ZZ9"/heading="Auth. Days"/left/newline
+end box/newline
+
+  ins_link:extdate/heading="Extension Date"/newline=2
+
+}
+
+sorted by
+  switch(csort)
+  case "Adjuster"        : cadjuster
+  case "Body Shop"       : ins_link:bodyshop
+  case "Renter"          : str(renter_link:customerlastname)+", "+str(renter_link:customerfirstname)
+  case " Bill to Ins Co" : cbillto
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "    Sorted by "+str(csort)
+  end box/newline=4
+
+end of report
+"Total Extensions: "+str(count[rrm:ranumber,report])
+
+;
+replace insext_1.eq
+run/setparameter insext_1.eq
+replace insext.eq
+run/parameterfile=insext_1 insext.eq
+rrepl insext
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view insext
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Extension Report" -- Report Title
+   string rptname1    = "insext" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "insext_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

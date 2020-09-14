@@ -1,0 +1,120 @@
+--clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: RentWorks Job Submission Routine
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 7/8/2019
+Modified:
+
+Notes:
+$Workfile: rwsubmitjob.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rwsubmitjob.mf $
+$Revision: 2 $
+$History: rwsubmitjob.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve file path to submit 
+------------------------------------------------------------------------*/
+
+cli echo "%cd%" > "pathoutput.cq"
+
+define
+
+  string pathoutput = include "pathoutput.cq"
+  file seg_count = access counter,
+    set min=1, max = countfields(pathoutput,"\")-1
+
+  string pathout = if seg_count:position = min then '"'+subfield(pathoutput,"\",seg_count:position)+"\"
+                       else if seg_count:position = max then subfield(pathoutput,"\",seg_count:position)+"\"+'"'
+                         else subfield(pathoutput,"\",seg_count:position)+"\"
+
+     
+list/domain="dummy"/noheadings/nobanner/nodefaults
+  pathout/concatenate
+;
+run/parameterfile
+rrepl filepath
+
+/*------------------------------------------------------------------------
+ Create job submission parameters
+------------------------------------------------------------------------*/
+define
+  string action      = parameter default ""
+  string rptdesc     = parameter default ""
+  string rptname1    = parameter default ""
+  string rptname2    = parameter default ""
+  string rptname3    = parameter default ""
+  string parfile     = parameter default ""
+  string xmlname     = parameter default ""
+  string exportname  = parameter default ""
+  string startdate   = parameter default str(todaysdate)
+  string enddate     = parameter default str(todaysdate)
+  string jobparameters = include "jobparams.cq"
+  string filepath = include "filepath.cq"
+  string dbid = "-db "+trim(systemsettings:databasename)+" -H "+trim(subfield(jobparameters,"|",5))+" -S "+trim(subfield(jobparameters,"|",6))
+  string jobid = trim(subfield(jobparameters,"|",1))
+  string empid = trim(subfield(jobparameters,"|",2))
+  string cp = trim(subfield(jobparameters,"|",3))
+  string xmlpath = if xmlname = "" then "" else trim(filepath)+xmlname+trim(subfield(jobparameters,"|",1))+".xml"
+  string rptpath1 = if rptname1 = "" then "" else trim(filepath)+rptname1+trim(subfield(jobparameters,"|",1))+".cqe"
+  string rptpath2 = if rptname2 = "" then "" else ","+trim(filepath)+rptname2+trim(subfield(jobparameters,"|",1))+".cqe"
+  string rptpath3 = if rptname3 = "" then "" else ","+trim(filepath)+rptname3+trim(subfield(jobparameters,"|",1))+".cqe"
+  string rptpath = rptpath1+rptpath2+rptpath3
+  string exportpath = if exportname = "" then "" else trim(filepath)+exportname+trim(subfield(jobparameters,"|",1))+".iif"
+  string line1 = if rptname1 = "" then "" else 'cli copy/Y '+ rptname1+'.cqe '+ trim(filepath)+rptname1+trim(subfield(jobparameters,"|",1))+'.cqe' 
+  string line2 = if rptname2 = "" then "" else 'cli copy/Y '+ rptname2+'.cqe '+ trim(filepath)+rptname2+trim(subfield(jobparameters,"|",1))+'.cqe' 
+  string line3 = if rptname3 = "" then "" else 'cli copy/Y '+ rptname3+'.cqe '+ trim(filepath)+rptname3+trim(subfield(jobparameters,"|",1))+'.cqe' 
+  string line4 = if xmlname = "" then "" else 'cli copy/Y '+ xmlname+'.xml '+ trim(filepath)+xmlname+trim(subfield(jobparameters,"|",1))+'.xml' 
+  string line5 = if exportname = "" then "" else 'cli copy/Y '+ exportname+'.* '+ trim(filepath)+exportname+trim(subfield(jobparameters,"|",1))+'.txt' 
+  string line6 = 'cli E:\RentWorks_CQ\webreports\jobsubmit.bat '+ 
+  '"Action='+action+'|'+
+  'DBID='+dbid+'|'+ 
+  'JobID='+jobid+'|'+
+  'EmpId='+empid+'|'+
+  'StartDate='+startdate+'|'+
+  'EndDate='+enddate+'|'+
+  'XMLPath='+xmlpath+'|'+
+  'RPTPath='+rptpath+'|'+
+  'ExportPath='+exportpath+'|'+
+  'Description='+rptdesc+'|'+
+  'CP='+cp+'|"';
+ 
+        
+list/domain="systemsettings"/noheadings/nodefaults/nobanner
+line1/newline
+line2/newline
+line3/newline
+line4/newline
+line5/newline
+line6/newline
+;
+
+replace jobsubmit.eq
+run/parameterfile=rwsubmitpar.cq jobsubmit.eq
+rrepl jobsubmit
+
+/*------------------------------------------------------------------------
+ Execute job submission
+------------------------------------------------------------------------*/
+
+cli copy/Y jobsubmit.cq jobsubmit.mf
+--run/parameterfile jobsubmit.mf
+;

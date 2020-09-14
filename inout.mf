@@ -1,0 +1,407 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Incoming Outgoing Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/26/2018
+Modified:
+
+Notes:
+$Workfile: inout.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/inout.mf $
+$Revision: 2 $
+$History: inout.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="banks"
+if itemnumber=1 then '"'+banks:bankid+'"' else
+   ',"'+banks:bankid+'"'
+
+sorted by
+   banks:bankid
+top of report
+'string cbank[8192] = multivalue parameter prompt "Bank IDs: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_banks"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  string cselect = parameter prompt "Select Units by:" valid "Grounding Date","In Service Date","Grounding Miles/KM" default "Grounding Date"
+  number cmiles = parameter prompt "Grounding Miles/KM" error "Error: Miles/Km < 0" if cmiles < 0 default 0
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_banks.cq"
+  string cunits[1024] = multivalue parameter prompt "Units to Select: "  valid "Outgoing","Incoming" default "Outgoing","Incoming"
+  string csortin = parameter prompt "Sort Incoming Units by:" valid "In Service Date","Class" default "In Service Date"
+  string csortout = parameter prompt "Sort Outgoing Units by:" valid "Grounding Date","Class","Miles/KM to Grounding" default "Grounding Date"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace inout_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve outgoing units
+------------------------------------------------------------------------*/
+ 
+
+include "inout_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+   file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+   file classseq_link = access invclass,
+    set invclass:invclass=inv:invclass,
+    one to one, generic,null fill on failure
+
+   number imiles = if inv:expoutservicemiles > 0 then inv:odometer - inv:expoutservicemiles else inv:odometer
+
+   string sort_by[60] = if csortout = "Grounding Date" then str(inv:expectedoutservicedate,"YYYY-MM-DD") else
+                         if csortout = "Class" then str(classseq_link:classsequence,"999999")
+   number sort_by2    = if csortout = "Miles/KM to Grounding" then imiles else 0
+
+where (inv:invclass = cclass or cclass = "ALL") and
+      (inv:locationcode = cloc or inv:ownedlocationcode = cloc or cloc = "ALL") and
+      (clocgroup = "" or clocgroup = alt_locgroup:groupname or clocgroup = alt_locgroupO:groupname) and
+      (inv:Product  = cProduct or cProduct = "ALL" ) and
+      (inv:bankid = cbank or cbank = "ALL") and
+      ((((inv:inservicedate >= dtsdate and inv:inservicedate <= dtedate)
+        or inv:inservicedate = null) and cselect = "In Service Date") or
+       (((inv:expectedoutservicedate >= dtsdate and inv:expectedoutservicedate <= dtedate)
+        or inv:expectedoutservicedate = null) and cselect = "Grounding Date") or
+       (imiles >= cmiles and cselect = "Grounding Miles/KM")) and
+      (cunits contains "Outgoing")
+
+list/domain="inv"/hold="inout_hf"
+
+  "O"/width=2/name="stat_flag"
+  inv:vehiclestatusowned 
+  inv:product 
+  inv:unitnumber 
+  inv:year 
+  inv:make 
+  inv:model 
+  inv:serialnumber
+  inv:odometer 
+  inv:invclass 
+  inv:inservicedate 
+  inv:expectedoutservicedate 
+  inv:bankid 
+  inv:buyback 
+  inv:datedue 
+  inv:locationcodedue 
+  inv:locationcode
+  inv:ownedlocationcode
+  inv:ranumber 
+  inv:expoutservicemiles 
+  inv:minkeepdate 
+  inv:maxkeepdate 
+  inv:minkeepmiles 
+  inv:maxkeepmiles
+  inv:expecteddeliverydate
+  inv:expectedinservicedate
+  inv:acquisitionprice
+  imiles
+  sort_by
+  sort_by2
+
+;
+replace inout_1.eq
+run/setparameter inout_1.eq
+
+run/parameterfile=inout_1 inout_1.eq
+
+/*------------------------------------------------------------------------
+ Summary or detail
+------------------------------------------------------------------------*/
+include "inout_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if csummary = "Summary" then "/nodetail"  else ""
+;
+run/parameterfile=inout_1
+rrepl inout_i2
+
+run/parameterfile=inout_1 
+
+/*------------------------------------------------------------------------
+ Retrieve onOrder vehicles
+------------------------------------------------------------------------*/
+
+include "inout_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invnew:expecteddeliveryloc,
+    null fill on failure
+
+   file classseq_link = access invclass,
+    set invclass:invclass=inv:invclass,
+    one to one, generic,null fill on failure
+
+   number imiles = if invnew:expoutservicemiles > 0 then invnew:odometer - invnew:expoutservicemiles else invnew:odometer
+
+   string sort_by[60] = if csortin = "In Service Date" then str(invnew:expectedinservicedate,"YYYY-MM-DD") else
+                        if csortin = "Class" then str(classseq_link:classsequence,"999999")
+
+   number sort_by2 = 0
+
+where (invnew:invclass = cclass or cclass = "ALL") and
+      (invnew:expecteddeliveryloc = cloc or cloc = "ALL") and
+      (clocgroup = "" or clocgroup = alt_locgroup:groupname) and
+      (invnew:Product  = cProduct or cProduct = "ALL" ) and
+      (invnew:bankid = cbank or cbank = "ALL") and
+      ((((invnew:expectedinservicedate >= dtsdate and invnew:expectedinservicedate <= dtedate) or invnew:expectedinservicedate = null)
+        and cselect = "In Service Date") or
+      (((invnew:expectedoutservicedate >= dtsdate and invnew:expectedoutservicedate <= dtedate) or invnew:expectedoutservicedate = null)
+        and cselect = "Grounding Date") or
+      ((imiles >= cmiles or invnew:expoutservicemiles = 0) and cselect = "Grounding Miles/KM")) and
+      (cunits contains "Incoming")
+
+
+list/domain="invnew"/hold="inout_hf"/append
+
+  "I"/width=2/name="stat_flag"
+  invnew:vehiclestatusowned
+  invnew:product 
+  invnew:unitnumber 
+  invnew:year
+  invnew:make 
+  invnew:model
+  invnew:serialnumber
+  invnew:odometer 
+  invnew:invclass 
+  invnew:inservicedate
+  invnew:expectedoutservicedate 
+  invnew:bankid 
+  invnew:buyback
+  invnew:datedue
+  invnew:locationcodedue
+  invnew:locationcode
+  invnew:ownedlocationcode
+  invnew:ranumber
+  invnew:expoutservicemiles
+  invnew:minkeepdate
+  invnew:maxkeepdate
+  invnew:minkeepmiles
+  invnew:maxkeepmiles
+  invnew:expecteddeliverydate
+  invnew:expectedinservicedate
+  invnew:acquisitionprice
+  imiles
+  sort_by
+  sort_by2
+
+;
+run/parameterfile=inout_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "inout_i1.inc"
+
+define
+   string bb_flag = if inout_hf:buyback = 0 then "No" else "Yes"
+
+   file stat_desc = access invstatus,
+    set invstatus:invstatus = inout_hf:vehiclestatusowned,
+    null fill on failure
+
+  string desc = stat_desc:description;
+
+   string stat_field = if inout_hf:stat_flag = "I" then "Incoming" else "Outgoing"
+
+list/domain="inout_hf"/noheadings/nobanner/pageof/noreporttotals/title="Incoming Outgoing Units Report"/pagelength=70 include "inout_i2.cq"
+
+  inout_hf:product/displaywidth=10/name="a"
+  inout_hf:unitnumber/displaywidth=10/name="b"
+  inout_hf:year/displaywidth=4/nocommas /name="c"
+  inout_hf:make/displaywidth=10 /name="d"
+  inout_hf:model/displaywidth=10 /name="e"
+  inout_hf:serialnumber/displaywidth=20 /name="f"
+
+if inout_hf:stat_flag = "I" then {
+  inout_hf:invclass/displaywidth=10 /name="g"
+  inout_hf:expecteddeliverydate/displaywidth=10 /name="h"
+  inout_hf:expectedoutservicedate/displaywidth=10 /name="i"
+  inout_hf:bankid/displaywidth=10 /name="j"
+  bb_flag/displaywidth=4/name="k"
+  inout_hf:acquisitionprice/displaywidth=12/decimalplaces=2/name="l"
+} else { 
+  inout_hf:odometer/displaywidth=10 /name="gg"
+  inout_hf:inservicedate/displaywidth=10 /name="hh"
+  inout_hf:bankid/displaywidth=10/name="ii"
+  inout_hf:ranumber/displaywidth=10 /name="jj"
+  desc/displaywidth=10/name="kk"
+  inout_hf:minkeepmiles/displaywidth=10 /name="ll"
+  inout_hf:minkeepdate/displaywidth=10 /name="mm"/newline
+  inout_hf:invclass/displaywidth=10/align=f
+  inout_hf:expoutservicemiles/displaywidth=10/align=gg
+  inout_hf:expectedoutservicedate/displaywidth=10/align=hh    
+  bb_flag/displaywidth=4/align=ii
+  inout_hf:locationcodedue/displaywidth=10/align=jj
+  inout_hf:datedue/displaywidth=10/align=kk
+  inout_hf:maxkeepmiles /displaywidth=10/align=ll
+  inout_hf:maxkeepdate/displaywidth=10/align=mm/newline
+}
+
+sorted by
+  inout_hf:stat_flag/page
+  inout_hf:sort_by
+  inout_hf:sort_by2/descending
+  inout_hf:unitnumber 
+
+end of inout_hf:sort_by
+  if inout_hf:stat_flag = "I" then {
+    if csortin = "In Service Date" then "Total Units in on:  "+str(inout_hf:expectedinservicedate)+" :   "+str(count[inout_hf:unitnumber,inout_hf:sort_by]) else 
+         "Total Units in for Class "+str(inout_hf:invclass)+" :   "+str(count[inout_hf:unitnumber,inout_hf:sort_by])/align=a
+      "Total Acquisition Cost:   "/align=j
+      total[inout_hf:acquisitionprice,inout_hf:sort_by]/align=l/newline
+  }
+  if inout_hf:stat_flag = "O" then {
+    if csortout = "Grounding Date" then "Total Units out on:  "+str(inout_hf:expectedoutservicedate)+" :   "+str(count[inout_hf:unitnumber,inout_hf:sort_by]) else
+           if csortout = "Class" then "Total Units out for Class "+str(inout_hf:invclass)+" :   "+str(count[inout_hf:unitnumber,inout_hf:sort_by])/align=a
+  }
+  ""/newline
+
+end of inout_hf:stat_flag
+  ""/newline
+  "Total "+str(stat_field)+" Units: "+str(count[inout_hf:stat_flag,inout_hf:stat_flag])
+  if inout_hf:stat_flag = "I" then { "Total Acquistion Cost:   "/align=i total[inout_hf:acquisitionprice,inout_hf:stat_flag]/decimalplaces=2/displaywidth=12/align=l/newline}
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cselect = "Grounding Miles/KM" then "Vehicles within "+str(cmiles)+" miles/Km of Grounding"/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  end box /newline=4
+
+if inout_hf:stat_flag = "I" then {
+  "Incoming Units"/column=1/newline=2
+  "Product"/align=a
+  "Unit#"/align=b 
+  "Yr"/align=c
+  "Make"/align=d 
+  "Model"/align=e 
+  "VIN#"/align=f 
+  "Class"/align=g 
+  "Expected Del Date"/align=h 
+  "Expected Grd Date"/align=i 
+  "Bank ID"/align=j 
+  "Buy Back"/align=k
+  "Acquistion Price"/align=l/newline
+} else { 
+  "Outgoing Units"/column=1/newline=2
+  "Product"/align=a
+  "Unit#" /align=b
+  "Yr" /align=c
+  "Make" /align=d
+  "Model" /align=e
+  "VIN#"/align=f
+  "Odometer"/align=gg 
+  "In Service Date"/align=hh 
+  "Bank ID"/align=ii
+  "RA Number"/align=jj 
+  "Status"/align=kk
+  "Min Keep Odom"/align=ll 
+  "Min Keep Date"/align=mm/newline
+  "Class"/align=f
+  "Grd Odom"/align=gg
+  "Ground Date"/align=hh 
+  "Location Due"/align=ii
+  "Buy Back"/align=jj
+  "Date Due"/align=kk
+  "Max Keep Odom"/align=ll 
+  "Max Keep Date"/align=mm/newline
+}
+;
+
+replace inout.eq
+ run/parameterfile=inout_1 inout.eq
+rrepl inout
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view inout
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Incoming Outgoing Report" -- Report Title
+   string rptname1    = "inout" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "inout_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

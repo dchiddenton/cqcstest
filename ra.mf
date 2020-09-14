@@ -1,0 +1,433 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Contract and Reservations Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/28/2018
+Modified:
+
+Notes:
+$Workfile: ra.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ra.mf $
+$Revision: 3 $
+$History: ra.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 3/25/20    Time: 2:45p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel formatting output.
+ * Added total charges column.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter  prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cstatus = multivalue parameter prompt "Status' or 'ALL': " valid "Pending Open","Open","Closed (Unposted)","Closed (Posted)","Void",
+  "Quote","Pending Reservation","Open Reservation","No-Show","Cancelled Res","Voided Res" default "ALL"
+  string cselect = parameter valid "RA #","Reference #","Company" prompt "Select By:" default "RA #"
+  string crange = range parameter prompt "Range Selection (Start..End or ALL): " default ALL
+  string ccompflag = parameter/uppercase prompt "Only Contracts with a Company?" valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string csort = parameter valid "Renting Location","Due/In Location","Company","Reference #","RA #","Status" prompt "Sorted By:" default "RA #"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace ra_i1.inc
+
+/*------------------------------------------------------------------------
+ first procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "ra_i1.inc"
+
+
+list/domain="dummy"/nobanner/nodefaults
+""
+;
+replace ra_1.eq
+run/setparameter ra_1.eq
+
+/*------------------------------------------------------------------------
+Summary or detail
+------------------------------------------------------------------------*/
+
+include "ra_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+
+run/parameterfile=ra_1
+rrepl "ra_i2"
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+include "ra_i1.inc"
+
+/* Retrieve all RRM records*/
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file invtrx_link = access invtrx,
+   set invtrx:invtrxid=rrm:invtrxid,
+   one to one,generic,null fill on failure
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid = rrm:commonid,
+   one to one, null fill on failure
+
+  file res_link = access resdb,
+   set resdb:commonid = rrm:commonid,
+   one to one, null fill on failure
+
+  string rate_code = if rrm:rastatus = 0 then res_link:ratecode else rental_link:ratecode
+
+  number post_flag = if rrm:rastatus=3 then if rrm:datedbrposted = null then 100 else 200 else 0
+
+  string rstat = switch(rrm:resstatus)
+    case 10 : "Quote"
+    case 15 : "Pending Reservation"
+    case 20 : "Open Reservation"
+    case 30 : "Open Contract"
+    case 40 : "Closed Contract"
+    case 50 : "Cancelled Res"
+    case 60 : "No-Show"
+    case 70 : "Void"
+    case 80 : "Voided Res"
+
+  string cstat = switch(rrm:rastatus+post_flag)
+    case 1   : "Pending Open"          
+    case 2   : "Open"             
+    case 4   : "Void"  
+    case 103 : "Closed (Unposted)"
+    case 203 : "Closed (Posted)"     
+
+  string crastat = switch(cstat)
+    case "Pending Open "     : "Pending Open"         
+    case "Open"              : "Open"        
+    case "Void"              : "Void"
+    case "Closed (Unposted)" : "Closed"
+    case "Closed (Posted)"   : "Posted"
+
+  string rrm_status = if rrm:rastatus <> 0 then crastat else rstat
+
+  string ccrange = switch(cselect)
+    case "RA #"        : rrm:ranumber
+    case "Reference #" : rrm:referencenum
+    case "Company"     : rrm:company
+       
+
+  string cust_name = rrm:customerlastname + ", " + rrm:customerfirstname
+  date date_in = if rrm:rastatus=3 then rrm:datein else rrm:datedue
+  number time_in = if rrm:rastatus=3 then rrm:timein else rrm:timedue
+
+ 
+
+ where 
+  ( rrm:dateout >= 
+    dtSdate
+  and rrm:dateout <= 
+    dtEdate )
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (ccrange = crange) 
+  and ((rstat = cstatus or cstat = cstatus) or cstatus = "ALL")
+  and (rrm:company <> "" or ccompflag = "N")
+
+
+list/domain="rrm"/nobanner/pageof/pagelength=80/title="Contracts and Reservations Report"/noreporttotals/noheadings/duplicates include "ra_i2.cq"
+rrm:dateout/displaywidth=8
+rrm:timeout/displaywidth=5
+date_in/displaywidth=8
+time_in/displaywidth=5
+rrm:ranumber/displaywidth=10
+rrm:resnumber/displaywidth=10
+rate_code/displaywidth=10
+cust_name/displaywidth=30
+invtrx_link:unitnumber/displaywidth=10
+rrm_status/displaywidth=20
+rrm:locationcodeout/displaywidth=10
+rrm:locationcodedue/displaywidth=10
+rrm:company/displaywidth=20
+rrm:referencenum/displaywidth=10
+rrm:totalcharges/displaywidth=12/decimalplaces=2
+
+sorted by
+   switch(csort)
+    case "Status" : rrm_status/count/heading = "@"  
+    case "Renting Location" : rrm:locationcodeout
+    case "Due/In Location" : rrm:locationcodedue
+    case "Company" : rrm:company
+    case "Reference #" : rrm:referencenum
+   rrm:ranumber
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) 
+  "    " + str(cselect) +" Range: " + str(crange)/newline
+  "Status: " + str(cstatus) + "  Sort by: " + str(csort)/displaywidth=100/newline
+  end box /newline=4
+ 
+
+"Date Out"/align=rrm:dateout
+"Time Out"/align=rrm:timeout
+"Date In"/align=date_in
+"Time In"/align=time_in
+"RA #"/align=rrm:ranumber
+"Res #"/align=rrm:resnumber
+"Rate Code"/align=rate_code
+"Renter's name"/align=cust_name
+"Unit #"/align=invtrx_link:unitnumber
+"Status"/align=rrm_status
+"Location Out"/align=rrm:locationcodeout
+"Location Due"/align=rrm:locationcodedue
+"Company"/align=rrm:company
+"Reference #"/align=rrm:referencenum
+"Total Charges"/align=rrm:totalcharges/newline
+
+end of report
+  ""/newline
+  "Total Contracts: "+str(count[rrm:ranumber,report])
+   total[rrm:totalcharges,report]/align=rrm:totalcharges
+;
+
+replace ra.eq
+
+/*------------------------------------------------------------------------
+ Output Report -Excel
+------------------------------------------------------------------------*/
+include "ra_i1.inc"
+
+/* Retrieve all RRM records*/
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file invtrx_link = access invtrx,
+   set invtrx:invtrxid=rrm:invtrxid,
+   one to one,generic,null fill on failure
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid = rrm:commonid,
+   one to one, null fill on failure
+
+  file res_link = access resdb,
+   set resdb:commonid = rrm:commonid,
+   one to one, null fill on failure
+
+  string rate_code = if rrm:rastatus = 0 then res_link:ratecode else rental_link:ratecode
+
+  number post_flag = if rrm:rastatus=3 then if rrm:datedbrposted = null then 100 else 200 else 0
+
+  string rstat = switch(rrm:resstatus)
+    case 10 : "Quote"
+    case 15 : "Pending Reservation"
+    case 20 : "Open Reservation"
+    case 30 : "Open Contract"
+    case 40 : "Closed Contract"
+    case 50 : "Cancelled Res"
+    case 60 : "No-Show"
+    case 70 : "Void"
+    case 80 : "Voided Res"
+
+  string cstat = switch(rrm:rastatus+post_flag)
+    case 1   : "Pending Open"          
+    case 2   : "Open"             
+    case 4   : "Void"  
+    case 103 : "Closed (Unposted)"
+    case 203 : "Closed (Posted)"     
+
+  string crastat = switch(cstat)
+    case "Pending Open "     : "Pending Open"         
+    case "Open"              : "Open"        
+    case "Void"              : "Void"
+    case "Closed (Unposted)" : "Closed"
+    case "Closed (Posted)"   : "Posted"
+
+  string rrm_status = if rrm:rastatus <> 0 then crastat else rstat
+
+  string ccrange = switch(cselect)
+    case "RA #"        : rrm:ranumber
+    case "Reference #" : rrm:referencenum
+    case "Company"     : rrm:company
+       
+
+  string cust_name = rrm:customerlastname + ", " + rrm:customerfirstname
+  date date_in = if rrm:rastatus=3 then rrm:datein else rrm:datedue
+  number time_in = if rrm:rastatus=3 then rrm:timein else rrm:timedue
+
+ 
+
+ where 
+  ( rrm:dateout >= 
+    dtSdate
+  and rrm:dateout <= 
+    dtEdate )
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (ccrange = crange) 
+  and ((rstat = cstatus or cstat = cstatus) or cstatus = "ALL")
+  and (rrm:company <> "" or ccompflag = "N")
+
+
+list/domain="rrm"/nobanner/pagelength=0/title="Contracts and Reservations Report"/noreporttotals/noheadings/duplicates 
+rrm:dateout/displaywidth=8
+rrm:timeout/displaywidth=5
+date_in/displaywidth=8
+time_in/displaywidth=5
+rrm:ranumber/displaywidth=10
+rrm:resnumber/displaywidth=10
+rate_code/displaywidth=10
+cust_name/displaywidth=30
+invtrx_link:unitnumber/displaywidth=10
+rrm_status/displaywidth=20
+rrm:locationcodeout/displaywidth=10
+rrm:locationcodedue/displaywidth=10
+rrm:company/displaywidth=20
+rrm:referencenum/displaywidth=10
+rrm:totalcharges/displaywidth=12/decimalplaces=2
+
+sorted by
+   switch(csort)
+    case "Status" : rrm_status 
+    case "Renting Location" : rrm:locationcodeout
+    case "Due/In Location" : rrm:locationcodedue
+    case "Company" : rrm:company
+    case "Reference #" : rrm:referencenum
+    rrm:ranumber
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) 
+  "    " + str(cselect) +" Range: " + str(crange)/newline
+  "Status: " + str(cstatus) + "  Sort by: " + str(csort)/displaywidth=100/newline
+  end box /newline=4
+ 
+
+"Date Out"/align=rrm:dateout
+"Time Out"/align=rrm:timeout
+"Date In"/align=date_in
+"Time In"/align=time_in
+"RA #"/align=rrm:ranumber
+"Res #"/align=rrm:resnumber
+"Rate Code"/align=rate_code
+"Renter's name"/align=cust_name
+"Unit #"/align=invtrx_link:unitnumber
+"Status"/align=rrm_status
+"Location Out"/align=rrm:locationcodeout
+"Location Due"/align=rrm:locationcodedue
+"Company"/align=rrm:company
+"Reference #"/align=rrm:referencenum
+"Total Charges"/align=rrm:totalcharges
+
+end of report
+  ""/newline
+  "Total Contracts: "+str(count[rrm:ranumber,report])
+   total[rrm:totalcharges,report]/align=rrm:totalcharges
+;
+replace ra_xl.eq
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "ra_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=ra_1 ra.eq"/newline
+} else {
+"run/xls/parameterfile=ra_1 ra_xl.eq"/newline
+}
+"rrepl ra"/newline
+"view"/newline 
+;
+run/parameterfile=ra_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Contract and Reservations Report" -- Report Title
+   string rptname1    = "ra" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "ra_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

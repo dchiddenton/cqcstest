@@ -1,0 +1,254 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Vehicle Problems Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/6/2017
+Modified:
+
+Notes:
+$Workfile: prob.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/prob.mf $
+$Revision: 2 $
+$History: prob.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default 01.01.1980
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string crange = range parameter prompt "Enter Fleet Range (Start..End or ALL): " default ALL
+  string cproblem = parameter prompt "Problem Type: " valid "Critical","Non-Critical","ALL" default "ALL"
+  string crepair = parameter prompt "Repair Type: " valid "Repaired","Unrepaired","ALL" default "ALL"
+  string cloctype=parameter prompt "Report by: " valid "All Locations","Owned Locations","Current Locations" default "All Locations"
+  string csold = parameter/uppercase prompt "Include Sold Vehicles?" valid "Y","N" default "Y"
+  string csort = parameter prompt "Sort by: " valid "Vehicle","Problem Date","Repair Date" default "Vehicle"
+  string notes_problem = parameter/uppercase prompt "Print Problem Notes?" valid "Y","N" default "N"
+  string notes_vehicle = parameter/uppercase prompt "Print Vehicle Notes?" valid "Y","N" default "N"
+
+;
+replace prob_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve inv problems - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "prob_i1.inc"
+
+  file inv_link = access inv,
+   set inv:invid=invproblems:invid,
+   one to one, zero fill on failure
+
+  file invsold_link = access invsold,
+   set invsold:invid=invproblems:invid,
+   one to one, zero fill on failure
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv_link:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv_link:ownedlocationcode,
+    null fill on failure
+
+  file alt_locgroupCS = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold_link:locationcode,
+    null fill on failure
+
+  file alt_locgroupOS = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold_link:ownedlocationcode,
+    null fill on failure
+
+  number sold_flag = if invsold_link:invid = 0 then 0 else 1
+
+  number loctypeC = if(((cloctype = "Owned Locations" and (inv_link:ownedlocationcode = cLoc)) or(cloctype = "Current Locations" and (inv_link:locationcode = cLoc)))
+  and ((cloctype = "Owned Locations" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current Locations" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+   or cloctype = "All Locations") and sold_flag = 0 then 1 else 0
+
+  number loctypeS = if(((cloctype = "Owned Locations" and (invsold_link:ownedlocationcode = cLoc)) or(cloctype = "Current Locations" and (invsold_link:locationcode = cLoc)))
+  and ((cloctype = "Owned Locations" and (cLocGroup = "" or cLocGroup = alt_locgroupoS:groupname)) or
+      (cloctype = "Current Locations" and (cLocGroup = "" or cLocGroup = alt_locgroupCS:groupname)))
+   or cloctype = "All Locations") and (sold_flag = 1 and csold = "Y") then 1 else 0
+
+
+  number inc_flag = loctypec + loctypes 
+
+where 
+
+  (invproblems:datereported >= dtSdate and invproblems:datereported <= dtEdate) and
+  (invproblems:Product = cProduct) and
+  (invproblems:unitnumber = crange)
+
+
+list/domain="invproblems"/hold="problems_hf"
+  invproblems:invid/keyelement=1.1
+  invproblems:product
+  invproblems:unitnumber 
+  invproblems:datereported
+  invproblems:timereported 
+  invproblems:critical
+  invproblems:repaired
+  invproblems:daterepaired 
+  invproblems:timerepaired
+  invproblems:roid 
+  invproblems:problemsummary
+  invproblems:repairsummary
+  invproblems:problemnotes 
+
+  inc_flag
+
+;
+replace prob_1.eq
+run/setparameter prob_1.eq
+
+run/parameterfile=prob_1 prob_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "prob_i1.inc"
+
+   string key_str = str(problems_hf:invid)
+
+  file prob_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+where 
+  ((cproblem="Critical" and problems_hf:critical=1) or (cproblem="Non-Critical" and problems_hf:critical=0) or cproblem ="ALL")
+  and ((crepair = "Repaired" and problems_hf:repaired=1) or (crepair = "Unrepaired" and problems_hf:repaired=0) or crepair = "ALL") 
+  and problems_hf:inc_flag > 0
+
+
+list/domain="problems_hf"/pageof/nobanner/noheadings/noreporttotals/title="Vehicle Problems Report"
+
+  "Product: " + problems_hf:product + "   Unit#: "+problems_hf:unitnumber /newline=2
+  problems_hf:datereported/column=40/name="a" 
+  problems_hf:timereported /name="b"
+  if problems_hf:critical=1 then "Yes" else "No"/center /name="c"
+  if problems_hf:repaired=1 then "Yes" else "No"/center /name="d"
+  problems_hf:daterepaired /name="e"
+  problems_hf:timerepaired /name="f"
+  problems_hf:roid /name="g"/newline
+
+if (notes_problem = "Y" and problems_hf:problemsummary <> "") then {
+  "Problem Summary: " + problems_hf:problemsummary/displaywidth=40
+  "Repair Summary: " + problems_hf:repairsummary/displaywidth=40/align=e/newline
+  if problems_hf:problemnotes <> "" then {
+  box/width=100/fill/noblanklines
+  "Problem Notes: " + problems_hf:problemnotes
+  end box/newline
+  }
+  }
+
+if (notes_vehicle = "Y" and prob_to_notes:summary <> "") then {
+  "Vehicle Summary: " + prob_to_notes:summary/displaywidth=100/newline
+  if prob_to_notes:notes <>"" then {
+  box/width=100/fill/noblanklines
+  "Vehicle Notes: " + prob_to_notes:notes
+  end box/newline
+  }
+ }
+
+sorted by switch(csort)
+  case "Problem Date": problems_hf:datereported
+  case "Repair Date" : problems_hf:daterepaired
+  problems_hf:unitnumber
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cLocgroup <> "" then str(cloctype)+" group: " + str(cLocGroup) else str(cloctype)+": " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Sorted by: "+csort+"   Include Sold?: "+csold
+  end box/newline=4
+
+  "Report Date"/align=a
+  "Report Time"/align=b
+  "Critical"/align=c
+  "Repaired"/align=d
+  "Repair Date"/align=e
+  "Repair Time"/align=f
+  "R/O#"/align=g
+
+end of report
+  "Total Records: " + str(count[problems_hf:unitnumber])
+
+;
+replace prob.eq
+run/parameterfile=prob_1 prob.eq
+rrepl prob
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view prob
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Vehicle Problems Report" -- Report Title
+   string rptname1    = "prob" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "prob_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

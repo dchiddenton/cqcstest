@@ -1,0 +1,304 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Local Company List
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/24/2019
+Modified:
+
+Notes:
+$Workfile: complist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/complist.mf $
+$Revision: 1 $
+$History: complist.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 10/25/19   Time: 1:20p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+define
+   number num_params = countfields(systemsettings:companycategory,",") 
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="systemsettings"
+  if i_counter:position <= num_params then
+     if itemnumber=1 then '"ALL"'
+     ',"'+subfield(systemsettings:companycategory,",",i_counter:position)+'"'
+
+
+sorted by
+   subfield(systemsettings:companycategory,",",i_counter:position)
+top of report
+'string ccategory[8192] = multivalue parameter prompt "Categories: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl param_category
+
+define
+  sales_rep = str(employee:employeefirstname) + " " + str(employee:employeelastname)
+  sales_repLast =  str(employee:employeelastname)+ " " + str(employee:employeefirstname)
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"ALL","NONE"'
+   ',"'+sales_rep+'"'
+
+sorted by
+   sales_repLast
+top of report
+'string csalesrep[8192] = multivalue parameter prompt "Sales Rep: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl param_salesrep
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  string ccomprange = range parameter prompt "Company Range (Start..End or ALL): " default ALL
+  include "param_salesrep.cq"
+  include "param_category.cq"
+  string cctype[1024] = multivalue parameter prompt "Company Type:" valid "Body Shop","Corp-Cust","Corporate","Insurance",
+      "Renter","Repair Shop","Tour","Vendor","Other" default "ALL"
+  string cactive = parameter prompt "Active or Inactive Companyies:" valid "Only Active","Only Inactive","Active and Inactive" default "Only Active"
+  string ccompchg = parameter/uppercase prompt "Companies with Charges Only? " valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by: " valid "Company Name","Sales Rep" default "Company Name"
+
+;
+replace complist_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve company records - setup parameters
+------------------------------------------------------------------------*/
+include "complist_i1.inc"
+
+where company:company = ccomprange or ccomprange = "ALL"
+
+list/domain="company"/hold="comp_hf"
+  company:company /keyelement=1.1
+  company:category 
+  company:salesrep 
+  company:address1 
+  company:address2 
+  company:city 
+  company:state 
+  company:zipcode 
+  company:phonenumber 
+  company:faxnumber 
+  company:billingaddress1 
+  company:billingaddress2 
+  company:billingcity 
+  company:billingstate 
+  company:billingzipcode 
+  company:billingphonenumber 
+  company:billingfaxnumber 
+  company:billingcontactfirstname 
+  company:billingcontactlastname 
+  company:type 
+  company:arcust 
+  company:apvend
+  company:dateinactive
+  company:ratecode
+
+;
+replace complist_1.eq
+run/setparameter complist_1.eq
+
+run/parameterfile=complist_1 complist_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve applicable company charges
+------------------------------------------------------------------------*/
+include "complist_i1.inc"
+define
+  string ratea = if companychgs:calcmeth = 10 then str(companychgs:ratepct,"zz9.999")+ "% " else ""
+  string rateb = if companychgs:rateunit <> 0 then str(companychgs:rateunit,"zzz,zzz,zz9.99")+"/Unit " else ""
+  string ratec = if companychgs:ratehour <> 0 then str(companychgs:ratehour,"zzz,zzz,zz9.99")+"/Hour " else ""
+  string rated = if companychgs:rateday <> 0 then str(companychgs:rateday,"zzz,zzz,zz9.99")+"/Day " else ""
+  string ratee = if companychgs:rateweek <> 0 then str(companychgs:rateweek,"zzz,zzz,zz9.99")+"/Week " else ""
+  string ratef = if companychgs:ratemonth <> 0 then str(companychgs:ratemonth,"zzz,zzz,zz9.99")+"/Month " else ""
+
+  string rate_str = trim(ratea+rateb+ratec+rated+ratee+ratef)
+
+where company:company = ccomprange or ccomprange = "ALL"
+
+list/domain="companychgs"/hold="compchgs_hf"
+  companychgs:company /keyelement=1.1
+  companychgs:code 
+  companychgs:locationcode 
+  companychgs:product 
+  companychgs:invclass 
+  rate_str
+  companychgs:override
+;
+run/parameterfile=complist_1
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "complist_i1.inc"
+
+define
+   file compchg_link = access compchgs_hf,
+    set compchgs_hf:company=comp_hf:company,
+    one to many, null fill on failure
+
+  file emp_link = access employee,
+    set employee:employeenumber=comp_hf:salesrep,
+    one to one, null fill on failure
+
+  string sales_rep = if comp_hf:salesrep = "None" then "None"  else str(emp_link:employeefirstname) + " " + str(emp_link:employeelastname)
+  string sales_repLast =  if comp_hf:salesrep = "None" then " " else str(emp_link:employeelastname)+ " " + str(emp_link:employeefirstname)
+
+where (compchg_link:company <> null and ccompchg = "Y") or ccompchg = "N" and
+      (comp_hf:salesrep = csalesrep or csalesrep = "ALL") and
+      (comp_hf:category = ccategory or ccategory = "ALL") and
+      (comp_hf:type = cctype or cctype = "ALL") and
+      ((comp_hf:dateinactive <> null and cactive = "Only Inactive") or
+       (comp_hf:dateinactive = null and cactive = "Only Active") or
+       (cactive = "Active and Inactive")) and 
+      ((ccompchg = "Y" and compchg_link:company <> null) or ccompchg = "N")
+     
+
+list/domain="comp_hf"/title="Local Company List"/nobanner/noheadings/pageof/pagelength=85
+  comp_hf:company/displaywidth=30
+  comp_hf:category /displaywidth=20
+  sales_rep /displaywidth=20
+  comp_hf:address1 /displaywidth=20
+  comp_hf:address2 /displaywidth=20
+  comp_hf:city /displaywidth=10
+  comp_hf:state /displaywidth=5
+  comp_hf:zipcode /displaywidth=6
+  comp_hf:phonenumber /displaywidth=15/mask=include "phone_mask.cq"
+  comp_hf:faxnumber /displaywidth=15/mask=include "phone_mask.cq"
+  comp_hf:billingaddress1 /displaywidth=20
+  comp_hf:billingaddress2 /displaywidth=20
+  comp_hf:billingcity /displaywidth=10
+  comp_hf:billingstate /displaywidth=5
+  comp_hf:billingzipcode /displaywidth=6
+  comp_hf:billingphonenumber /displaywidth=15/mask=include "phone_mask.cq"
+  comp_hf:billingfaxnumber /displaywidth=15/mask=include "phone_mask.cq"
+  comp_hf:billingcontactfirstname /displaywidth=10
+  comp_hf:billingcontactlastname /displaywidth=15
+  comp_hf:type /displaywidth=5
+  comp_hf:arcust /displaywidth=8
+  comp_hf:apvend /displaywidth=8
+
+followed by
+ if ccompchg = "Y" then {
+   "Rate Code: "+str(comp_hf:ratecode)/column=3/width=30/newline
+   "Misc chgs: "/column=3
+  }
+
+followed by
+if (ccompchg = "Y" and compchg_link:company <> null) then {
+box/column=10
+  compchg_link:code/displaywidth=10
+  compchg_link:rate_str/displaywidth=30
+  if compchg_link:override = "I" then "Incl." else ""/displaywidth=5
+  compchg_link:product/displaywidth=10
+  compchg_link:locationcode/displaywidth=10
+  compchg_link:invclass/displaywidth=10
+end box/newlines
+}
+
+sorted by
+  if csort = "Sales Rep" then sales_repLast
+  comp_hf:company
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Company Range: " + str(ccomprange)/displaywidth=100/newline
+   "Sales Reps: " + str(csalesrep)/displaywidth=100/newline
+  "Company Types: "+str(cctype)/displaywidth=100/newline
+  end box/newline=4
+
+
+  "Company"/align=comp_hf:company
+  "Category"/align=comp_hf:category
+  "Sales Rep"/align=sales_rep 
+  "Address"/align=comp_hf:address1
+  "Address"/align=comp_hf:address2 
+  "City"/align=comp_hf:city 
+  "State"/align=comp_hf:state
+  "Zip"/align=comp_hf:zipcode 
+  "Phone #"/align=comp_hf:phonenumber 
+  "Fax #"/align=comp_hf:faxnumber
+  "Bill Address"/align=comp_hf:billingaddress1 
+  "Bill Address"/align=comp_hf:billingaddress2 
+  "Bill City"/align=comp_hf:billingcity
+  "Bill State"/align=comp_hf:billingstate 
+  "Bill Zip"/align=comp_hf:billingzipcode 
+  "Bill Phone #"/align=comp_hf:billingphonenumber 
+  "Bill Fax #"/align=comp_hf:billingfaxnumber 
+  "Contact"/align=comp_hf:billingcontactfirstname 
+  comp_hf:billingcontactlastname 
+  "Comp Type"/align=comp_hf:type 
+  "AR Cust"/align=comp_hf:arcust
+  "AP Vend"/align=comp_hf:apvend /newline
+;
+replace complist.eq
+run/parameterfile=complist_1 complist.eq
+rrepl complist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view complist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Local Company List" -- Report Title
+   string rptname1    = "complist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "complist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

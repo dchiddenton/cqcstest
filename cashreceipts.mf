@@ -1,0 +1,384 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Cash Receipts Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+
+/*------------------------------------------------------------------------
+
+Created: 5/20/2019
+Modified: 
+
+Files:
+
+Notes: MODIFIED FOR NO POSTING 
+
+$Workfile: cashreceipts.mf $                              
+
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/cashreceipts.mf $
+
+$Revision: 2 $
+
+$History: cashreceipts.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Setup standard parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+
+  include "param_loc.cq" 
+  include "param_locgroup.cq"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" Valid "Y","N" default "N" 
+
+-- string cPost = parameter/uppercase prompt "Post? " Valid "Y","N" default "N"   
+
+ --NO POSTING YET
+ string cpost="N"
+ --string cSelect =  parameter prompt "Companies to Include: " default ALL;
+;
+replace cashreceipts_i1.inc
+
+/*------------------------------------------------------------------------
+ Retireve payment lines
+------------------------------------------------------------------------*/
+
+viewpoint native;
+
+  include "cashreceipts_i1.inc"
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = paymentline:locreceived,
+    null fill on failure
+
+  file pmt_link = access payments,
+    set payments:paymentid=paymentline:paymentid
+
+where
+  (((paymentline:datereceived >= dtSdate and paymentline:datereceived <= dtEdate) and cPost = "N")
+   --or
+   --(((paymentline:datereceived <= dtEdate and paymentline:datereceived >= dtEdate - 365) and paymentline:dateposted = null) and cPost = "Y")
+   )
+  and (cLoc = "" or paymentline:locreceived = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="paymentline"/noheadings/hold="payline_hf"
+
+  paymentline:paymentid
+  paymentline:locreceived 
+  paymentline:datereceived/keyelement=1.3
+  paymentline:timereceived /keyelement=1.4
+  paymentline:empreceived 
+  paymentline:amount 
+  paymentline:reference /keyelement=1.2
+  paymentline:memo 
+  paymentline:dateposted 
+  paymentline:receiptid 
+  paymentline:receipttype
+  pmt_link:company/keyelement=1.1
+  pmt_link:arcust
+;
+replace cashreceipts_1.eq
+run/setparameter cashreceipts_1.eq
+
+run/parameterfile=cashreceipts_1 
+
+/*------------------------------------------------------------------------
+ Create consolidated payment header
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  file pmt_link = access payments,
+    set payments:paymentid=payline_hf:paymentid,
+    one to one,
+    null fill on failure
+
+
+ list/domain="payline_hf"/nodetail/noheadings/hold="recheader_hf"
+  pmt_link:company
+  pmt_link:arcust
+  pmt_link:company
+  payline_hf:amount 
+  payline_hf:reference 
+  pmt_link:paymenttype
+  payline_hf:datereceived 
+  payline_hf:dateposted 
+  payline_hf:locreceived 
+  payline_hf:empreceived 
+  payline_hf:memo 
+
+sorted by
+  payline_hf:datereceived
+  pmt_link:company
+  payline_hf:reference
+
+end of payline_hf:reference
+  pmt_link:company/keyelement=1.1
+  pmt_link:arcust
+  total[payline_hf:amount,payline_hf:reference]/name="rec_tot" 
+  payline_hf:reference/keyelement=1.2
+  pmt_link:paymenttype
+  payline_hf:datereceived/keyelement=1.3
+  payline_hf:timereceived/keyelement=1.4
+  payline_hf:dateposted 
+  payline_hf:locreceived 
+  payline_hf:empreceived 
+  payline_hf:memo
+;
+
+run/parameterfile=cashreceipts_1
+
+
+/*------------------------------------------------------------------------
+ Create output stream based on Excel selection
+------------------------------------------------------------------------*/
+include "cashreceipts_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+'list/domain="recheader_hf"/nobanner/pageof/pagelength=70/title="Cash Receipts Report"/needs=10/noheadings'/newline
+'pmt_link:ranumber/noheading'/newline
+'  pmt_link:invoicenumber/noheading'/newline
+'  rrm_link:customerlastname/noheading'/newline
+'  pmt_link:datereceived/noheading'/newline
+'  pmt_link:paymentamount/noheading'/newline
+'  payline_hf:datereceived/noheading'/newline
+'  payline_link:amount/noheading'/newline
+''/newline
+'sorted by'/newline
+'   recheader_hf:company'/newline
+'   recheader_hf:datereceived'/newline
+'   recheader_hf:reference'/newline
+''/newline
+''/newline
+'top of recheader_hf:company'/newline
+'   recheader_hf:company/heading="Company"'/newline
+'   pmt_link:arcust/heading="A/R Customer No."/newline=2'/newline
+''/newline
+'  '/newline
+''/newline
+'top of recheader_hf:reference'/newline
+'   "Reference #"/align=recheader_hf:reference'/newline
+'   "Pmt Type"/align=recheader_hf:paymenttype'/newline
+'   "Date Recd"/align=recheader_hf:datereceived '/newline
+'   "Time Recd"/align=recheader_hf:timereceived '/newline
+'   "Location"/align=recheader_hf:locreceived '/newline
+'   "Recd by"/align=recheader_hf:empreceived'/newline
+'   "Total Payment"/align=recheader_hf:rec_tot/newline'/newline
+''/newline
+'  recheader_hf:reference/displaywidth=15 '/newline
+'  recheader_hf:paymenttype /displaywidth=10'/newline
+'  recheader_hf:datereceived '/newline
+'  recheader_hf:timereceived '/newline
+'  recheader_hf:locreceived '/newline
+'  recheader_hf:empreceived'/newline
+'  recheader_hf:rec_tot/newline'/newline
+'  recheader_hf:memo/heading="Memo"/newline=2'/newline
+''/newline
+'  "RA #"/align=pmt_link:ranumber'/newline
+'  "Invoice #"/align=pmt_link:invoicenumber'/newline
+'  "Name"/align=rrm_link:customerlastname'/newline
+'  "Invoice Date"/align=pmt_link:datereceived'/newline
+'  "Invoice Amt"/align=pmt_link:paymentamount'/newline
+'  "Payment Date"/align=payline_hf:datereceived'/newline
+'  "Payment Amt"/align=payline_link:amount'/newline
+''/newline
+'end of recheader_hf:reference'/newline
+'   ""/newline'/newline
+'  "Totals: "/align=pmt_link:datereceived'/newline
+'  total[pmt_link:paymentamount,recheader_hf:reference]/align=pmt_link:paymentamount'/newline
+'  total[payline_link:amount,recheader_hf:reference]/align=payline_link:amount/newline'/newline
+''/newline
+'top of page'/newline
+''/newline
+' "company_logo.jpg"/image/width=20/left/newline'/newline
+''/newline
+' box/center/column=1'/newline
+'  if cPost = "Y" then "Posting Cutoff Date: "+str(dtedate) else "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline'/newline
+'  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline'/newline
+' end box /newline=4'/newline
+} else {
+'list/domain="recheader_hf"/nobanner/pageof/pagelength=0/title="Cash Receipts Report"/noheadings'/newline
+'  recheader_hf:company'/newline
+'  pmt_link:arcust'/newline
+'  recheader_hf:reference/displaywidth=15 '/newline
+'  recheader_hf:paymenttype /displaywidth=10'/newline
+'  recheader_hf:datereceived '/newline
+'  recheader_hf:timereceived '/newline
+'  recheader_hf:locreceived '/newline
+'  recheader_hf:empreceived'/newline
+'  recheader_hf:rec_tot/total'/newline
+'  pmt_link:ranumber'/newline
+'  pmt_link:invoicenumber'/newline
+'  rrm_link:customerlastname'/newline
+'  pmt_link:datereceived'/newline
+'  pmt_link:paymentamount'/newline
+'  payline_hf:datereceived'/newline
+'  payline_link:amount'/newline
+'  recheader_hf:memo'/newline
+''/newline
+''/newline
+'sorted by'/newline
+'   recheader_hf:company'/newline
+'   recheader_hf:datereceived'/newline
+'   recheader_hf:reference'/newline
+''/newline
+''/newline
+'top of page'/newline
+''/newline
+' "company_logo.jpg"/image/width=20/left/newline'/newline
+''/newline
+' box/center/column=1'/newline
+'  if cPost = "Y" then "Posting Cutoff Date: "+str(dtedate) else "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline'/newline
+'  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline'/newline
+' end box /newline=4'/newline
+''/newline
+'   "Company"/align=recheader_hf:company'/newline
+'   "A/R Customer No."/align=pmt_link:arcust'/newline
+'   "Reference #"/align=recheader_hf:reference'/newline
+'   "Pmt Type"/align=recheader_hf:paymenttype'/newline
+'   "Date Recd"/align=recheader_hf:datereceived '/newline
+'   "Time Recd"/align=recheader_hf:timereceived '/newline
+'   "Location"/align=recheader_hf:locreceived '/newline
+'   "Recd by"/align=recheader_hf:empreceived'/newline
+'   "Payment Received"/align=recheader_hf:rec_tot'/newline
+'   "RA #"/align=pmt_link:ranumber'/newline
+'   "Invoice #"/align=pmt_link:invoicenumber'/newline
+'   "Name"/align=rrm_link:customerlastname'/newline
+'   "Invoice Date"/align=pmt_link:datereceived'/newline
+'   "Invoice Amt"/align=pmt_link:paymentamount'/newline
+'   "Payment Date"/align=payline_hf:datereceived'/newline
+'   "Payment Applied"/align=payline_link:amount'/newline
+'   "Memo"/align=recheader_hf:memo'/newline
+''/newline
+}
+;
+run/parameterfile=cashreceipts_1
+rrepl outputstream
+
+/*------------------------------------------------------------------------
+ Output report
+------------------------------------------------------------------------*/
+
+include "cashreceipts_i1.inc"
+
+define
+
+   file payline_link = access payline_hf,
+    set payline_hf:company=recheader_hf:company,
+    payline_hf:reference=recheader_hf:reference,
+    payline_hf:datereceived=recheader_hf:datereceived,
+    one to many, null fill on failure
+
+  file pmt_link = access payments,
+    set payments:paymentid=payline_link:paymentid,
+    one to one,
+    null fill on failure
+
+  file rrm_link = access rrm,
+    set rrm:commonid=pmt_link:commonid,
+    one to one,null fill on failure
+
+
+
+include "outputstream.cq"
+;
+
+replace cashreceipts.eq
+run/parameterfile=cashreceipts_1 cashreceipts.eq
+rrepl cashreceipts
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view cashreceipts
+
+/*------------------------------------------------------------------------
+ Create posting files for upload
+------------------------------------------------------------------------*/
+/*
+list/domain="payline_hf"/xml="cashreceipts"
+"paymentline"/name="table"/width=20
+  payline_hf:paymentid /width=11
+  payline_hf:receiptid /name="uniqueid"/width=11
+  payline_hf:amount /name="amount"/width=14/decimalplaces=2
+  payline_hf:locreceived
+  payline_hf:datereceived
+;
+run/parameterfile=cashreceipts_1
+
+  include "cashreceipts_i1.inc"
+  
+where cpost="Y"  
+
+list/domain="dummy"
+dummy:position
+;
+run/parameterfile=cashreceipts_1
+rrepl cashreceipt_1
+
+if selected > 0  
+run postcashrecQB.mf
+endif
+*/
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Cash Receipts Journal" -- Report Title
+   string rptname1    = "cashreceipts" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "cashreceipts_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile=cashreceipts_1
+rrepl rwsubmitpar
+run/parameterfile=cashreceipts_1 rwsubmitjob.mf

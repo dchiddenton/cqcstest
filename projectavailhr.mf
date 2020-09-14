@@ -1,0 +1,842 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Projected Availability/Utilization Report by Hour
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: projectavailhr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/projectavailhr.mf $
+$Revision: 2 $
+$History: projectavailhr.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "start_date.cq"
+  include "fleet_default.cq"
+  date last_date = start_date + 365
+  date dtsdate = parameter prompt "Starting Date: " error "Error: Start Date < today" if dtsdate < todaysdate default todaysdate 
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate  error "Date Past Available Data" if dtedate > last_date default todaysdate + 10
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cfleet = parameter prompt "Calculate UT% on Current or Owned Fleet?: " valid "Current","Owned" default fleet_default
+  string cosflag = parameter/uppercase prompt "Include O/S Repairs?: " valid "Y","N" default "Y"
+  --string cnegday = parameter/uppercase prompt "Carry Negatives?: " valid "Y","N" default "Y"
+  --string cselect2 = parameter/uppercase prompt "Exclude Overdues Vehicles?: " valid "Y","N" default "N"
+  string cforeign = parameter/uppercase prompt "Include Foreign Vehicles?: " valid "Y","N" default "N"
+  number ns_factor = parameter/mask="zz9.9" prompt "No-Show Factor %: " valid if ns_factor >=0 and ns_factor <= 100 default 0.0
+;
+replace projectavailhr_i1.inc
+
+/*------------------------------------------------------------------------
+ Determine first countdate in availcount table
+------------------------------------------------------------------------*/
+ 
+where recordnumber=1
+list/domain="availcount"/nobanner/nodefaults/noreporttotals
+  "date start_date = date('"+str(availcount:countdate)+"')"
+;
+run/parameterfile
+rreplace start_date
+
+/*------------------------------------------------------------------------
+ Get default UT calculation from CF
+------------------------------------------------------------------------*/
+
+define
+   file cf_link = access customfeature,
+    set customfeature:code="R1013",
+    zero fill on failure
+
+list/domain="dummy"/nobanner/nodefaults/noreporttotals
+  if cf_link:active = 1 then 'string fleet_default = "Current"' else 'string fleet_default = "Owned"'
+;
+run/parameterfile
+rreplace fleet_default
+
+/*------------------------------------------------------------------------
+ Retrieve availcount numbers to temp file
+------------------------------------------------------------------------*/
+
+viewpoint native;
+
+include "projectavailhr_i1.inc"
+
+define
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = availcount:locationcode,
+    null fill on failure;
+
+    
+where 
+  ( availcount:countdate <= 
+    dtedate )
+  and (availcount:locationcode = cLoc or cLoc = "ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (availcount:product = cProduct or cProduct = "ALL")
+  and (availcount:invclass = cClass or cClass = "ALL")
+
+  
+list/domain="availcount"/hold="availcount_hf"
+  availcount:locationcode
+  availcount:product 
+  availcount:invclass
+  availcount:countdate
+  availcount:fltready 
+  if cforeign = "Y" then availcount:fgnready else 0/name="fgnready"
+  availcount:dueback
+  round(availcount:reserved -(availcount:reserved*(ns_factor divide 100)),0)/name="reserved"
+  round(availcount:duebackres - (availcount:duebackres*(ns_factor divide 100)),0)/name="duebackres"
+  availcount:noshowres
+  if cosflag = "Y" then availcount:duebackrepair else 0/name="duebackrepair"
+  availcount:infleetcurrent
+  availcount:infleetowned
+  availcount:onordercurrent
+  availcount:onorderowned
+  availcount:onrent
+  availcount:onrepair
+  availcount:outfleetcurrent
+  availcount:outfleetowned
+;
+
+replace projectavailhr_1.eq
+run/setparameter projectavailhr_1.eq
+
+/*------------------------------------------------------------------------
+ determine if there are special events occuring
+------------------------------------------------------------------------*/
+
+include "projectavailhr_i1.inc"
+
+define
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = specialevents:locationcode,
+    null fill on failure;
+
+where 
+  ((specialevents:startdate >= dtsdate and specialevents:startdate <= dtedate) or 
+   (specialevents:enddate >= dtsdate and specialevents:enddate <= dtedate))
+  and (specialevents:locationcode = cLoc or cLoc = "ALL") 
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (specialevents:product = cProduct or cProduct = "ALL")
+  and (specialevents:invclass = cClass or cClass = "ALL")
+
+list/domain="specialevents"/nodetail/nobanner/nodefaults/noendofreport
+  specialevents:code
+end of report
+"number special_events ="+str(count[specialevents:code])
+;
+run/parameterfile=projectavailhr_1
+rreplace special_events
+
+run/parameterfile=projectavailhr_1 projectavailhr_1.eq 
+
+/*------------------------------------------------------------------------
+ Calculate running totals of all statistics
+------------------------------------------------------------------------*/
+ 
+viewpoint native;
+
+include "projectavailhr_i1.inc"
+
+define
+
+  number prev_start = if cforeign = "Y" then 
+    (if availcount_hf:countdate = todaysdate  then 
+       (availcount_hf:fltready[24] + availcount_hf:fgnready[24] + availcount_hf:dueback[24] + availcount_hf:duebackrepair[24] +
+        availcount_hf:duebackres[24] - availcount_hf:reserved[24] - availcount_hf:onrepair[24]) else
+          (sumarray(availcount_hf:fltready) + sumarray(availcount_hf:fgnready) + sumarray(availcount_hf:dueback) +
+           sumarray(availcount_hf:duebackres) + sumarray(availcount_hf:duebackrepair) - sumarray(availcount_hf:reserved) - sumarray(availcount_hf:onrepair)))
+   else 
+     (if availcount_hf:countdate = todaysdate  then 
+       (availcount_hf:fltready[24] + availcount_hf:dueback[24] + availcount_hf:duebackrepair[24] +
+        availcount_hf:duebackres[24] - availcount_hf:reserved[24] - availcount_hf:onrepair[24]) else
+          (sumarray(availcount_hf:fltready) + sumarray(availcount_hf:dueback) +
+           sumarray(availcount_hf:duebackres) + sumarray(availcount_hf:duebackrepair) - sumarray(availcount_hf:reserved) - sumarray(availcount_hf:onrepair)))
+
+  number day_start = if cforeign = "Y" then 
+     running total[availcount_hf:fltready,availcount_hf:invclass] + 
+     running total[availcount_hf:fgnready,availcount_hf:invclass] +
+     running total[availcount_hf:dueback,availcount_hf:invclass] +
+     running total[availcount_hf:duebackrepair,availcount_hf:invclass] +
+     running total[availcount_hf:duebackres,availcount_hf:invclass] -
+     running total[availcount_hf:reserved,availcount_hf:invclass] -
+     running total[availcount_hf:onrepair,availcount_hf:invclass] 
+   else 
+     running total[availcount_hf:fltready,availcount_hf:invclass] + 
+     running total[availcount_hf:dueback,availcount_hf:invclass] +
+     running total[availcount_hf:duebackrepair,availcount_hf:invclass] +
+     running total[availcount_hf:duebackres,availcount_hf:invclass] -
+     running total[availcount_hf:reserved,availcount_hf:invclass] -
+     running total[availcount_hf:onrepair,availcount_hf:invclass]
+  
+
+list/domain="availcount_hf"/nodetail/noheadings/hold="fltready_hf"
+
+  availcount_hf:locationcode
+  availcount_hf:product 
+  availcount_hf:invclass
+  availcount_hf:countdate
+  sumarray(availcount_hf:fltready)
+  sumarray(availcount_hf:fgnready)
+  sumarray(availcount_hf:dueback)
+  sumarray(availcount_hf:reserved)
+  sumarray(availcount_hf:onrepair)
+  sumarray(availcount_hf:duebackres)
+  sumarray(availcount_hf:duebackrepair)
+  sumarray(availcount_hf:noshowres)
+
+sorted by
+
+  availcount_hf:locationcode
+  availcount_hf:product
+  availcount_hf:invclass
+  availcount_hf:countdate
+
+
+top of availcount_hf:invclass
+  availcount_hf:locationcode/keyelement=1.1
+  availcount_hf:product /keyelement=1.2
+  availcount_hf:invclass/keyelement=1.3
+  availcount_hf:countdate/name="countdate"/keyelement=1.4
+  prev_start
+
+end of availcount_hf:countdate
+  availcount_hf:locationcode
+  availcount_hf:product 
+  availcount_hf:invclass
+  availcount_hf:countdate+1
+  day_start/name="start_net"
+;
+run/parameterfile=projectavailhr_1 
+
+/*------------------------------------------------------------------------
+ Calculate hourly values
+------------------------------------------------------------------------*/
+
+include "projectavailhr_i1.inc"
+
+define
+  --date prev_date =   availcount_hf:countdate-1
+ 
+  file fltready_link = access fltready_hf,
+   set fltready_hf:locationcode=availcount_hf:locationcode,
+   fltready_hf:product=availcount_hf:product,
+   fltready_hf:invclass=availcount_hf:invclass,
+   fltready_hf:countdate=availcount_hf:countdate,
+   one to one,zero fill on failure
+
+  --#number start_value = if cnegday= "Y" then fltready_link:prev_start else if fltready_link:prev_start < 0 then 0 else fltready_link:prev_start
+  number start_value = fltready_link:prev_start
+
+  number hour_00 = start_value+availcount_hf:dueback[24]+availcount_hf:duebackrepair[24]+availcount_hf:duebackres[24]-availcount_hf:reserved[24]-availcount_hf:onrepair[24]
+  number hour_01 = hour_00 + availcount_hf:fltready[1]+availcount_hf:dueback[1]+availcount_hf:duebackrepair[1]+availcount_hf:duebackres[1]-availcount_hf:reserved[1]-availcount_hf:onrepair[1]
+  number hour_02 = hour_01 + availcount_hf:fltready[2]+availcount_hf:dueback[2]+availcount_hf:duebackrepair[2]+availcount_hf:duebackres[2]-availcount_hf:reserved[2]-availcount_hf:onrepair[2]
+  number hour_03 = hour_02 + availcount_hf:fltready[3]+availcount_hf:dueback[3]+availcount_hf:duebackrepair[3]+availcount_hf:duebackres[3]-availcount_hf:reserved[3]-availcount_hf:onrepair[3]
+  number hour_04 = hour_03 + availcount_hf:fltready[4]+availcount_hf:dueback[4]+availcount_hf:duebackrepair[4]+availcount_hf:duebackres[4]-availcount_hf:reserved[4]-availcount_hf:onrepair[4]
+  number hour_05 = hour_04 + availcount_hf:fltready[5]+availcount_hf:dueback[5]+availcount_hf:duebackrepair[5]+availcount_hf:duebackres[5]-availcount_hf:reserved[5]-availcount_hf:onrepair[5]
+  number hour_06 = hour_05 + availcount_hf:fltready[6]+availcount_hf:dueback[6]+availcount_hf:duebackrepair[6]+availcount_hf:duebackres[6]-availcount_hf:reserved[6]-availcount_hf:onrepair[6]
+  number hour_07 = hour_06 + availcount_hf:fltready[7]+availcount_hf:dueback[7]+availcount_hf:duebackrepair[7]+availcount_hf:duebackres[7]-availcount_hf:reserved[7]-availcount_hf:onrepair[7]
+  number hour_08 = hour_07 + availcount_hf:fltready[8]+availcount_hf:dueback[8]+availcount_hf:duebackrepair[8]+availcount_hf:duebackres[8]-availcount_hf:reserved[8]-availcount_hf:onrepair[8]
+  number hour_09 = hour_08 + availcount_hf:fltready[9]+availcount_hf:dueback[9]+availcount_hf:duebackrepair[9]+availcount_hf:duebackres[9]-availcount_hf:reserved[9]-availcount_hf:onrepair[9]
+  number hour_10 = hour_09 + availcount_hf:fltready[10]+availcount_hf:dueback[10]+availcount_hf:duebackrepair[10]+availcount_hf:duebackres[10]-availcount_hf:reserved[10]-availcount_hf:onrepair[10]
+  number hour_11 = hour_10 + availcount_hf:fltready[11]+availcount_hf:dueback[11]+availcount_hf:duebackrepair[11]+availcount_hf:duebackres[11]-availcount_hf:reserved[11]-availcount_hf:onrepair[11]
+  number hour_12 = hour_11 + availcount_hf:fltready[12]+availcount_hf:dueback[12]+availcount_hf:duebackrepair[12]+availcount_hf:duebackres[12]-availcount_hf:reserved[12]-availcount_hf:onrepair[12]
+  number hour_13 = hour_12 + availcount_hf:fltready[13]+availcount_hf:dueback[13]+availcount_hf:duebackrepair[13]+availcount_hf:duebackres[13]-availcount_hf:reserved[13]-availcount_hf:onrepair[13]
+  number hour_14 = hour_13 + availcount_hf:fltready[14]+availcount_hf:dueback[14]+availcount_hf:duebackrepair[14]+availcount_hf:duebackres[14]-availcount_hf:reserved[14]-availcount_hf:onrepair[14]
+  number hour_15 = hour_14 + availcount_hf:fltready[15]+availcount_hf:dueback[15]+availcount_hf:duebackrepair[15]+availcount_hf:duebackres[15]-availcount_hf:reserved[15]-availcount_hf:onrepair[15]
+  number hour_16 = hour_15 + availcount_hf:fltready[16]+availcount_hf:dueback[16]+availcount_hf:duebackrepair[16]+availcount_hf:duebackres[16]-availcount_hf:reserved[16]-availcount_hf:onrepair[16]
+  number hour_17 = hour_16 + availcount_hf:fltready[17]+availcount_hf:dueback[17]+availcount_hf:duebackrepair[17]+availcount_hf:duebackres[17]-availcount_hf:reserved[17]-availcount_hf:onrepair[17]
+  number hour_18 = hour_17 + availcount_hf:fltready[18]+availcount_hf:dueback[18]+availcount_hf:duebackrepair[18]+availcount_hf:duebackres[18]-availcount_hf:reserved[18]-availcount_hf:onrepair[18]
+  number hour_19 = hour_18 + availcount_hf:fltready[19]+availcount_hf:dueback[19]+availcount_hf:duebackrepair[19]+availcount_hf:duebackres[19]-availcount_hf:reserved[19]-availcount_hf:onrepair[19]
+  number hour_20 = hour_19 + availcount_hf:fltready[20]+availcount_hf:dueback[20]+availcount_hf:duebackrepair[20]+availcount_hf:duebackres[20]-availcount_hf:reserved[20]-availcount_hf:onrepair[20]
+  number hour_21 = hour_20 + availcount_hf:fltready[21]+availcount_hf:dueback[21]+availcount_hf:duebackrepair[21]+availcount_hf:duebackres[21]-availcount_hf:reserved[21]-availcount_hf:onrepair[21]
+  number hour_22 = hour_21 + availcount_hf:fltready[22]+availcount_hf:dueback[22]+availcount_hf:duebackrepair[22]+availcount_hf:duebackres[22]-availcount_hf:reserved[22]-availcount_hf:onrepair[22]
+  number hour_23 = hour_22 + availcount_hf:fltready[23]+availcount_hf:dueback[23]+availcount_hf:duebackrepair[23]+availcount_hf:duebackres[23]-availcount_hf:reserved[23]-availcount_hf:onrepair[23]
+
+list/domain="availcount_hf"/hold="avail_hf"
+  availcount_hf:countdate 
+  availcount_hf:locationcode 
+  availcount_hf:product 
+  availcount_hf:invclass 
+  "AVAIL"/name="status"/width=10
+  hour_00
+  hour_01
+  hour_02
+  hour_03
+  hour_04
+  hour_05
+  hour_06
+  hour_07
+  hour_08
+  hour_09
+  hour_10
+  hour_11
+  hour_12
+  hour_13
+  hour_14
+  hour_15
+  hour_16
+  hour_17
+  hour_18
+  hour_19
+  hour_20
+  hour_21
+  hour_22
+  hour_23
+
+
+sorted by
+  availcount_hf:countdate
+  availcount_hf:locationcode
+  availcount_hf:product
+  availcount_hf:invclass
+;
+
+run/parameterfile=projectavailhr_1 
+/*------------------------------------------------------------------------
+ Calculate OR and Fleet numbers
+------------------------------------------------------------------------*/
+include "projectavailhr_i1.inc"
+
+list/domain="availcount_hf"/hold="avail_hf"/append
+  availcount_hf:countdate 
+  availcount_hf:locationcode 
+  availcount_hf:product 
+  availcount_hf:invclass 
+  "OR"/name="status"/width=10
+  availcount_hf:onrent[24]/width=19/name="hour_00"
+  availcount_hf:onrent[01]/width=19/name="hour_01"
+  availcount_hf:onrent[02]/width=19/name="hour_02"
+  availcount_hf:onrent[03]/width=19/name="hour_03"
+  availcount_hf:onrent[04]/width=19/name="hour_04"
+  availcount_hf:onrent[05]/width=19/name="hour_05"
+  availcount_hf:onrent[06]/width=19/name="hour_06"
+  availcount_hf:onrent[07]/width=19/name="hour_07"
+  availcount_hf:onrent[08]/width=19/name="hour_08"
+  availcount_hf:onrent[09]/width=19/name="hour_09"
+  availcount_hf:onrent[10]/width=19/name="hour_10"
+  availcount_hf:onrent[11]/width=19/name="hour_11"
+  availcount_hf:onrent[12]/width=19/name="hour_12"
+  availcount_hf:onrent[13]/width=19/name="hour_13"
+  availcount_hf:onrent[14]/width=19/name="hour_14"
+  availcount_hf:onrent[15]/width=19/name="hour_15"
+  availcount_hf:onrent[16]/width=19/name="hour_16"
+  availcount_hf:onrent[17]/width=19/name="hour_17"
+  availcount_hf:onrent[18]/width=19/name="hour_18"
+  availcount_hf:onrent[19]/width=19/name="hour_19"
+  availcount_hf:onrent[20]/width=19/name="hour_20"
+  availcount_hf:onrent[21]/width=19/name="hour_21"
+  availcount_hf:onrent[22]/width=19/name="hour_22"
+  availcount_hf:onrent[23]/width=19/name="hour_23"
+
+followed by
+  availcount_hf:countdate 
+  availcount_hf:locationcode 
+  availcount_hf:product 
+  availcount_hf:invclass 
+  "FLEET"
+  if cfleet = "Owned" then availcount_hf:infleetowned[24] else availcount_hf:infleetcurrent[24]
+  if cfleet = "Owned" then availcount_hf:infleetowned[01] else availcount_hf:infleetcurrent[01]
+  if cfleet = "Owned" then availcount_hf:infleetowned[02] else availcount_hf:infleetcurrent[02]
+  if cfleet = "Owned" then availcount_hf:infleetowned[03] else availcount_hf:infleetcurrent[03]
+  if cfleet = "Owned" then availcount_hf:infleetowned[04] else availcount_hf:infleetcurrent[04]
+  if cfleet = "Owned" then availcount_hf:infleetowned[05] else availcount_hf:infleetcurrent[05]
+  if cfleet = "Owned" then availcount_hf:infleetowned[06] else availcount_hf:infleetcurrent[06]
+  if cfleet = "Owned" then availcount_hf:infleetowned[07] else availcount_hf:infleetcurrent[07]
+  if cfleet = "Owned" then availcount_hf:infleetowned[08] else availcount_hf:infleetcurrent[08]
+  if cfleet = "Owned" then availcount_hf:infleetowned[09] else availcount_hf:infleetcurrent[09]
+  if cfleet = "Owned" then availcount_hf:infleetowned[10] else availcount_hf:infleetcurrent[10]
+  if cfleet = "Owned" then availcount_hf:infleetowned[11] else availcount_hf:infleetcurrent[11]
+  if cfleet = "Owned" then availcount_hf:infleetowned[12] else availcount_hf:infleetcurrent[12]
+  if cfleet = "Owned" then availcount_hf:infleetowned[13] else availcount_hf:infleetcurrent[13]
+  if cfleet = "Owned" then availcount_hf:infleetowned[14] else availcount_hf:infleetcurrent[14]
+  if cfleet = "Owned" then availcount_hf:infleetowned[15] else availcount_hf:infleetcurrent[15]
+  if cfleet = "Owned" then availcount_hf:infleetowned[16] else availcount_hf:infleetcurrent[16]
+  if cfleet = "Owned" then availcount_hf:infleetowned[17] else availcount_hf:infleetcurrent[17]
+  if cfleet = "Owned" then availcount_hf:infleetowned[18] else availcount_hf:infleetcurrent[18]
+  if cfleet = "Owned" then availcount_hf:infleetowned[19] else availcount_hf:infleetcurrent[19]
+  if cfleet = "Owned" then availcount_hf:infleetowned[20] else availcount_hf:infleetcurrent[20]
+  if cfleet = "Owned" then availcount_hf:infleetowned[21] else availcount_hf:infleetcurrent[21]
+  if cfleet = "Owned" then availcount_hf:infleetowned[22] else availcount_hf:infleetcurrent[22]
+  if cfleet = "Owned" then availcount_hf:infleetowned[23] else availcount_hf:infleetcurrent[23]
+
+
+--# for furture development of Active Fleet
+--#followed by
+--#  availcount_hf:countdate 
+--#  availcount_hf:locationcode 
+--#  availcount_hf:product 
+--#  availcount_hf:invclass 
+--#  "ACTIVEFLEET"/width=20
+--#  availcount_hf:activefleetcurrent[24]
+--#  availcount_hf:activefleetcurrent[01]
+--#  availcount_hf:activefleetcurrent[02]
+--#  availcount_hf:activefleetcurrent[03]
+--#  availcount_hf:activefleetcurrent[04]
+--#  availcount_hf:activefleetcurrent[05]
+--#  availcount_hf:activefleetcurrent[06]
+--#  availcount_hf:activefleetcurrent[07]
+--#  availcount_hf:activefleetcurrent[08]
+--#  availcount_hf:activefleetcurrent[09]
+--#  availcount_hf:activefleetcurrent[10]
+--#  availcount_hf:activefleetcurrent[11]
+--#  availcount_hf:activefleetcurrent[12]
+--#  availcount_hf:activefleetcurrent[13]
+--#  availcount_hf:activefleetcurrent[14]
+--#  availcount_hf:activefleetcurrent[15]
+--#  availcount_hf:activefleetcurrent[16]
+--#  availcount_hf:activefleetcurrent[17]
+--#  availcount_hf:activefleetcurrent[18]
+--#  availcount_hf:activefleetcurrent[19]
+--#  availcount_hf:activefleetcurrent[20]
+--#  availcount_hf:activefleetcurrent[21]
+--#  availcount_hf:activefleetcurrent[22]
+--#  availcount_hf:activefleetcurrent[23]
+
+
+sorted by
+  availcount_hf:countdate
+  availcount_hf:locationcode
+  availcount_hf:product
+  availcount_hf:invclass
+;
+
+run/parameterfile=projectavailhr_1 
+/*------------------------------------------------------------------------
+ Calculate sort order totals
+------------------------------------------------------------------------*/
+define 
+  number sort_order = 1
+  string loc_code[20] = avail_hf:locationcode
+where avail_hf:status = "AVAIL"
+sum/domain="avail_hf"/hold="availfinal_hf"
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+avail_hf:product
+avail_hf:invclass/showall
+;
+run/parameterfile=projectavailhr_1
+
+define
+  number sort_order = 2
+  string loc_code[20] = "ALL"
+where avail_hf:status = "AVAIL"
+sum/domain="avail_hf"/hold="availfinal_hf"/append
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+avail_hf:product
+avail_hf:invclass/showall
+;
+run/parameterfile=projectavailhr_1
+
+define
+  number sort_order = 2
+  string loc_code[20] = avail_hf:locationcode
+where avail_hf:status = "FLEET"
+sum/domain="avail_hf"/hold="availfinal_hf"/append
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+"ALL"/name="product"/width=20
+"ALL"/name="invclass"/width=16
+;
+run/parameterfile=projectavailhr_1
+
+define
+  number sort_order = 2
+  string loc_code[20] = "ALL"
+where avail_hf:status = "FLEET"
+sum/domain="avail_hf"/hold="availfinal_hf"/append
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+"ALL"/name="product"/width=20
+"ALL"/name="invclass"/width=16
+;
+run/parameterfile=projectavailhr_1
+
+define
+  number sort_order = 2
+  string loc_code[20] = avail_hf:locationcode
+where avail_hf:status = "OR"
+sum/domain="avail_hf"/hold="availfinal_hf"/append
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+"ALL"/name="product"/width=20
+"ALL"/name="invclass"/width=16
+;
+run/parameterfile=projectavailhr_1
+
+define
+  number sort_order = 2
+  string loc_code[20] = "ALL"
+where avail_hf:status = "OR"
+sum/domain="avail_hf"/hold="availfinal_hf"/append
+hour_00 hour_01 hour_02 hour_03 hour_04 hour_05 hour_06 hour_07 hour_08 hour_09 hour_10 hour_11 hour_12
+hour_13 hour_14 hour_15 hour_16 hour_17 hour_18 hour_19 hour_20 hour_21 hour_22 hour_23
+by
+avail_hf:status/keyelement=1.3
+sort_order
+avail_hf:countdate/keyelement=1.2
+loc_code/keyelement=1.1
+"ALL"/name="product"/width=20
+"ALL"/name="invclass"/width=16
+;
+run/parameterfile=projectavailhr_1
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+include "projectavailhr_i1.inc"
+
+define
+   include "special_events.cq"
+
+   file fleet_link = access availfinal_hf,
+    set availfinal_hf:loc_code=availfinal_hf:loc_code,
+    availfinal_hf:countdate=availfinal_hf:countdate,
+    availfinal_hf:status="FLEET",
+    one to one,zero fill on failure
+
+   file or_link = access availfinal_hf,
+    set availfinal_hf:loc_code=availfinal_hf:loc_code,
+    availfinal_hf:countdate=availfinal_hf:countdate,
+    availfinal_hf:status="OR",
+    one to one,zero fill on failure
+
+   file sequence_link = access invclass,
+     set invclass:invclass = availfinal_hf:invclass,
+     one to one, null fill on failure
+
+   number min_net01 = if availfinal_hf:hour_00 < availfinal_hf:hour_01 then availfinal_hf:hour_00 else availfinal_hf:hour_01
+   number min_net02 = if min_net01 < availfinal_hf:hour_02 then min_net01 else availfinal_hf:hour_02
+   number min_net03 = if min_net02 < availfinal_hf:hour_03 then min_net02 else availfinal_hf:hour_03
+   number min_net04 = if min_net03 < availfinal_hf:hour_04 then min_net03 else availfinal_hf:hour_04
+   number min_net05 = if min_net04 < availfinal_hf:hour_05 then min_net04 else availfinal_hf:hour_05
+   number min_net06 = if min_net05 < availfinal_hf:hour_06 then min_net05 else availfinal_hf:hour_06
+   number min_net07 = if min_net06 < availfinal_hf:hour_07 then min_net06 else availfinal_hf:hour_07
+   number min_net08 = if min_net07 < availfinal_hf:hour_08 then min_net07 else availfinal_hf:hour_08
+   number min_net09 = if min_net08 < availfinal_hf:hour_09 then min_net08 else availfinal_hf:hour_09
+   number min_net10 = if min_net09 < availfinal_hf:hour_10 then min_net09 else availfinal_hf:hour_10
+   number min_net11 = if min_net10 < availfinal_hf:hour_11 then min_net10 else availfinal_hf:hour_11
+   number min_net12 = if min_net11 < availfinal_hf:hour_12 then min_net11 else availfinal_hf:hour_12
+   number min_net13 = if min_net12 < availfinal_hf:hour_13 then min_net12 else availfinal_hf:hour_13
+   number min_net14 = if min_net13 < availfinal_hf:hour_14 then min_net13 else availfinal_hf:hour_14
+   number min_net15 = if min_net14 < availfinal_hf:hour_15 then min_net14 else availfinal_hf:hour_15
+   number min_net16 = if min_net15 < availfinal_hf:hour_16 then min_net15 else availfinal_hf:hour_16
+   number min_net17 = if min_net16 < availfinal_hf:hour_17 then min_net16 else availfinal_hf:hour_17
+   number min_net18 = if min_net17 < availfinal_hf:hour_18 then min_net17 else availfinal_hf:hour_18
+   number min_net19 = if min_net18 < availfinal_hf:hour_19 then min_net18 else availfinal_hf:hour_19
+   number min_net20 = if min_net19 < availfinal_hf:hour_20 then min_net19 else availfinal_hf:hour_20
+   number min_net21 = if min_net20 < availfinal_hf:hour_21 then min_net20 else availfinal_hf:hour_21
+   number min_net22 = if min_net21 < availfinal_hf:hour_22 then min_net21 else availfinal_hf:hour_22
+   number min_net = if min_net22 < availfinal_hf:hour_23 then min_net22 else availfinal_hf:hour_23
+ 
+where 
+  ( availfinal_hf:countdate >= dtsdate and availfinal_hf:countdate <= 
+    dtedate ) and availfinal_hf:status = "AVAIL"
+
+list/domain="availfinal_hf"/noheadings/nobanner/pageof/title="Projected Availability/Utilization Report by Hour"/nototals/pagelength=70
+if (itemnumber[availfinal_hf:loc_code]=1) then {
+
+  "Location: "+availfinal_hf:loc_code/newline
+  str(dayname(availfinal_hf:countdate))+" "+str(availfinal_hf:countdate,"DD-MMM-YYYY")/newline
+  }
+  availfinal_hf:product /displaywidth=10
+  availfinal_hf:invclass /displaywidth=10
+  min_net/displaywidth=6
+  availfinal_hf:hour_00/displaywidth=6
+  availfinal_hf:hour_01/displaywidth=6
+  availfinal_hf:hour_02/displaywidth=6
+  availfinal_hf:hour_03/displaywidth=6
+  availfinal_hf:hour_04/displaywidth=6
+  availfinal_hf:hour_05/displaywidth=6
+  availfinal_hf:hour_06/displaywidth=6
+  availfinal_hf:hour_07/displaywidth=6
+  availfinal_hf:hour_08/displaywidth=6
+  availfinal_hf:hour_09/displaywidth=6
+  availfinal_hf:hour_10/displaywidth=6
+  availfinal_hf:hour_11/displaywidth=6
+  availfinal_hf:hour_12/displaywidth=6
+  availfinal_hf:hour_13/displaywidth=6
+  availfinal_hf:hour_14/displaywidth=6
+  availfinal_hf:hour_15/displaywidth=6
+  availfinal_hf:hour_16/displaywidth=6
+  availfinal_hf:hour_17/displaywidth=6
+  availfinal_hf:hour_18/displaywidth=6
+  availfinal_hf:hour_19/displaywidth=6
+  availfinal_hf:hour_20/displaywidth=6
+  availfinal_hf:hour_21/displaywidth=6
+  availfinal_hf:hour_22/displaywidth=6
+  availfinal_hf:hour_23/displaywidth=6
+
+
+sorted by
+  availfinal_hf:countdate/page
+  availfinal_hf:sort_order
+  availfinal_hf:loc_code
+  availfinal_hf:product
+  sequence_link:classsequence
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Include Foreign Vehicle?: "+str(cforeign)+"   Include O/S Repairs?: "+str(cosflag)+"   UT% based on "+str(cfleet)+" Fleet"/newline
+  "NoShow Factor%: "+str(ns_factor)/newline
+  if special_events > 0 then str(special_events)+" Special Events Occur During this Date Range" else ""/newline
+  if todaysdate - start_date > 1 then "*** Data is "+str(todaysdate-start_date)+" days old - Please run updater. ***" else ""/newline
+ end box /newline=4
+
+  "Product"/align=availfinal_hf:product
+  "Class"/align=availfinal_hf:invclass 
+  "Min"/align=min_net
+  "00:00"/align=availfinal_hf:hour_00
+  "01:00"/align=availfinal_hf:hour_01
+  "02:00"/align=availfinal_hf:hour_02
+  "03:00"/align=availfinal_hf:hour_03
+  "04:00"/align=availfinal_hf:hour_04
+  "05:00"/align=availfinal_hf:hour_05
+  "06:00"/align=availfinal_hf:hour_06
+  "07:00"/align=availfinal_hf:hour_07
+  "08:00"/align=availfinal_hf:hour_08
+  "09:00"/align=availfinal_hf:hour_09
+  "10:00"/align=availfinal_hf:hour_10
+  "11:00"/align=availfinal_hf:hour_11
+  "12:00"/align=availfinal_hf:hour_12
+  "13:00"/align=availfinal_hf:hour_13
+  "14:00"/align=availfinal_hf:hour_14
+  "15:00"/align=availfinal_hf:hour_15
+  "16:00"/align=availfinal_hf:hour_16
+  "17:00"/align=availfinal_hf:hour_17
+  "18:00"/align=availfinal_hf:hour_18
+  "19:00"/align=availfinal_hf:hour_19
+  "20:00"/align=availfinal_hf:hour_20
+  "21:00"/align=availfinal_hf:hour_21
+  "22:00"/align=availfinal_hf:hour_22
+  "23:00"/align=availfinal_hf:hour_23/newline
+
+if (itemnumber[availfinal_hf:loc_code]>0 and pagenumber <> 1) then {
+  ""/newline
+  "Location: "+availfinal_hf:loc_code+" ...continued"/newline
+  str(dayname(availfinal_hf:countdate))+" "+str(availfinal_hf:countdate,"DD-MMM-YYYY")/newline
+}
+
+
+
+end of availfinal_hf:loc_code
+  ""/newline
+  str(availfinal_hf:loc_code)+" totals for "+str(availfinal_hf:countdate)/displaywidth=30/align=availfinal_hf:product
+  running total[hour_00,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_00
+  running total[hour_01,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_01
+  running total[hour_02,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_02
+  running total[hour_03,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_03
+  running total[hour_04,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_04
+  running total[hour_05,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_05
+  running total[hour_06,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_06
+  running total[hour_07,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_07
+  running total[hour_08,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_08
+  running total[hour_09,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_09
+  running total[hour_10,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_10
+  running total[hour_11,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_11
+  running total[hour_12,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_12
+  running total[hour_13,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_13
+  running total[hour_14,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_14
+  running total[hour_15,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_15
+  running total[hour_16,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_16
+  running total[hour_17,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_17
+  running total[hour_18,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_18
+  running total[hour_19,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_19
+  running total[hour_20,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_20
+  running total[hour_21,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_21
+  running total[hour_22,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_22
+  running total[hour_23,availfinal_hf:loc_code]/displaywidth=6/align=availfinal_hf:hour_23/newline=2
+
+--  str(availfinal_hf:loc_code)+" On Rent for "+str(availfinal_hf:countdate)/displaywidth=30/align=availfinal_hf:product
+"On Rent"/align=min_net
+  or_link:hour_00/displaywidth=6/align=availfinal_hf:hour_00
+  or_link:hour_01/displaywidth=6/align=availfinal_hf:hour_01
+  or_link:hour_02/displaywidth=6/align=availfinal_hf:hour_02
+  or_link:hour_03/displaywidth=6/align=availfinal_hf:hour_03
+  or_link:hour_04/displaywidth=6/align=availfinal_hf:hour_04
+  or_link:hour_05/displaywidth=6/align=availfinal_hf:hour_05
+  or_link:hour_06/displaywidth=6/align=availfinal_hf:hour_06
+  or_link:hour_07/displaywidth=6/align=availfinal_hf:hour_07
+  or_link:hour_08/displaywidth=6/align=availfinal_hf:hour_08
+  or_link:hour_09/displaywidth=6/align=availfinal_hf:hour_09
+  or_link:hour_10/displaywidth=6/align=availfinal_hf:hour_10
+  or_link:hour_11/displaywidth=6/align=availfinal_hf:hour_11
+  or_link:hour_12/displaywidth=6/align=availfinal_hf:hour_12
+  or_link:hour_13/displaywidth=6/align=availfinal_hf:hour_13
+  or_link:hour_14/displaywidth=6/align=availfinal_hf:hour_14
+  or_link:hour_15/displaywidth=6/align=availfinal_hf:hour_15
+  or_link:hour_16/displaywidth=6/align=availfinal_hf:hour_16
+  or_link:hour_17/displaywidth=6/align=availfinal_hf:hour_17
+  or_link:hour_18/displaywidth=6/align=availfinal_hf:hour_18
+  or_link:hour_19/displaywidth=6/align=availfinal_hf:hour_19
+  or_link:hour_20/displaywidth=6/align=availfinal_hf:hour_20
+  or_link:hour_21/displaywidth=6/align=availfinal_hf:hour_21
+  or_link:hour_22/displaywidth=6/align=availfinal_hf:hour_22
+  or_link:hour_23/displaywidth=6/align=availfinal_hf:hour_23/newline
+
+
+  --str(availfinal_hf:loc_code)+" Fleet for "+str(availfinal_hf:countdate)/displaywidth=30/align=availfinal_hf:product
+if cfleet = "Current" then "Current Fleet" else "Owned Fleet"/align=min_net
+  fleet_link:hour_00/displaywidth=6/align=availfinal_hf:hour_00
+  fleet_link:hour_01/displaywidth=6/align=availfinal_hf:hour_01
+  fleet_link:hour_02/displaywidth=6/align=availfinal_hf:hour_02
+  fleet_link:hour_03/displaywidth=6/align=availfinal_hf:hour_03
+  fleet_link:hour_04/displaywidth=6/align=availfinal_hf:hour_04
+  fleet_link:hour_05/displaywidth=6/align=availfinal_hf:hour_05
+  fleet_link:hour_06/displaywidth=6/align=availfinal_hf:hour_06
+  fleet_link:hour_07/displaywidth=6/align=availfinal_hf:hour_07
+  fleet_link:hour_08/displaywidth=6/align=availfinal_hf:hour_08
+  fleet_link:hour_09/displaywidth=6/align=availfinal_hf:hour_09
+  fleet_link:hour_10/displaywidth=6/align=availfinal_hf:hour_10
+  fleet_link:hour_11/displaywidth=6/align=availfinal_hf:hour_11
+  fleet_link:hour_12/displaywidth=6/align=availfinal_hf:hour_12
+  fleet_link:hour_13/displaywidth=6/align=availfinal_hf:hour_13
+  fleet_link:hour_14/displaywidth=6/align=availfinal_hf:hour_14
+  fleet_link:hour_15/displaywidth=6/align=availfinal_hf:hour_15
+  fleet_link:hour_16/displaywidth=6/align=availfinal_hf:hour_16
+  fleet_link:hour_17/displaywidth=6/align=availfinal_hf:hour_17
+  fleet_link:hour_18/displaywidth=6/align=availfinal_hf:hour_18
+  fleet_link:hour_19/displaywidth=6/align=availfinal_hf:hour_19
+  fleet_link:hour_20/displaywidth=6/align=availfinal_hf:hour_20
+  fleet_link:hour_21/displaywidth=6/align=availfinal_hf:hour_21
+  fleet_link:hour_22/displaywidth=6/align=availfinal_hf:hour_22
+  fleet_link:hour_23/displaywidth=6/align=availfinal_hf:hour_23/newline=2
+
+
+  --str(availfinal_hf:loc_code)+" UT% for "+str(availfinal_hf:countdate)/displaywidth=30/align=availfinal_hf:product
+"UT%"/align=min_net
+  if ((or_link:hour_00 divide fleet_link:hour_00)*100)>0 then ((or_link:hour_00 divide fleet_link:hour_00)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_00
+  if ((or_link:hour_01 divide fleet_link:hour_01)*100)>0 then ((or_link:hour_01 divide fleet_link:hour_01)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_01
+  if ((or_link:hour_02 divide fleet_link:hour_02)*100)>0 then ((or_link:hour_02 divide fleet_link:hour_02)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_02
+  if ((or_link:hour_03 divide fleet_link:hour_03)*100)>0 then ((or_link:hour_03 divide fleet_link:hour_03)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_03
+  if ((or_link:hour_04 divide fleet_link:hour_04)*100)>0 then ((or_link:hour_04 divide fleet_link:hour_04)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_04
+  if ((or_link:hour_05 divide fleet_link:hour_05)*100)>0 then ((or_link:hour_05 divide fleet_link:hour_05)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_05
+  if ((or_link:hour_06 divide fleet_link:hour_06)*100)>0 then ((or_link:hour_06 divide fleet_link:hour_06)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_06
+  if ((or_link:hour_07 divide fleet_link:hour_07)*100)>0 then ((or_link:hour_07 divide fleet_link:hour_07)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_07
+  if ((or_link:hour_08 divide fleet_link:hour_08)*100)>0 then ((or_link:hour_08 divide fleet_link:hour_08)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_08
+  if ((or_link:hour_09 divide fleet_link:hour_09)*100)>0 then ((or_link:hour_09 divide fleet_link:hour_09)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_09
+  if ((or_link:hour_10 divide fleet_link:hour_10)*100)>0 then ((or_link:hour_10 divide fleet_link:hour_10)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_10
+  if ((or_link:hour_11 divide fleet_link:hour_11)*100)>0 then ((or_link:hour_11 divide fleet_link:hour_11)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_11
+  if ((or_link:hour_12 divide fleet_link:hour_12)*100)>0 then ((or_link:hour_12 divide fleet_link:hour_12)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_12
+  if ((or_link:hour_13 divide fleet_link:hour_13)*100)>0 then ((or_link:hour_13 divide fleet_link:hour_13)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_13
+  if ((or_link:hour_14 divide fleet_link:hour_14)*100)>0 then ((or_link:hour_14 divide fleet_link:hour_14)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_14
+  if ((or_link:hour_15 divide fleet_link:hour_15)*100)>0 then ((or_link:hour_15 divide fleet_link:hour_15)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_15
+  if ((or_link:hour_16 divide fleet_link:hour_16)*100)>0 then ((or_link:hour_16 divide fleet_link:hour_16)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_16
+  if ((or_link:hour_17 divide fleet_link:hour_17)*100)>0 then ((or_link:hour_17 divide fleet_link:hour_17)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_17
+  if ((or_link:hour_18 divide fleet_link:hour_18)*100)>0 then ((or_link:hour_18 divide fleet_link:hour_18)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_18
+  if ((or_link:hour_19 divide fleet_link:hour_19)*100)>0 then ((or_link:hour_19 divide fleet_link:hour_19)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_19
+  if ((or_link:hour_20 divide fleet_link:hour_20)*100)>0 then ((or_link:hour_20 divide fleet_link:hour_20)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_20
+  if ((or_link:hour_21 divide fleet_link:hour_21)*100)>0 then ((or_link:hour_21 divide fleet_link:hour_21)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_21
+  if ((or_link:hour_22 divide fleet_link:hour_22)*100)>0 then ((or_link:hour_22 divide fleet_link:hour_22)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_22
+  if ((or_link:hour_23 divide fleet_link:hour_23)*100)>0 then ((or_link:hour_23 divide fleet_link:hour_23)*100) else 0 /mask="zz9.9%"/displaywidth=6/align=availfinal_hf:hour_23/newline
+;
+
+replace projectavailhr.eq
+run/parameterfile=projectavailhr_1 projectavailhr.eq
+rrepl projectavailhr
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view projectavailhr
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Projected Availability/Utilization Report by Hour" -- Report Title
+   string rptname1    = "projectavalhr" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "projectavailhr_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,223 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Tax Exempt Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 8/30/2017
+Modified:
+
+Notes:
+$Workfile: taxexempt.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/taxexempt.mf $
+$Revision: 2 $
+$History: taxexempt.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1  
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cselect = parameter/uppercase prompt "Include Taxable Contracts with $0 Tax:" valid "Y","N" default "N"
+  string csort = parameter prompt "Sort By:" valid "Report Date","Location","Company" default "Report Date"
+
+;
+replace taxexempt_i1.inc
+/*------------------------------------------------------------------------
+ Select tax fees  - setup parameters
+------------------------------------------------------------------------*/
+include "taxexempt_i1.inc"
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm:commonid,
+   one to many, null fill on failure
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one,zero fill on failure
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file inv_link = access inv,
+   set inv:invid=rrm:invid,
+   one to one,null fill on failure
+
+where 
+
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate)
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+  and rrm:rastatus=3
+    
+list/domain="rrm"/nodetail/hold = "taxexempt_hf"
+  rcmift_link:commonid
+  rrm:ranumber
+  if (rcmift_link:type >= 51 and rcmift_link:type <= 53) then {
+  rcmift_link:total/name="amount"
+  1/name="tax_flag1"
+} else {
+  0.00
+  0
+}
+  
+sorted by rrm:commonid
+
+end of rrm:commonid
+  rrm:taxable
+  rrm:ranumber
+  rrm:customerfirstname+" "+rrm:customerlastname/name="name"
+  rrm:dateout
+  rrm:datein
+  rrm:rptdate
+  rrm:rptloccode
+  inv_link:unitnumber
+  rrm:company
+  running total[amount,rrm:commonid]/name="tax_amt"
+  running total[tax_flag1,commonid]/name="tax_flag"
+  rental_link:totaltpm - rental_link:rentaldiscountamt/name="nettm"
+  rrm:totalcharges
+
+;
+replace taxexempt_1.eq
+run/setparameter taxexempt_1.eq
+
+run/parameterfile=taxexempt_1 taxexempt_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "taxexempt_i1.inc"
+
+define
+   string taxable_flag = if taxexempt_hf:taxable=1 then "*" else ""
+   string taxrec_flag = if (taxexempt_hf:tax_flag <> 0 and taxexempt_hf:taxable=0) then "^" else ""
+
+where taxexempt_hf:tax_flag=0 or (taxexempt_hf:tax_amt = 0 and cselect = "Y")
+
+list/domain="taxexempt_hf"/nobanner/noheadings/pageof/title="Tax Exempt Report"
+  taxexempt_hf:ranumber+" "+taxable_flag+taxrec_flag /name="a"
+  taxexempt_hf:name/displaywidth=25 /name="b"
+  taxexempt_hf:dateout /name="c"
+  taxexempt_hf:datein /name="d"
+  taxexempt_hf:rptloccode /name="e"
+  taxexempt_hf:rptdate /name="f"
+  taxexempt_hf:unitnumber /name="g"
+  taxexempt_hf:company/displaywidth=25 /name="h"
+  taxexempt_hf:nettm/total /name="i"
+  taxexempt_hf:totalcharges/total /name="j"
+
+sorted by
+   switch(csort)
+     case "Location"    : taxexempt_hf:rptloccode/total/heading="@"
+     case "Company"     : taxexempt_hf:company
+     
+    taxexempt_hf:rptdate
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Include $0 Tax RAs: "+cselect
+  end box/newline=4
+
+
+  "Check-Out"/align=c
+  "Check-In"/align=d
+  "Report"/align=e
+  "Report"/align=f/newline
+
+  "RA#"/align=a
+  "Name"/align=b
+  "Date"/align=c
+  "Date"/align=d
+  "Location"/align=e
+  "Date"/align=f
+  "Unit#"/align=g
+  "Company"/align=h
+  "T&M Net"/align=i
+  "Total"/align=j/newline
+end of report
+  ""/newline
+  if cselect = "Y" then {
+  "* - contract marked taxable with $0 tax"
+  "^ - contract marked non-taxable with $0 tax record"
+}
+
+;
+replace taxexempt.eq
+run/parameterfile=taxexempt_1 taxexempt.eq
+rrepl taxexempt
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view taxexempt
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Tax Exempt Report" -- Report Title
+   string rptname1    = "taxexempt" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "taxexempt_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

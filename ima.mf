@@ -1,0 +1,239 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Maintenance Alerts Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/7/2017
+Modified:
+
+Notes:
+$Workfile: ima.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ima.mf $
+$Revision: 2 $
+$History: ima.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default 01.01.1980
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  number codomrange = range parameter prompt "Enter Odometer Range (Start..End or ALL): " default ALL
+  string crange = range parameter prompt "Enter Fleet Range (Start..End or ALL): " default ALL
+  string calert = parameter prompt "Alerts to Print: " valid "Warning","Ground","ALL" default "ALL"
+  string csort = parameter prompt "Sort by: " valid "Next Odometer","Next Date","Unit Number" default "Unit Number"
+  string cnoalert = parameter/uppercase prompt "Show Vehicles Without Current Alerts?" valid "Y","N" default "N"
+
+;
+replace ima_i1.inc
+/*------------------------------------------------------------------------
+ Retreieve inv records and flag mtn alerts
+------------------------------------------------------------------------*/
+viewpoint native;
+include "ima_i1.inc"
+
+  file ima_link = access ima,
+   set ima:invid=inv:invid,
+   one to many, zero fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+where 
+  (inv:Product = cProduct) and
+  (inv:unitnumber = crange) and 
+     (inv:ownedlocationcode = cLoc or cLoc = "ALL" )
+     and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="inv"/nodetail/hold="inv_hf"
+  inv:invid
+  inv:unitnumber
+  inv:ownedlocationcode
+  inv:locationcode
+  inv:model
+  inv:ranumber
+  ima_link:invid
+
+sorted by inv:invid
+
+end of inv:invid
+  inv:invid
+  inv:unitnumber
+  inv:ownedlocationcode
+  inv:locationcode
+  inv:model
+  inv:ranumber
+  if running total[ima_link:invid,inv:invid]= 0 then 0 else 1/name="alert_flag"
+
+;
+replace ima_1.eq
+run/setparameter ima_1.eq
+
+run/parameterfile=ima_1 ima_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "ima_i1.inc"
+
+  file ima_link = access ima,
+   set ima:invid=inv_hf:invid,
+   one to many, null fill on failure
+
+  file mtn_link = access invmaint,
+   set invmaint:typeid=ima_link:typeid,
+   one to one
+
+  string schedule_desc = switch(ima_link:schedule)
+    case 1   : "Recur Day/Mlg"
+    case 2   : "Recur Day"
+    case 3   : "Recur Mlg"
+    case 4   : "NonRec Day/Mlg"
+    case 5   : "NonRec Day"
+    case 6   : "NonRec Mlg"
+    case 7   : "NonRec Immed"
+    default  : "N/A"
+ 
+where 
+
+  (((ima_link:nextdate >= dtSdate and ima_link:nextdate <= dtEdate) or
+  (ima_link:nextodom = codomrange)) and
+  (ima_link:unitnumber = crange)) 
+ 
+list/domain="inv_hf"/pageof/nobanner/noheadings/noreporttotals/title="Maintenance Alert Report"/pagelength=70
+if ((((ima_link:schedule = 1 or ima_link:schedule = 2 or ima_link:schedule = 4 or ima_link:schedule = 5) and
+    (ima_link:nextdate >= dtSdate and ima_link:nextdate <= dtEdate)) or
+    ((ima_link:schedule = 1 or ima_link:schedule = 3 or ima_link:schedule = 4 or ima_link:schedule = 6) and
+    (ima_link:nextodom = codomrange)) or ima_link:schedule = 7) and (ima_link:datetimerepaired = null) and
+    ((ima_link:action="Warning" and calert = "Warning") or (ima_link:action="Ground" and calert = "Ground") or calert = "ALL")) or
+    (inv_hf:alert_flag=0 and cnoalert="Y")
+     then {
+
+inv_hf:unitnumber/noduplicates/name="a"
+inv_hf:model/name="b"
+mtn_link:description/displaywidth=20/name="c"
+schedule_desc/name="d"
+ima_link:action/name="e"
+inv_hf:ranumber/name="f"
+ima_link:freqdays/name="g"
+ima_link:freqmiles/name="h"
+ima_link:lastdate/name="i"
+ima_link:lastodom/name="j"
+ima_link:nextdate/name="k"
+ima_link:nextodom/name="l"
+}
+
+sorted by 
+   inv_hf:alert_flag/descending/page
+   if csort = "Next Odometer" then ima_link:nextodom
+   if csort =  "Next Date" then ima_link:nextdate
+   ima_link:unitnumber
+
+top of inv_hf:alert_flag
+  if (inv_hf:alert_flag=0 and cnoalert="Y") then "Units with No Maintenance Alerts"/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Sorted by: "+csort
+  end box/newline=4
+
+  "    Frequency    "/align=h/centre
+  "  Last Maintenance"/align=i
+  "  Next Maintenance"/align=k/newline
+
+  "Unit#"/align=a
+  "Model"/align=b
+  "Procedure"/align=c
+  "Schedule"/align=d
+  "Action"/align=e
+  "RA#"/align=f
+  "Days"/align=g
+  "Mi/Km"/align=h
+  "Date"/align=i
+  "Odometer"/align=j
+  "Date"/align=k
+  "Odometer"/align=l/newline
+
+end of report
+  "Total Records: "+str(count[ima_link:unitnumber])
+
+;
+replace ima.eq
+run/parameterfile=ima_1 ima.eq
+rrepl ima
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view ima
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Maintenance Alerts Report" -- Report Title
+   string rptname1    = "ima" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "ima_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

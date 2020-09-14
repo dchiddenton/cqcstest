@@ -1,0 +1,144 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Invoice Reciept Message List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/13/2018
+Modified:
+
+Notes:
+$Workfile: msglist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/msglist.mf $
+$Revision: 2 $
+$History: msglist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invoicemsg"
+if itemnumber=1 then '"'+invoicemsg:code+'"' else
+   ',"'+invoicemsg:code+'"'
+
+sorted by
+   invoicemsg:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Select Messages or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_code"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+   include "param_code.cq"
+;
+replace msglist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "msglist_i1.inc"
+define
+
+  string Underline = switch (invoicemsg:uline)
+     Case 0  :"No"
+     Case 1  :"Yes"
+     Default :"Unknown"
+  
+  string DoubleWidth = switch (invoicemsg:dblwidth)
+     Case 0  :"No"
+     Case 1  :"Yes"
+     Default :"Unknown"
+
+
+where 
+     invoicemsg:code = ccode or ccode = "ALL"
+
+list/domain="invoicemsg"/nobanner/pageof/title="Invoice Receipt Messages List"/count
+  invoicemsg:code 
+  invoicemsg:msg /width=50
+  Underline/heading="Underline" 
+  DoubleWidth/heading="Double-Width"
+
+sorted by
+  invoicemsg:code
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Codes: " + str(ccode)/displaywidth=100/newline
+  end box /newline=4
+
+;
+replace msglist_1.eq
+replace msglist.eq
+run/setparameter msglist_1.eq
+
+run/parameterfile=msglist_1 msglist_1.eq
+
+run/parameterfile=msglist_1 msglist.eq
+rrepl msglist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view msglist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Invoice Reciept Message List" -- Report Title
+   string rptname1    = "msglist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "msglist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

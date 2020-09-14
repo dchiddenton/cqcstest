@@ -1,0 +1,263 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Renter List
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/12/2017
+Modified:
+
+Notes:
+$Workfile: renterlist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/renterlist.mf $
+$Revision: 3 $
+$History: renterlist.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 3/18/20    Time: 9:39a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel output format.
+ * Added phone mask functionality.
+ * Added mobile phone number.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cname = range parameter prompt "Enter Name Range (Start..End or ALL): " default ALL
+  string czip = range parameter prompt "Enter Zip Code Range (Start..End or ALL): " default ALL
+  number ccustnum = range parameter prompt "Enter Customer # Range (Start..End or ALL): " default ALL
+  string cbirth = multivalue parameter prompt "Birth Month:" valid "January","February","March","April","May","June","July","August", "September","October","November","December" default "ALL"
+  date dtsdate = parameter prompt "Last Rental Since:" default dateadd((todaysdate-day(todaysdate)+1),-month(todaysdate)+1)
+  number cminrent = parameter prompt "Minimum Rentals:" error "Must be >= 0" if cminrent < 0 default 1
+  string cbad = parameter/uppercase prompt "Bad Renters Only?" valid "Y","N" default "N"
+  string cactive = parameter prompt "Show Renters:" valid "ALL","Active Only","Inactive Only" default "ALL"
+  string cadded = parameter/uppercase prompt "Only Customers Added Last Month?" valid "Y","N" default "N"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace renterlist_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters - Output report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "renterlist_i1.inc"
+define
+  file rrm_link = access rrm,
+   set rrm:renterid=renter:renterid,sorted by rrm:dateout/descending,
+   one to one,generic, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_link:locationcodeout,
+    null fill on failure
+ 
+  string cust_name = if renter:badrenter = 1 then
+    "** " + toggle(renter:customerlastname) + ", " + toggle(renter:customerfirstname) else
+      toggle(renter:customerlastname) + ", " + toggle(renter:customerfirstname)
+
+  number added_flag = if month(renter:dateadded) = month(todaysdate-day(todaysdate)) then 1 else 0
+
+where (renter:customerlastname = cname or cname = "ALL")
+      and (renter:renterid = ccustnum or ccustnum = 0)
+
+list/domain="renter"/nobanner/noheadings/pageof/noreporttotals/pagelength=90/title="Renter List"
+if ((rrm_link:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (renter:zipcode =  czip or czip = "ALL")
+  and (renter:lastrental >= dtsdate)
+  and (renter:rentals >= cminrent)
+  and (monthname(renter:dob) = cbirth or cbirth = "ALL")
+  and ((renter:badrenter = 1 and cbad = "Y") or cbad = "N")
+  and ((renter:dateinactive <> null and cactive = "Inactive Only") or (renter:dateinactive = null and cactive = "Active Only")
+   or cactive = "ALL")
+  and ((added_flag = 1 and cadded = "Y") or cadded = "N")) then {
+
+  cust_name/displaywidth=30/heading="Renter's Name" 
+  toggle(renter:address1)/displaywidth=25/heading="Address 1" 
+  toggle(renter:address2) /displaywidth=25/heading="Address 2"
+  toggle(renter:city)/displaywidth=15/heading="City"
+  renter:state/displaywidth=5/heading="State"
+  renter:zipcode /displaywidth=8/heading="Zip/Postal"
+  renter:homephonenumber/mask=include "phone_mask.cq" /heading="Phone"
+  renter:mobilephonenumber/mask=include "phone_mask.cq" /heading="Mobile"
+  renter:renterid /displaywidth=7/heading="Cust #"
+  renter:rentals /displaywidth=7/heading="# Rentals"
+  renter:email /displaywidth=30/heading="Email"
+  renter:lastrental /displaywidth=8/heading="Last Rental"
+  if rrm_link:locationcodeout=null then "N/A" else rrm_link:locationcodeout/displaywidth=8/heading="Last Loc Out"
+  renter:preferredclass /displaywidth=7/heading="Pref Class"
+  renter:sourcecode /displaywidth=8/heading="Source Code"
+}
+
+sorted by
+  renter:customerlastname
+  renter:customerfirstname
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cadded = "Y" then "Only Customers Added in: "+str(todaysdate-day(todaysdate),"M(9) Y(4)")/newline else ""
+  "Customer Names: " + str(cname)+"   Cust#: "+str(ccustnum)/newline
+  "Zip/Postal Codes: "+str(czip)+"   Birth Month: "+str(cbirth)/newline
+  "Minimum Rentals: "+str(cminrent)+"   Last Rental since: "+str(dtsdate)
+  end box/newline=4
+
+;
+replace renterlist_1.eq
+run/setparameter renterlist_1.eq
+
+replace renterlist.eq
+
+/*------------------------------------------------------------------------
+ Output report -Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+include "renterlist_i1.inc"
+define
+  file rrm_link = access rrm,
+   set rrm:renterid=renter:renterid,sorted by rrm:dateout/descending,
+   one to one,generic, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_link:locationcodeout,
+    null fill on failure
+ 
+  string cust_name = if renter:badrenter = 1 then
+    "** " + toggle(renter:customerlastname) + ", " + toggle(renter:customerfirstname) else
+      toggle(renter:customerlastname) + ", " + toggle(renter:customerfirstname)
+
+  number added_flag = if month(renter:dateadded) = month(todaysdate-day(todaysdate)) then 1 else 0
+
+where (renter:customerlastname = cname or cname = "ALL")
+      and (renter:renterid = ccustnum or ccustnum = 0)
+
+list/domain="renter"/nobanner/noheadings/pageof/noreporttotals/pagelength=0/title="Renter List"
+if ((rrm_link:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (renter:zipcode =  czip or czip = "ALL")
+  and (renter:lastrental >= dtsdate)
+  and (renter:rentals >= cminrent)
+  and (monthname(renter:dob) = cbirth or cbirth = "ALL")
+  and ((renter:badrenter = 1 and cbad = "Y") or cbad = "N")
+  and ((renter:dateinactive <> null and cactive = "Inactive Only") or (renter:dateinactive = null and cactive = "Active Only")
+   or cactive = "ALL")
+  and ((added_flag = 1 and cadded = "Y") or cadded = "N")) then {
+
+  cust_name/displaywidth=30/heading="Renter's Name" 
+  toggle(renter:address1)/displaywidth=25/heading="Address 1" 
+  toggle(renter:address2) /displaywidth=25/heading="Address 2"
+  toggle(renter:city)/displaywidth=15/heading="City"
+  renter:state/displaywidth=5/heading="State"
+  renter:zipcode /displaywidth=8/heading="Zip/Postal"
+  renter:homephonenumber/mask=include "phone_mask.cq" /heading="Phone"
+  renter:mobilephonenumber/mask=include "phone_mask.cq" /heading="Mobile"
+  renter:renterid /displaywidth=7/heading="Cust #"
+  renter:rentals /displaywidth=7/heading="# Rentals"
+  renter:email /displaywidth=30/heading="Email"
+  renter:lastrental /displaywidth=8/heading="Last Rental"
+  if rrm_link:locationcodeout=null then "N/A" else rrm_link:locationcodeout/displaywidth=8/heading="Last Loc Out"
+  renter:preferredclass /displaywidth=7/heading="Pref Class"
+  renter:sourcecode /displaywidth=8/heading="Source Code"
+}
+
+sorted by
+  renter:customerlastname
+  renter:customerfirstname
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cadded = "Y" then "Only Customers Added in: "+str(todaysdate-day(todaysdate),"M(9) Y(4)")/newline else ""
+  "Customer Names: " + str(cname)+"   Cust#: "+str(ccustnum)/newline
+  "Zip/Postal Codes: "+str(czip)+"   Birth Month: "+str(cbirth)/newline
+  "Minimum Rentals: "+str(cminrent)+"   Last Rental since: "+str(dtsdate)
+  end box/newline=4
+
+;
+
+replace renterlist_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "renterlist_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=renterlist_1 renterlist.eq"/newline
+} else {
+"run/xls/parameterfile=renterlist_1 renterlist_xl.eq"/newline
+}
+"rrepl renterlist"/newline
+"view"/newline 
+;
+run/parameterfile=renterlist_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "renterlist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "renterlist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

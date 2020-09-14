@@ -1,0 +1,840 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Projected Availability/Utilization Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: projectavail.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/projectavail.mf $
+$Revision: 2 $
+$History: projectavail.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+
+define
+  include "start_date.cq"
+  include "fleet_default.cq"
+  date last_date = start_date + 365
+  date dtsdate = parameter prompt "Starting Date: " error "Error: Start Date < today" if dtsdate < todaysdate default todaysdate 
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate  error "Date Past Available Data" if dtedate > last_date default todaysdate + 10
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cfleet = parameter prompt "Calculate UT% on Current or Owned Fleet?: " valid "Current","Owned" default fleet_default
+  string cosflag = parameter/uppercase prompt "Include Dueback Repairs?: " valid "Y","N" default "Y"
+  --string cnegday = parameter/uppercase prompt "Carry Negatives?: " valid "Y","N" default "Y"
+  --string cselect2 = parameter/uppercase prompt "Exclude Overdues Vehicles?: " valid "Y","N" default "N"
+  string cforeign = parameter/uppercase prompt "Include Foreign Vehicles?: " valid "Y","N" default "N"
+  number ns_factor = parameter/mask="zz9.9" prompt "No-Show Factor %: " valid if ns_factor >=0 and ns_factor <= 100 default 0.0
+
+;
+replace projectavail_i1.inc
+
+/*------------------------------------------------------------------------
+ Determine first countdate in availcount table
+------------------------------------------------------------------------*/
+
+where recordnumber=1
+list/domain="availcount"/nobanner/nodefaults/noreporttotals
+  "date start_date = date('"+str(availcount:countdate)+"')"
+;
+run/parameterfile
+rreplace start_date
+
+/*------------------------------------------------------------------------
+ Get default UT calculation from CF
+------------------------------------------------------------------------*/
+
+define
+   file cf_link = access customfeature,
+    set customfeature:code="R1013",
+    zero fill on failure
+
+list/domain="dummy"/nobanner/nodefaults/noreporttotals
+  if cf_link:active = 1 then 'string fleet_default = "Current"' else 'string fleet_default = "Owned"'
+;
+run/parameterfile
+rreplace fleet_default
+/*------------------------------------------------------------------------
+ Retrieve availcount numbers to temp file - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "projectavail_i1.inc"
+
+define
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = availcount:locationcode,
+    null fill on failure;
+
+    
+where 
+  ( availcount:countdate <= 
+    dtedate )
+  and (availcount:locationcode = cLoc or cLoc = "ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (availcount:product = cProduct or cProduct = "ALL")
+  and (availcount:invclass = cClass or cClass = "ALL")
+
+  
+list/domain="availcount"/hold="availcount_hf"
+  availcount:locationcode/keyelement=1.1
+  availcount:product/keyelement=1.2
+  availcount:invclass/keyelement=1.3
+  availcount:countdate/keyelement=1.4
+  availcount:fltready 
+  if cforeign = "Y" then availcount:fgnready else 0/name="fgnready"
+  availcount:dueback
+  round(availcount:reserved -(availcount:reserved*(ns_factor divide 100)),0)/name="reserved"
+  round(availcount:duebackres - (availcount:duebackres*(ns_factor divide 100)),0)/name="duebackres"
+  availcount:noshowres
+  if cosflag = "Y" then availcount:duebackrepair else 0/name="duebackrepair"
+  availcount:infleetcurrent
+  availcount:infleetowned
+  availcount:onordercurrent
+  availcount:onorderowned
+  availcount:onrent
+  availcount:onrepair
+  availcount:outfleetcurrent
+  availcount:outfleetowned
+
+sorted by
+  availcount:locationcode
+  availcount:product 
+  availcount:invclass
+  availcount:countdate
+;
+replace projectavail_1.eq
+run/setparameter projectavail_1.eq
+
+run/parameterfile=projectavail_1 projectavail_1.eq
+
+
+/*------------------------------------------------------------------------
+ Determine if there are special events occuring
+------------------------------------------------------------------------*/
+
+include "projectavail_i1.inc"
+
+define
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = specialevents:locationcode,
+    null fill on failure
+
+where 
+  ((specialevents:startdate >= dtsdate and specialevents:startdate <= dtedate) or 
+   (specialevents:enddate >= dtsdate and specialevents:enddate <= dtedate))
+  and (specialevents:locationcode = cLoc or cLoc = "ALL") 
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (specialevents:product = cProduct or cProduct = "ALL")
+  and (specialevents:invclass = cClass or cClass = "ALL")
+
+list/domain="specialevents"/nodetail/nobanner/nodefaults/noendofreport
+  specialevents:code
+end of report
+"number special_events ="+str(count[specialevents:code])
+;
+run/parameterfile=projectavail_1
+rreplace special_events
+
+/*------------------------------------------------------------------------
+ Consolidate data by loc/class/date
+------------------------------------------------------------------------*/
+
+list/domain="availcount_hf"/hold="availclass_hf"
+
+  availcount_hf:locationcode/keyelement=1.1 
+  availcount_hf:product/keyelement=1.2 
+  availcount_hf:invclass/keyelement=1.3
+  availcount_hf:countdate/keyelement=1.4
+  if (sumarray(availcount_hf:fltready) + sumarray(availcount_hf:fgnready)) > availcount_hf:infleetcurrent[23] then availcount_hf:infleetcurrent[23] else
+     (sumarray(availcount_hf:fltready) + sumarray(availcount_hf:fgnready))/width=11/name="readyrent"  -- cannot start with more than the current fleet
+  sumarray(availcount_hf:dueback)/width=11/name="dueback"
+  sumarray(availcount_hf:reserved)/width=11/name="reserved"
+  sumarray(availcount_hf:onrepair)/width=11/name="onrepair"
+  sumarray(availcount_hf:duebackres)/width=11/name="duebackres"
+  sumarray(availcount_hf:duebackrepair)/width=11/name="duebackrepair"
+  sumarray(availcount_hf:noshowres)/width=11/name="noshowres"
+  availcount_hf:onrent[23]/width=11
+  availcount_hf:infleetcurrent[23]/width=11
+  availcount_hf:infleetowned[23]/width=11
+
+sorted by
+  availcount_hf:locationcode
+  availcount_hf:product
+  availcount_hf:invclass
+  availcount_hf:countdate
+;
+run/parameterfile=projectavail_1
+
+/*------------------------------------------------------------------------
+ Create avail hold file
+------------------------------------------------------------------------*/
+list/domain="availclass_hf"/hold="avail_hf"
+  availclass_hf:locationcode /keyelement=1.1
+  availclass_hf:product /keyelement=1.2
+  availclass_hf:invclass/width=16/keyelement=1.3
+  availclass_hf:countdate /keyelement=1.4
+  availclass_hf:readyrent/width=11/name="readyrent"
+  availclass_hf:dueback/width=11/name="dueback" 
+  availclass_hf:reserved/width=11/name="reserved" 
+  availclass_hf:onrepair/width=11/name="onrepair" 
+  availclass_hf:duebackres/width=11/name="duebackres" 
+  availclass_hf:duebackrepair/width=11/name="duebackrepair" 
+  availclass_hf:noshowres/width=11/name="noshowres" 
+  availclass_hf:on_rent/width=11/name="onrent" 
+  availclass_hf:in_flt_curr/width=11/name="infltcurr" 
+  availclass_hf:in_flt_own/width=11/name="infltown"
+;
+run/parameterfile=projectavail_1
+
+/*------------------------------------------------------------------------
+ Consolidate data by loc/class/date
+------------------------------------------------------------------------*/
+list/domain="availclass_hf"/nodetail/hold="avail_hf"/append
+  availclass_hf:locationcode 
+  availclass_hf:product 
+  availclass_hf:invclass 
+  availclass_hf:countdate
+  availclass_hf:readyrent
+  availclass_hf:dueback 
+  availclass_hf:reserved 
+  availclass_hf:onrepair 
+  availclass_hf:duebackres 
+  availclass_hf:duebackrepair 
+  availclass_hf:noshowres 
+  availclass_hf:on_rent 
+  availclass_hf:in_flt_curr 
+  availclass_hf:in_flt_own
+
+sorted by
+  availclass_hf:locationcode
+  availclass_hf:countdate
+
+end of availclass_hf:countdate
+  availclass_hf:locationcode /keyelement=1.1
+  availclass_hf:product /keyelement=1.2
+  "ALL"/width=16/name="invclass" /keyelement=1.3
+  availclass_hf:countdate /keyelement=1.4
+  total[availclass_hf:readyrent,availclass_hf:countdate]/width=11/name="readyrent" 
+  total[availclass_hf:dueback,availclass_hf:countdate]/width=11/name="dueback" 
+  total[availclass_hf:reserved,availclass_hf:countdate]/width=11/name="reserved" 
+  total[availclass_hf:onrepair,availclass_hf:countdate]/width=11/name="onrepair" 
+  total[availclass_hf:duebackres,availclass_hf:countdate]/width=11/name="duebackres" 
+  total[availclass_hf:duebackrepair,availclass_hf:countdate]/width=11/name="duebackrepair" 
+  total[availclass_hf:noshowres,availclass_hf:countdate]/width=11/name="noshowres" 
+  total[availclass_hf:on_rent,availclass_hf:countdate]/width=11/name="onrent" 
+  total[availclass_hf:in_flt_curr,availclass_hf:countdate]/width=11/name="infltcurr" 
+  total[availclass_hf:in_flt_own,availclass_hf:countdate]/width=11/name="infltown"
+
+;
+run/parameterfile=projectavail_1
+
+/*------------------------------------------------------------------------
+ Consolidate data by all locations by class
+------------------------------------------------------------------------*/
+list/domain="availclass_hf"/nodetail/hold="avail_hf"/append
+  availclass_hf:locationcode 
+  availclass_hf:product 
+  availclass_hf:invclass 
+  availclass_hf:countdate
+  availclass_hf:readyrent
+  availclass_hf:dueback 
+  availclass_hf:reserved 
+  availclass_hf:onrepair 
+  availclass_hf:duebackres 
+  availclass_hf:duebackrepair 
+  availclass_hf:noshowres 
+  availclass_hf:on_rent 
+  availclass_hf:in_flt_curr 
+  availclass_hf:in_flt_own
+
+sorted by
+  availclass_hf:invclass
+  availclass_hf:countdate
+
+end of availclass_hf:countdate
+  "ALL"/width=20/name="locationcode" /keyelement=1.1
+  availclass_hf:product /keyelement=1.2
+  availclass_hf:invclass/width=16 /keyelement=1.3
+  availclass_hf:countdate /keyelement=1.4
+  total[availclass_hf:readyrent,availclass_hf:countdate]/width=11/name="readyrent" 
+  total[availclass_hf:dueback,availclass_hf:countdate]/width=11/name="dueback" 
+  total[availclass_hf:reserved,availclass_hf:countdate]/width=11/name="reserved" 
+  total[availclass_hf:onrepair,availclass_hf:countdate]/width=11/name="onrepair" 
+  total[availclass_hf:duebackres,availclass_hf:countdate]/width=11/name="duebackres" 
+  total[availclass_hf:duebackrepair,availclass_hf:countdate]/width=11/name="duebackrepair" 
+  total[availclass_hf:noshowres,availclass_hf:countdate]/width=11/name="noshowres" 
+  total[availclass_hf:on_rent,availclass_hf:countdate]/width=11/name="onrent" 
+  total[availclass_hf:in_flt_curr,availclass_hf:countdate]/width=11/name="infltcurr" 
+  total[availclass_hf:in_flt_own,availclass_hf:countdate]/width=11/name="infltown"
+
+;
+run/parameterfile=projectavail_1
+
+/*------------------------------------------------------------------------
+ Consolidate data by all locations all class
+------------------------------------------------------------------------*/
+list/domain="availclass_hf"/nodetail/hold="avail_hf"/append
+  availclass_hf:locationcode 
+  availclass_hf:product 
+  availclass_hf:invclass 
+  availclass_hf:countdate
+  availclass_hf:readyrent
+  availclass_hf:dueback 
+  availclass_hf:reserved 
+  availclass_hf:onrepair 
+  availclass_hf:duebackres 
+  availclass_hf:duebackrepair 
+  availclass_hf:noshowres 
+  availclass_hf:on_rent 
+  availclass_hf:in_flt_curr 
+  availclass_hf:in_flt_own
+
+sorted by
+  availclass_hf:countdate
+
+end of availclass_hf:countdate
+  "ALL"/width=20/name="locationcode" /keyelement=1.1
+  availclass_hf:product /keyelement=1.2
+  "ALL"/width=16/name="invclass" /keyelement=1.3
+  availclass_hf:countdate /keyelement=1.4
+  total[availclass_hf:readyrent,availclass_hf:countdate]/width=11/name="readyrent" 
+  total[availclass_hf:dueback,availclass_hf:countdate]/width=11/name="dueback" 
+  total[availclass_hf:reserved,availclass_hf:countdate]/width=11/name="reserved" 
+  total[availclass_hf:onrepair,availclass_hf:countdate]/width=11/name="onrepair" 
+  total[availclass_hf:duebackres,availclass_hf:countdate]/width=11/name="duebackres" 
+  total[availclass_hf:duebackrepair,availclass_hf:countdate]/width=11/name="duebackrepair" 
+  total[availclass_hf:noshowres,availclass_hf:countdate]/width=11/name="noshowres" 
+  total[availclass_hf:on_rent,availclass_hf:countdate]/width=11/name="onrent" 
+  total[availclass_hf:in_flt_curr,availclass_hf:countdate]/width=11/name="infltcurr" 
+  total[availclass_hf:in_flt_own,availclass_hf:countdate]/width=11/name="infltown"
+
+;
+run/parameterfile=projectavail_1
+
+/*------------------------------------------------------------------------
+ Calculate balance forward for all classes
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+
+  
+  number day_change = avail_hf:readyrent +
+    avail_hf:dueback +
+    avail_hf:duebackrepair +
+    avail_hf:duebackres -
+    avail_hf:reserved -
+    avail_hf:onrepair 
+
+
+  number day_change_bal = running total[day_change,avail_hf:invclass]
+  number nonegadj = if day_change < 0 then day_change_bal*-1 else 0
+  number normalized_bal = day_change_bal + running maximum[nonegadj,avail_hf:invclass]
+  number fltmaxadj = if normalized_bal > avail_hf:infltcurr then avail_hf:infltcurr-normalized_bal else 0
+  number bal_fwd = normalized_bal+fltmaxadj
+ 
+
+list/domain="avail_hf"/hold="netdata"
+
+  avail_hf:locationcode/keyelement=1.1 
+  avail_hf:product/keyelement=1.2 
+  avail_hf:invclass/keyelement=1.3
+  avail_hf:countdate/keyelement=1.4
+  avail_hf:readyrent/name="readyrent"
+  avail_hf:dueback/name="dueback"
+  avail_hf:reserved/name="reserved"
+  avail_hf:onrepair/name="onrepair"
+  avail_hf:duebackres/name="duebackres"
+  avail_hf:duebackrepair/name="duebackrepair"
+  avail_hf:noshowres/name="noshowres"
+  bal_fwd
+  avail_hf:onrent
+  avail_hf:infltcurr
+  avail_hf:infltown
+
+
+
+sorted by
+  avail_hf:locationcode
+  avail_hf:product
+  avail_hf:invclass
+  avail_hf:countdate
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Recursively calculate previous days avail
+------------------------------------------------------------------------*/
+define
+  date prev_date = netdata:countdate - 1
+
+  file prev_day = access netdata,
+   set netdata:locationcode=netdata:locationcode,
+   netdata:product=netdata:product,
+   netdata:invclass=netdata:invclass,
+   netdata:countdate=prev_date,
+   one to one,
+   zero fill on failure
+
+
+  number available = prev_day:bal_fwd + netdata:readyrent
+
+  number day_end = available +
+    netdata:dueback +
+    netdata:duebackrepair +
+    netdata:duebackres -
+    netdata:reserved -
+    netdata:onrepair 
+
+  number netavail = if day_end > 0 then netdata:bal_fwd else day_end
+
+  number over_book = if netavail < 0 then netavail*-1 else 0
+
+
+list/domain="netdata"/hold="net_data"
+  netdata:locationcode/keyelement=1.1 
+  netdata:product/keyelement=1.2 
+  netdata:invclass/keyelement=1.3
+  netdata:countdate/keyelement=1.4
+  netdata:readyrent/width=11
+  netdata:dueback /width=11
+  netdata:reserved/width=11 
+  netdata:onrepair/width=11 
+  netdata:duebackres/width=11 
+  netdata:duebackrepair/width=11 
+  netdata:noshowres/width=11 
+  netdata:onrent/width=11 
+  netdata:infltcurr/width=11 
+  netdata:infltown/width=11
+  available/width=11
+  netavail/width=11
+  netdata:bal_fwd/width=11
+  over_book/width=11
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Calculate class nets
+------------------------------------------------------------------------*/
+where net_data:invclass<>"ALL"
+sum/domain="net_data"/hold="net_final"
+  net_data:netavail/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode/width=20 
+  net_data:invclass /width=20
+  "Class Net"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Calculate daily net available
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:bal_fwd/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode/width=20 
+  net_data:invclass /width=20
+  "NetAvailable"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Calculate over-booking - Location
+------------------------------------------------------------------------*/
+where net_data:invclass<>"ALL" or net_data:locationcode <> "ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:over_book/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode/width=20 
+  "ALL"/name="invclass"/width=20
+  "OverBook"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Calculate over-booking - All Locations
+------------------------------------------------------------------------*/
+where net_data:invclass<>"ALL" or net_data:locationcode <> "ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:over_book/name="net_num"
+across
+  net_data:countdate 
+by
+  "ALL"/name="locationcode"/width=20 
+  "ALL"/name="invclass"/width=20
+  "OverBook"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+
+
+/*------------------------------------------------------------------------
+ Calculate available
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:available/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "Available"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+/*------------------------------------------------------------------------
+ Calculate reserved
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:reserved/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "Reserved"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+/*------------------------------------------------------------------------
+ Calculate dueback
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:dueback+net_data:duebackrepair/width=11/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "DueBack"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+/*------------------------------------------------------------------------
+ Calculate DB res
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:duebackres/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "DB Res"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+/*------------------------------------------------------------------------
+ Calculate On Rent
+------------------------------------------------------------------------*/
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+  net_data:onrent/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "OnRent"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+/*------------------------------------------------------------------------
+ On Order/Out fleet - future use
+------------------------------------------------------------------------*/
+--#where net_data:invclass="ALL"
+--#sum/domain="net_data"/hold="net_final"/append
+--#  net_data:onordercurrent*1/name="net_num"
+--#across
+--#  net_data:countdate 
+--#by
+--#  net_data:locationcode 
+--#  net_data:invclass/width=20
+--#  "In Fleet"/width=20/name="Status"
+--#;
+--#run/parameterfile=projectavail_1 
+
+--#where net_data:invclass="ALL"
+--#sum/domain="net_data"/hold="net_final"/append
+--#  net_data:outfleetcurrent*1/name="net_num"
+--#across
+--#  net_data:countdate 
+--#by
+--#  net_data:locationcode 
+--#  net_data:invclass/width=20
+--#  "Out Fleet"/width=20/name="Status"
+--#;
+--#run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Calculate total available fleet
+------------------------------------------------------------------------*/
+include "projectavail_i1.inc"
+where net_data:invclass="ALL"
+sum/domain="net_data"/hold="net_final"/append
+if cfleet="Current" then net_data:infltcurr else net_data:infltown/name="net_num"
+across
+  net_data:countdate 
+by
+  net_data:locationcode 
+  net_data:invclass/width=20
+  "AvailFleet"/width=20/name="Status"
+;
+run/parameterfile=projectavail_1 
+
+/*------------------------------------------------------------------------
+ Dynamically create output enquiry
+------------------------------------------------------------------------*/
+viewpoint native;
+
+  include "projectavail_i1.inc"
+define
+  number num_days = dtEdate - dtSdate
+
+  file counter_1 = access counter,
+   set counter:min = 0,
+   counter:max = num_days
+
+  date date_net = (dtSdate + counter_1:position)/mask="mm_dd_yy"
+
+  string dow = str(dayname(date_net),3)
+    
+list/nodefaults/noreporttotals/pagelength=0/domain="dummy"
+
+"  include 'projectavail_i1.inc'"/newline
+"define"/newline
+"  include 'special_events.cq'"/newline
+"  file sequence_link = access invclass,"/newline
+"    set invclass:invclass = net_final:invclass,"/newline
+"    one to one, null fill on failure"/newline
+
+"  number sort_order = switch(net_final:status)"/newline
+'    case "Class Net" : 1'/newline
+'    default : 2;'/newline
+'  number total_order = if net_final:locationcode = "ALL" then 2 else 1;'/newline
+
+"  number class_sort = switch(net_final:invclass)"/newline
+'    case "ALL" : 9999999'/newline
+"    default : sequence_link:classsequence;"/newline
+
+followed by
+
+  "number net_fleet_" + str(date_net,"mm_dd_yy") + '= if net_final:status  = "AvailFleet" then net_final:net_num_' + str(date_net,"mm_dd_yy")/newline
+ -- "number net_iu_" + str(date_net,"mm_dd_yy") + '= if net_final:status  = "UnAvailFleet" then net_final:net_num_' + str(date_net,"mm_dd_yy")/newline
+ -- "number net_iv_" + str(date_net,"mm_dd_yy") + '= net_fleet_' + str(date_net,"mm_dd_yy") + " - " + 'net_iu_' + str(date_net,"mm_dd_yy")/newline
+
+followed by
+
+  "number net_tot_" + str(date_net,"mm_dd_yy") + '= if net_final:status = "NetAvailable" then net_final:net_num_' + str(date_net,"mm_dd_yy") + " else 0"/newline
+
+followed by
+
+  "number net_over_" + str(date_net,"mm_dd_yy") + '= if net_final:status = "OverBook" then net_final:net_num_' + str(date_net,"mm_dd_yy") + " else 0"/newline
+
+
+followed by
+
+  "number net_or_" + str(date_net,"mm_dd_yy") + '= if net_final:status = "OnRent" then if net_final:net_num_' + str(date_net,"mm_dd_yy") +
+      " > 0 then " + 'net_final:net_num_' + str(date_net,"mm_dd_yy")+ " else 0 else 0"/newline
+
+
+
+followed by
+
+  'list/domain="net_final"/noreporttotals/nobanner/title="Projected Availability/Utilization Report"/pageof/pagelength=75'/newline
+  'if (net_final:status <> "OnRent" and net_final:status <> "AvailFleet" and net_final:status <> "UnAvailFleet" and net_final:status <> "NetAvailable" and net_final:status <> "OverBook") then {'/newline
+  --"net_final:locationcode"/newline
+  "net_final:invclass"/newline 
+  "net_final:status"/newline
+
+followed by
+
+  "net_final:net_num_" + str(date_net,"mm_dd_yy") + "/name=" + '"net_num_' + str(date_net,"mm_dd_yy") + '"'
+   + "/heading=" + '"' + dow + "-" + str(date_net,"dd mmm") + '"' + "/displaywidth=7"
+
+followed by
+""/newline
+"}"/newline
+"sorted by"/newline
+"  total_order"/newline
+"  net_final:locationcode/page"/newline
+"  sort_order"/newline
+"  class_sort"/newline
+""/newline
+"End of sort_order"/newline
+'""/newline'/newline
+
+followed by
+"Top of page"/newline
+  "'company_logo.jpg'/image/width=20/left/newline"/newline
+
+ 'box/center/column=1'/newline
+  '"Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline'/newline
+  '"Product: " + str(cProduct)+"   "'/newline
+  'if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline'/newline
+  '"Include Foreign Vehicles?: "+str(cforeign)+"   Include O/S Repairs?: "+str(cosflag)+"   UT% based on "+str(cfleet)+" Fleet"/newline'/newline
+  '"NoShow Factor%: "+str(ns_factor)/newline'/newline
+  'if special_events > 0 then str(special_events)+" Special Events Occur During this Date Range" else ""/newline'/newline
+  'if todaysdate - start_date > 1 then "*** Data is "+str(todaysdate-start_date)+" days old - Please run updater. ***" else ""/newline'/newline
+  'end box /newline=4'/newline
+
+followed by
+"top of net_final:locationcode"/newline
+  '"Location: " + str(net_final:locationcode)/newline=2'/newline
+
+
+
+followed by
+'end of net_final:locationcode'/newline
+  '"Net Available:"/align=net_final:status'/newline
+  "total[net_tot_" + str(date_net,"mm_dd_yy")+",sort_order]/displaywidth=7/align="+ 'net_num_' + str(date_net,"mm_dd_yy")/newline  
+
+followed by
+'""/newline=2'/newline
+  '"Over-Booked:"/align=net_final:status'/newline
+  "total[net_over_" + str(date_net,"mm_dd_yy")+",sort_order]/displaywidth=7/zerosuppress/align="+ 'net_num_' + str(date_net,"mm_dd_yy")  
+ 
+followed by
+'""/newline=2'/newline
+followed by
+'""/newline'/newline
+
+--#followed by
+--#""/newline
+--#'"Available Fleet:"'/newline
+--#"total[net_iv_" + str(date_net,"mm_dd_yy")+"]/align=net_num_" + str(date_net,"mm_dd_yy") + "/noheading"
+
+--#followed by
+--#'""/newline'/newline
+
+--#followed by
+--#""/newline
+--#'"Unavailable Fleet:"'/newline
+--#"total[net_iu_" + str(date_net,"mm_dd_yy")+"]/align=net_num_" + str(date_net,"mm_dd_yy") + "/noheading"
+
+--#followed by
+--#'""/newline=2'/newline
+
+followed by
+""/newline
+'"On Rent:"/align=net_final:status'/newline
+"total[net_or_" + str(date_net,"mm_dd_yy")+"]/displaywidth=7/align=net_num_" + str(date_net,"mm_dd_yy") + "/noheading"
+
+followed by
+'""/newline'/newline
+
+followed by
+""/newline
+'"Total Fleet:"/align=net_final:status'/newline
+"total[net_fleet_" + str(date_net,"mm_dd_yy")+"]/displaywidth=7/align=net_num_" + str(date_net,"mm_dd_yy") + "/noheading"
+
+followed by
+""/newline
+'""/newline=2'/newline
+
+--#followed by
+--#'"Available UT%:"'/newline
+--#'((total[net_or_' + str(date_net,"mm_dd_yy")+',sort_order]) divide total[net_iv_' + str(date_net,"mm_dd_yy")+'])* 100/mask="zz9.9%"/align=net_num_' + str(date_net,"mm_dd_yy") + "/noheading"
+
+--#followed by
+--#""/newline
+--#'""/newline=2'/newline
+
+followed by
+'"Total UT%:"/align=net_final:status'/newline
+'((total[net_or_' + str(date_net,"mm_dd_yy")+',sort_order]) divide total[net_fleet_' + str(date_net,"mm_dd_yy")+'])* 100/mask="zz9.9%"/displaywidth=7/align=net_num_' + str(date_net,"mm_dd_yy") + "/noheading"
+
+;
+
+run/parameterfile=projectavail_1 
+rreplace nets_detail
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native
+
+  include "nets_detail.cq"
+;
+replace projectavail.eq
+run/parameterfile=projectavail_1 projectavail.eq
+rrepl projectavail
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+ view projectavail
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Projected Availability/Utilization Report" -- Report Title
+   string rptname1    = "projectavail" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "projectavail_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,332 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Equipment Utilization Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/10/2019
+Modified:
+
+Notes:
+$Workfile: equiputil.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/equiputil.mf $
+$Revision: 1 $
+$History: equiputil.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 12/18/19   Time: 11:43a
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="equiptype"
+if itemnumber=1 then '"'+equiptype:equiptype+'"' else
+   ',"'+equiptype:equiptype+'"'
+
+sorted by
+   equiptype:equiptype
+top of report
+'string cequiptype[8192] = multivalue parameter prompt "Equipment Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_equiptype"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define 
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_equiptype.cq"
+  number inonrev = parameter/decimalplaces=0 prompt "Count as Non Rev After x Days? " default 7
+;
+replace equiputil_i1.inc
+
+
+/*------------------------------------------------------------------------
+ Copy equipment transactions and reindex - setup parameters
+------------------------------------------------------------------------*/
+include "equiputil_i1.inc"
+
+list/domain="equiptrx"/hold="equiptrx_hf"
+  equiptrx:equipid /keyelement=2.1
+  equiptrx:equiptype 
+  equiptrx:assetid /keyelement=1.1
+  equiptrx:serialnumber 
+  equiptrx:make 
+  equiptrx:model 
+  equiptrx:equipcolor 
+  equiptrx:description 
+  equiptrx:ownedlocationcode 
+  equiptrx:equipstatusout 
+  equiptrx:counterout 
+  equiptrx:commonid 
+  equiptrx:equiptrxid 
+  equiptrx:locationcodeout 
+  equiptrx:dateout /keyelement=3.1
+  equiptrx:timeout /keyelement=3.2
+  equiptrx:employeeout 
+  equiptrx:equipstatusin 
+  equiptrx:counterin 
+  equiptrx:locationcodein 
+  equiptrx:datein /keyelement=4.1
+  equiptrx:timein /keyelement=4.2
+  equiptrx:employeein 
+  equiptrx:locationcodedue 
+  equiptrx:datedue 
+  equiptrx:timedue 
+  equiptrx:dateadded 
+  equiptrx:timeadded 
+  equiptrx:returned 
+  equiptrx:invtrxid 
+  equiptrx:trxtypeout 
+  equiptrx:trxtypein 
+  equiptrx:trxorigin 
+  equiptrx:trxdate 
+  equiptrx:trxtime 
+  equiptrx:trxemp
+;
+replace equiputil_1.eq
+run/setparameter equiputil_1.eq
+
+run/parameterfile=equiputil_1 equiputil_1.eq
+
+/*------------------------------------------------------------------------
+ Calculate revenue days
+------------------------------------------------------------------------*/
+include "equiputil_i1.inc"
+define
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=equiptrx_hf:commonid,
+   one to one, zero fill on failure
+
+  date start_dt = if equiptrx_hf:dateout > rental_link:dateout then equiptrx_hf:dateout else rental_link:dateout
+  date start_date = if start_dt < dtsdate then dtsdate else start_dt
+  date end_dt = if (equiptrx_hf:datein = null and rental_link:datein = null) then dtedate else
+                   if (rental_link:datein = null) then equiptrx_hf:datein else rental_link:datein
+  date end_date = if end_dt > dtedate then dtedate else end_dt
+  
+
+  number rev_days = if rental_link:commonid = 0 then 0 else 
+                        if end_dt - start_date = 0 then 1 else end_dt - start_date
+Where
+     (EquipTrx:DateOut >= dtSDate AND EquipTrx:DateOut <= dtEDate) OR
+     (EquipTrx:DateIn <> null AND (EquipTrx:DateIn >= dtSDate AND EquipTrx:DateIn <= dtEDate)) OR
+     (EquipTrx:DateOut < dtSDate AND EquipTrx:DateIn = null)
+
+
+list/domain="equiptrx_hf"/nodetail/hold="equiprevdays_hf"
+  equiptrx_hf:equipid 
+  equiptrx_hf:assetid 
+  equiptrx_hf:locationcodeout 
+  equiptrx_hf:commonid
+  equiptrx_hf:trxtypeout
+  equiptrx_hf:dateout
+  equiptrx_hf:trxtypein
+  equiptrx_hf:datein
+  rental_link:ranumber
+  rental_link:dateout
+  rental_link:datein
+  start_dt
+  end_dt
+  rev_days
+
+ sorted by 
+
+  equiptrx_hf:locationcodeout
+  equiptrx_hf:equipid
+
+end of equiptrx_hf:equipid
+
+  equiptrx_hf:equipid/keyelement=1.1
+  equiptrx_hf:locationcodeout
+  total[rev_days,equiptrx_hf:equipid]/name="revdays"
+;
+run/parameterfile=equiputil_1
+
+/*------------------------------------------------------------------------
+ Find last rental date and ADD date
+------------------------------------------------------------------------*/
+where equiptrx_hf:trxtypein one of 2,4 
+
+list/domain="equiptrx_hf"/nodetail/hold="last_rental"
+  equiptrx_hf:equipid 
+  equiptrx_hf:dateout 
+  equiptrx_hf:datein 
+
+sorted by 
+  equiptrx_hf:equipid
+  equiptrx_hf:datein
+
+end of equiptrx_hf:equipid
+  equiptrx_hf:equipid /keyelement=1.1
+  equiptrx_hf:datein 
+;
+run/parameterfile=equiputil_1 
+
+where equiptrx_hf:trxorigin = "ADD" 
+
+list/domain="equiptrx_hf"/nodetail/hold="add_date"
+  equiptrx_hf:equipid  
+  equiptrx_hf:datein 
+
+sorted by 
+  equiptrx_hf:equipid
+  equiptrx_hf:datein
+
+end of equiptrx_hf:equipid
+  equiptrx_hf:equipid /keyelement=1.1
+  equiptrx_hf:datein
+;
+run/parameterfile=equiputil_1 
+
+/*------------------------------------------------------------------------
+ Calculate available days
+------------------------------------------------------------------------*/
+include "equiputil_i1.inc"
+define
+  file revday_link = access equiprevdays_hf,
+   set equiprevdays_hf:equipid=equip:equipid,
+   one to many, zero fill on failure
+  
+  file last_rent = access last_rental,
+   set last_rental:equipid=equip:equipid,
+   one to one,null fill on failure
+
+  file add_date = access add_date,
+   set add_date:equipid=equip:equipid,
+   one to one, null fill on failure
+
+  date st_date = if add_date:datein > dtsdate then add_date:datein else dtsdate
+  number avail_days = if dtedate - st_date = 0 then 1 else dtedate - st_date
+  
+
+list/domain="equip"/hold="equiputil"
+  equip:equipid 
+  equip:assetid 
+  equip:equiptype
+  equip:make 
+  equip:model
+  equip:equipstatus
+  equip:locationcode
+  revday_link:locationcodeout
+  revday_link:revdays
+  last_rent:datein/name="last_rent"
+  add_date:datein/name="add_date"
+  avail_days
+;
+run/parameterfile=equiputil_1  
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "equiputil_i1.inc"
+define
+  number nonrev = if ((todaysdate - equiputil:last_rent > inonrev) and equiputil:equipstatus <> 2) then 1 else 0
+
+where equiputil:equiptype = cequiptype or cequiptype = "ALL"
+
+list/domain="equiputil"/nodetail/nobanner/pageof/title="Equipment Utilization Report"/noreporttotals/noheadings
+  equiputil:equipid 
+  equiputil:assetid 
+  equiputil:revdays 
+  equiputil:last_rent 
+  equiputil:add_date 
+  equiputil:avail_days
+  nonrev
+
+sorted by
+  equiputil:locationcode
+
+end of equiputil:locationcode
+  equiputil:locationcode/name="a"
+  count[equiputil:equipid,equiputil:locationcode]/name="b"
+  total[equiputil:avail_days,equiputil:locationcode]/name="c"
+  total[equiputil:revdays,equiputil:locationcode]/name="d"
+  total[equiputil:revdays,equiputil:locationcode] divide total[equiputil:avail_days,equiputil:locationcode]/mask="ZZ9.99%"/name="e"
+  total[nonrev,equiputil:locationcode]/name="f"
+
+end of report
+  ""/newline
+  "Totals: "/align=a
+  count[equiputil:equipid,report]/align=b
+  total[equiputil:avail_days,report]/align=c
+  total[equiputil:revdays,report]/align=d
+  total[equiputil:revdays,report] divide total[equiputil:avail_days,report]/mask="ZZ9.99%"/align=e
+  total[nonrev,report]/align=f
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Unit is considered non rev at: " + str(inonrev) + " days: "/newline
+  "Types: " + str(cequiptype)
+  end box /newline=4
+
+  "Location" /align=a
+  "Avail Units" /align=b
+  "Avail Days" /align=c
+  "Revenue Days" /align=d
+  "Util%" /align=e
+  "NonRev" /align=f/newline
+;
+replace equiputil.eq
+run/parameterfile=equiputil_1 equiputil.eq
+rrepl equiputil
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view equiputil
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Equipment Utilization Report" -- Report Title
+   string rptname1    = "equiputil" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "equiputil_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

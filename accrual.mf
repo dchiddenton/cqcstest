@@ -1,0 +1,693 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Accrual Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/2/2017
+Modified:
+
+Notes:
+$Workfile: accrual.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/accrual.mf $
+$Revision: 2 $
+$History: accrual.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "As Of Date: " default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cselect = parameter prompt "Calc Accruals using: " valid "As-Of Date", "Due Date" default "As-Of Date"
+  string cselect2 = parameter/uppercase prompt "Pro-Rate to As-Of Date (Due Date Calc only)?: " valid "Y","N" default "Y"
+;
+replace accrual_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve contracts to accrue
+------------------------------------------------------------------------*/
+
+include "accrual_i1.inc"
+
+define
+  file rcmift_link = access rcmift,
+  set rcmift:commonid=rentaldb:commonid,one to many, 
+  generic,
+  null fill on failure
+
+  file renterlink = access renter,
+    set renter:renterid = rrm:renterid,
+    using first index,
+    one to one,
+    exact,
+    null fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+
+ 
+where (rrm:dateout <= dtSdate) and (rrm:rastatus=2 or (rrm:rastatus=3 and rrm:datein > dtSdate))
+     and (rrm:Product  = cProduct or cProduct = "ALL" )
+     and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+     and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/hold="accrual_1_hf"
+  rcmift_link:locationcode/keyelement=3.1 
+  rcmift_link:total /name="total_amt"
+  rcmift_link:type
+  rcmift_link:commonid/width=11/keyelement=1.1
+  rcmift_link:dateadded
+  rcmift_link:rptdate
+  rcmift_link:rptloccode/keyelement=2.1
+  rcmift_link:employeesoldby
+  rcmift_link:comm
+  rcmift_link:code
+  rcmift_link:chgunits
+  rcmift_link:chghours
+  rcmift_link:chgdays
+  rcmift_link:chgweeks
+  rcmift_link:chgmonths
+  rcmift_link:covded
+  rental_link:datein
+  rental_link:dateout
+  rental_link:datedue
+  rental_link:ranumber
+  rental_link:resnumber
+  rental_link:employeenumberout
+  rental_link:totaltpm
+  rental_link:taxamtsales
+  rental_link:rentaldiscountamt
+  renterlink:customerlastname
+  renterlink:systemid
+
+;
+replace accrual_1.eq
+run/setparameter accrual_1.eq
+
+run/parameterfile=accrual_1 accrual_1.eq
+
+/*------------------------------------------------------------------------
+ Create dummy holding record
+------------------------------------------------------------------------*/
+
+include "accrual_i1.inc"
+
+
+list/domain="dummy"/maxrecords=1/hold="accrual_1_hf"/append
+  
+  ""/width=20/name="locationcode"/keyelement=3.1 
+  0/width=14/decimalplaces=2/name="total_amt"
+  2/width=11/name="type"
+  0/width=11/name="commonid"/keyelement=1.1
+  dtsdate/name="dateadded"
+  dtsdate/name="rptdate"
+  ""/width=20/name="rptloccode"/keyelement=2.1
+  ""/width=20/name="employeesoldby"
+  0/width=4/name="comm"
+  ""/width=16/name="code"
+  0/width=14/decimalplaces=2/name="chgunits"
+  0/width=11/name="chghours"
+  0/width=11/name="chgdays"
+  0/width=11/name="chgweeks"
+  0/width=11/name="chgmonths"
+  0/width=14/decimalplaces=2/name="covded"
+  dtsdate/name="datein"
+  dtsdate/name="dateout"
+  dtsdate/name="datedue"
+  ""/width=20/name="ranumber"
+  ""/width=30/name="resnumber"
+  ""/width=20/name="employeenumberout"
+  0/width=14/decimalplaces=2/name="totaltpm"
+  0/width=14/decimalplaces=2/name="taxamtsales"
+  0/width=14/decimalplaces=2/name="rentaldiscountamt"
+  ""/width=50/name="customerlastname"
+  ""/width=20/name="systemid"
+
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  3/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  4/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  5/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  10/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  51/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+followed by
+
+  ""/width=20
+  0/width=14/decimalplaces=2
+  99/width=11
+  0/width=11
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=20
+  0/width=4
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=11
+  0/width=14/decimalplaces=2
+  dtsdate
+  dtsdate
+  dtsdate
+  ""/width=20
+  ""/width=30
+  ""/width=20
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  0/width=14/decimalplaces=2
+  ""/width=50
+  ""/width=20
+
+;
+run/parameterfile=accrual_1 
+
+/*------------------------------------------------------------------------
+ Consolidate data
+------------------------------------------------------------------------*/
+
+include "accrual_i1.inc"
+
+define
+
+string Charge_Type = switch(accrual_1_hf:type)
+  case 2 : "CDW"
+  case 3 : "PAC"
+  case 4 : "PEC"
+  case 5 : "SLI"
+  case 10,11 : "Fuel"
+  case 51,52,53 : "Taxes"
+  default : "Other"
+ 
+--where rrm:rastatus >1 and rrm:rastatus <4
+
+sum/domain="accrual_1_hf"/hold="accrual_2_hf"
+  accrual_1_hf:total_amt
+
+across charge_type/showall
+
+by
+accrual_1_hf:locationcode/name="location_code"
+accrual_1_hf:ranumber/keyelement=1.1
+accrual_1_hf:commonid/keyelement=2.1
+
+;
+run/parameterfile=accrual_1 
+
+/*------------------------------------------------------------------------
+ Retrieve deposit information
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+   file payments_link = access payments,
+    set payments:commonid=accrual_2_hf:commonid,
+    one to many, zero fill on failure
+
+   number auth_dep = if (payments_link:paiddeposit = 0 and payments_link:deposit = 1) then payments_link:paymentamount
+   number paid_dep = if (payments_link:paiddeposit = 1 and payments_link:deposit = 1) then payments_link:paymentamount
+
+list/domain="accrual_2_hf"/nodetail/hold="accrual_dep"
+  accrual_2_hf:ranumber
+  payments_link:paymentamount
+  payments_link:paiddeposit
+  payments_link:deposit
+
+sorted by accrual_2_hf:commonid
+
+end of accrual_2_hf:commonid/noheading
+ accrual_2_hf:commonid/keyelement=1.1
+ accrual_2_hf:ranumber
+ running total[auth_dep]/name="authdep"
+ running total[paid_dep]/name="paiddep"
+
+;
+run/parameterfile=accrual_1 
+
+/*------------------------------------------------------------------------
+ Consolidate and prorate revenue
+------------------------------------------------------------------------*/
+
+include "accrual_i1.inc"
+
+define
+    
+   date as_of_date = dtSdate
+
+
+  file chg_type = access accrual_2_hf,
+   set ranumber=accrual_1_hf:ranumber,
+   one to one, exact, 
+   zero fill on failure
+
+  file payments_link = access accrual_dep,
+   set accrual_dep:commonid=accrual_1_hf:commonid,
+   one to one,
+   zero fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=accrual_1_hf:commonid,
+   one to one, null fill on failure
+
+  file inv_link = access inv,
+   set inv:invid=rrm_link:invid,
+   one to one, null fill on failure
+
+  
+  date end_date = if accrual_1_hf:datein = null then accrual_1_hf:datedue else accrual_1_hf:datein
+
+  number days_elapsed = if (cselect = "Due Date" and ((end_date < as_of_date) or cselect2="N")) then
+   if(end_date - accrual_1_hf:dateout) < 1 then 1 else (end_date - accrual_1_hf:dateout)
+  else -- use As of Date
+   if(as_of_date - accrual_1_hf:dateout) < 1 then 1 else (as_of_date - accrual_1_hf:dateout)
+
+  number days_contracted = if (end_date - accrual_1_hf:dateout) < 1 then 1 else(end_date - accrual_1_hf:dateout)
+  proration_factor = days_elapsed divide days_contracted
+
+  number tpm = round(accrual_1_hf:totaltpm * proration_factor,2)
+  number cdw = round(chg_type:total_amt_cdw * proration_factor,2)
+  number pac = round(chg_type:total_amt_pac * proration_factor,2)
+  number pec = round(chg_type:total_amt_pec * proration_factor,2)
+  number sli = round(chg_type:total_amt_sli * proration_factor,2)
+  number tax = round(chg_type:total_amt_taxes * proration_factor,2)
+  number discount = round(accrual_1_hf:rentaldiscountamt * proration_factor,2)
+  number fuel = round(chg_type:total_amt_fuel * proration_factor,2)
+  number all_other = round(chg_type:total_amt_other * proration_factor,2)
+  
+  number overdue = as_of_date - accrual_1_hf:datedue
+
+  number tot_est = tpm + cdw + pac + pec +  sli - discount + fuel + tax + all_other
+  
+  number auth_deposit = payments_link:authdep
+
+  number paid_deposit = payments_link:paiddep
+
+  number outstanding = tot_est - paid_deposit
+  
+
+
+list/domain="accrual_1_hf"/hold="accrual_report_hf"
+days_contracted
+  accrual_1_hf:commonid
+  chg_type:location_code
+  accrual_1_hf:ranumber
+  inv_link:unitnumber
+  accrual_1_hf:customerlastname 
+  accrual_1_hf:dateout
+  accrual_1_hf:datein
+  accrual_1_hf:datedue 
+  tpm/mask="zzzzz9.99" 
+  cdw/mask="zzzzz9.99"
+  pac/mask="zzzzz9.99"
+  pec/mask="zzzzz9.99"
+  sli/mask="zzzzz9.99"
+  all_other/mask="zzzzz9.99"
+  tax/mask="zzzzz9.99"
+  tot_est/mask="zzzzz9.99"
+  accrual_1_hf:datedue 
+  days_elapsed/mask="zzzzz9" 
+  discount/mask="zzzzz9.99"
+  fuel/mask="zzzzz9.99"
+  auth_deposit/mask="zzzzz9.99"
+  paid_deposit/mask="zzzzz9.99"
+  overdue/mask="zzzzz9"
+  outstanding/mask="zzzzz9.99"
+  as_of_date
+
+sorted by
+accrual_1_hf:ranumber
+
+;
+run/parameterfile=accrual_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+include "accrual_i1.inc"
+
+define
+
+number tpmtot = if itemnumber[accrual_report_hf:ranumber] = 1 then tpm
+number cdwtot = if itemnumber[accrual_report_hf:ranumber] = 1 then cdw
+number pactot = if itemnumber[accrual_report_hf:ranumber] = 1 then pac
+number pectot = if itemnumber[accrual_report_hf:ranumber] = 1 then pec
+number slitot = if itemnumber[accrual_report_hf:ranumber] = 1 then sli
+number all_othertot = if itemnumber[accrual_report_hf:ranumber] = 1 then all_other
+number taxtot = if itemnumber[accrual_report_hf:ranumber] = 1 then tax
+number tot_esttot = if itemnumber[accrual_report_hf:ranumber] = 1 then tot_est
+number discounttot = if itemnumber[accrual_report_hf:ranumber] = 1 then discount
+number fueltot = if itemnumber[accrual_report_hf:ranumber] = 1 then fuel
+number deposittot = if itemnumber[accrual_report_hf:ranumber] = 1 then auth_deposit
+number paid_deposittot = if itemnumber[accrual_report_hf:ranumber] = 1 then paid_deposit
+number overduetot = if itemnumber[accrual_report_hf:ranumber] = 1 then overdue
+number outstandingtot = if itemnumber[accrual_report_hf:ranumber] = 1 then outstanding
+ 
+
+where accrual_report_hf:commonid <> 0
+
+list/nobanner/domain="accrual_report_hf"/title="Accrual Report"/noreporttotals/pageof/pagelength=70
+
+if itemnumber[accrual_report_hf:ranumber] = 1 then {
+
+  accrual_report_hf:ranumber/noheading/name="a"/column=1 
+  accrual_report_hf:dateout/noheading/name="b" /column=24
+  accrual_report_hf:unitnumber/noheading/name="c"/column=36
+  accrual_report_hf:tpm/noheading/name="d"/mask="z,zzz,zz9.99"/column=50/right 
+  accrual_report_hf:cdw/name="e"/noheading/mask="z,zzz,zz9.99"/column=65/right
+  accrual_report_hf:pac/name="f"/noheading/mask="z,zzz,zz9.99"/column=80/right
+  accrual_report_hf:pec/noheading/name="g" /mask="z,zzz,zz9.99"/column=95/right
+  accrual_report_hf:sli/name="h"/noheading/mask="z,zzz,zz9.99"/column=110/right
+  accrual_report_hf:all_other/name="i"/mask="z,zzz,zz9.99"/noheading/column=125/right
+  accrual_report_hf:outstanding/name="j"/noheading/mask="z,zzz,zz9.99"/column=140/right
+
+  accrual_report_hf:tax/name="k"/noheading/mask="z,zzz,zz9.99"/column=155/right
+  accrual_report_hf:tot_est/name="l"/noheading/mask="z,zzz,zz9.99"/column=170/right
+  
+  
+  ""/newline 
+  accrual_report_hf:customerlastname/noheading/align=a
+  accrual_report_hf:date_due/noheading/align=b 
+  accrual_report_hf:days_elapsed/align=c/noheading 
+  accrual_report_hf:discount/noheading/align=d/mask="z,zzz,zz9.99"
+  accrual_report_hf:fuel/noheading/align=e/mask="z,zzz,zz9.99"
+  accrual_report_hf:auth_deposit/align=f/mask="z,zzz,zz9.99"/noheading
+  accrual_report_hf:paid_deposit/align=g/mask="z,zzz,zz9.99"/noheading
+  accrual_report_hf:overdue/align=i/mask="z,zzz,zz9"/noheading
+--  accrual_report_hf:outstanding/align=j/mask="z,zzz,zz9.99"/noheading
+}
+sorted by
+accrual_report_hf:location_code/page
+accrual_report_hf:ranumber
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+"As of Date: " + str(as_of_date,"MM/DD/YYYY")/text/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+"Calc Overdue Accruals with: " + str(cselect)/text
+  end box/newlines=4
+
+  "RA#"/align=a
+  "Date Out"/align=b
+  "Unit#"/align=c
+  "T&M"/align=d
+  "CDW"/align=e
+  "PAC"/align=f
+  "PEC"/align=g
+  "SLI"/align=h
+  "Other"/align=i
+  "Outstanding"/align=j
+  "Taxes"/align=k
+  "Total Est"/align=l
+  
+  ""/newline
+  "Name"/align=a
+  "Date Due"/align=b
+  "Days"/align=c
+  "Discount"/align=d
+  "Fuel"/align=e
+  "Auth Dep"/align=f
+  "Paid Dep"/align=g
+  "Overdue"/align=i
+  ""/newlines=2
+  "Location: " + str(location_code)/newline
+
+
+
+End of accrual_report_hf:location_code
+""/newline
+  str(accrual_report_hf:location_code) + " Totals: "/align=a
+  str(count[days_elapsed])+" RA's"/noheading/align=c
+  total[tpmtot]/noheading/align=d/mask="z,zzz,zz9.99" 
+  total[cdwtot]/align=e/noheading/mask="z,zzz,zz9.99"
+  total[pactot]/align=f/noheading/mask="z,zzz,zz9.99"
+  total[pectot]/noheading/align=g/mask="z,zzz,zz9.99"
+  total[slitot]/align=h/noheading/mask="z,zzz,zz9.99"
+  total[all_othertot]/align=i/mask="z,zzz,zz9.99"/noheading
+  total[outstandingtot]/align=j/mask="z,zzz,zz9.99"/noheading
+  total[taxtot]/align=k/noheading/mask="z,zzz,zz9.99"
+  total[tot_esttot]/align=l/noheading/mask="z,zzz,zz9.99"
+  
+  
+  ""/newline 
+  str(total[days_elapsed]) + " Days"/align=c/noheading 
+  total[discounttot]/noheading/align=d/mask="z,zzz,zz9.99"
+  total[fueltot]/noheading/align=e/mask="z,zzz,zz9.99"
+  total[deposittot]/align=f/mask="z,zzz,zz9.99"/noheading
+  total[paid_deposittot]/align=g/mask="z,zzz,zz9.99"/noheading
+  total[overduetot]/align=i/mask="z,zzz,zz9"/noheading
+
+End of report
+""/newline
+  "Report Totals: "/align=a
+  str(count[days_elapsed])+" RA's"/noheading/align=c
+  total[tpmtot]/noheading/align=d/mask="z,zzz,zz9.99" 
+  total[cdwtot]/align=e/noheading/mask="z,zzz,zz9.99"
+  total[pactot]/align=f/noheading/mask="z,zzz,zz9.99"
+  total[pectot]/noheading/align=g/mask="z,zzz,zz9.99"
+  total[slitot]/align=h/noheading/mask="z,zzz,zz9.99"
+  total[all_othertot]/align=i/mask="z,zzz,zz9.99"/noheading
+  total[outstandingtot]/align=j/mask="z,zzz,zz9.99"/noheading
+  total[taxtot]/align=k/noheading/mask="z,zzz,zz9.99"
+  total[tot_esttot]/align=l/noheading/mask="z,zzz,zz9.99"
+  
+  
+  ""/newline 
+  str(total[days_elapsed]) + " Days"/align=c/noheading 
+  total[discounttot]/noheading/align=d/mask="z,zzz,zz9.99"
+  total[fueltot]/noheading/align=e/mask="z,zzz,zz9.99"
+  total[deposittot]/align=f/mask="z,zzz,zz9.99"/noheading
+  total[paid_deposittot]/align=g/mask="z,zzz,zz9.99"/noheading
+  total[overduetot]/align=i/mask="z,zzz,zz9"/noheading
+
+;
+replace accrual.eq
+run/parameterfile=accrual_1 accrual.eq
+rrepl accrual
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view accrual
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Accrual Report" -- Report Title
+   string rptname1    = "accrual" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "accrual_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

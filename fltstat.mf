@@ -1,0 +1,640 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Status Sheet Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/13/2017
+Modified:
+
+Notes:
+$Workfile: fltstat.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltstat.mf $
+$Revision: 3 $
+$History: fltstat.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 3/11/20    Time: 5:11p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel output formatting
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define 
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_invstatus.cq"
+  string idle_flag = parameter prompt "Idle by Last - Movement or Checkin: " valid "Movement","Checkin" default "Movement"
+  string inc_foreign = parameter/uppercase prompt "Include Foriegn Vehicles? " valid "Y","N" default "N"
+  string page_break = parameter/uppercase prompt "Page Break after each Status? " valid "Y","N" default "N"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+  string two_line = parameter/uppercase prompt "Additional Detail (incl Renter)? " valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by Status, Location, Unit, Movement: " valid "Status","Location","Unit","Movement", "Renter","Company","Owning Location" default "Status"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace fltstat_i1.inc
+/*------------------------------------------------------------------------
+ Determine inv records due for maintenance
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltstat_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file maint_link = access ima,
+    set ima:product= inv:product,
+    ima:unitnumber= inv:unitnumber,
+    one to many,
+    zero fill on failure
+  
+
+where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+      
+list/domain="inv"/nodetails/hold="fltstatmtn_hf"
+  inv:unitnumber 
+  if (maint_link:unitnumber = inv:unitnumber and (maint_link:nextdate <= todaysdate or (maint_link:nextodom-inv:odometer) <= 0))
+    then 1 else 0/name="maint"
+
+
+sorted by
+  inv:unitnumber
+
+end of inv:unitnumber
+  inv:unitnumber/keyelement=1.1
+  if total[maint] > 0 then "Y" else "N"/heading="mtn_flag"
+
+;
+replace fltstat_1.eq
+run/setparameter fltstat_1.eq
+
+run/parameterfile=fltstat_1 fltstat_1.eq
+
+/*------------------------------------------------------------------------
+ Create extra detail lines
+------------------------------------------------------------------------*/
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if two_line = "Y" then {
+  'inv:product /displaywidth=10 /name="aa"'/newline
+  'stat_desc:description /displaywidth=10 /name="bb"'/newline
+  'inv:currentfuellevel /displaywidth=4 /name="cc"'/newline
+  'if rrm_link:customerfirstname <> "" then rrm_link:customerlastname + ", " + rrm_link:customerfirstname else'/newline
+  'rrm_link:customerlastname/displaywidth=30/name="dd"'/newline
+  'inv:ownedlocationcode /displaywidth=10/name="ee"'/newline
+  'rrm_link:company /displaywidth=10/name="ff"'/newline
+  'inv:inservicedate/displaywidth=10 /name="gg"'/newline
+  'inv:soldto /displaywidth=10/name="hh"'/newline
+  'inv:datesold /displaywidth=12/name="ii"'/newline
+  'inv:salesprice /displaywidth=12/name="jj"'/newline
+};
+
+run/parameterfile=fltstat_1
+rrepl "fltstat_i2"
+
+/*------------------------------------------------------------------------
+ Set page break and sort details
+------------------------------------------------------------------------*/
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if csort = "Status" then {
+    if page_break = "Y" then {
+    "stat_desc:description/page/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+    }
+   else {
+    "stat_desc:description/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+   } 
+  }
+ if csort = "Location" then {
+    if page_break = "Y" then {
+    "inv:locationcode/page/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline 
+   }
+  else {
+    "inv:locationcode/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+   }
+  }
+  if (csort = "Owning Location") then {
+    if page_break = "Y" then {
+    "inv:ownedlocationcode/page/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline 
+    }
+   else {
+    "inv:ownedlocationcode/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+   }
+  }
+  if (csort = "Movement") then {
+    "inv:lastmovementdate/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+  }
+  if (csort = "Unit") then {
+    "inv:product/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+  }
+  if (csort = "Renter") then {
+    "inv:product/total/count/heading='@'"/newline
+    "rrm_link:customerlastname"/newline
+    "inv:unitnumber"/newline
+  }
+  if (csort = "Company") then {
+    "inv:product/total/count/heading='@'"/newline
+    "rrm_link:company"/newline
+    "inv:unitnumber"/newline
+  }
+
+;
+
+run/parameterfile=fltstat_1
+rrepl "fltstat_i3"
+
+/*------------------------------------------------------------------------
+ Set top of sections
+------------------------------------------------------------------------*/
+
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Status" then {
+  "Top of stat_desc:description"/newline
+  "'Status: '+str(stat_desc:description)/newline"/newline
+} else if csort = "Location" then {
+  "Top of inv:locationcode"/newline
+  "'Location: '+str(inv:locationcode)/newline"/newline
+} else if csort = "Owning Location" then {
+  "Top of inv:ownedlocationcode"/newline
+  "'Owning Location: '+str(inv:ownedlocationcode)/newline"/newline
+} else if csort = "Movement" then {
+  "Top of inv:lastmovementdate"/newline
+  "'Last Movement: '+str(inv:lastmovementdate)/newline"/newline
+} else {
+  "Top of inv:product"/newline
+  "'Unit: '+str(inv:product)/newline"/newline
+}
+;
+run/parameterfile=fltstat_1
+rrepl "fltstat_i4"
+
+/*------------------------------------------------------------------------
+ Create extra detail line headers
+------------------------------------------------------------------------*/
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if two_line = "Y" then {
+  '"Product" /align=aa'/newline
+  '"Status" /align=bb'/newline
+  '"Fuel" /align=cc'/newline
+  '"Renter" /align=dd'/newline
+  '"Owning Loc" /align=ee'/newline
+  '"Company" /align=ff'/newline
+  '"In Service" /align=gg'/newline
+  '"Sold to" /align=hh'/newline
+  '"Date Sold" /align=ii'/newline
+  '"Sales Price" /align=jj'/newline
+}
+;
+run/parameterfile=fltstat_1
+rrepl "fltstat_i5"
+
+/*------------------------------------------------------------------------
+ Set page length
+------------------------------------------------------------------------*/
+
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if two_line = "Y" then 
+ '/pagelength=120' else
+ '/pagelength=70'
+;
+
+run/parameterfile=fltstat_1
+rrepl "fltstat_i6"
+
+/*------------------------------------------------------------------------
+ Determine last rental date out
+------------------------------------------------------------------------*/
+
+include "fltstat_i1.inc"
+
+define
+
+
+   file invtrx_link = access invtrx,
+    set invtrx:product=inv:product,
+    invtrx:unitnumber=inv:unitnumber,
+    with invtrx:trxtypein = 2 or invtrx:trxtypein = 4,
+    sorted by invtrx:invtrxid/descending,
+    one to one,generic,reverse,null fill on failure
+
+where idle_flag="Checkin"
+
+list/domain="inv"/hold="fltstatrent_hf" 
+  inv:unitnumber 
+  inv:invid/keyelement=1.1
+  invtrx_link:invid
+  invtrx_link:invtrxid
+  invtrx_link:trxorigin
+  invtrx_link:trxtypein
+  invtrx_link:dateout
+  invtrx_link:datein
+
+;
+run/parameterfile=fltstat_1
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "fltstat_i1.inc"
+define 
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+   file invtrx_link = access fltstatrent_hf,
+    set fltstatrent_hf:invid=inv:invid,
+    one to one,generic, null fill on failure
+
+   file inv_stall = access readystall,
+    set readystall:invid=inv:invid,
+    one to one, generic, null fill on failure
+
+   file mtn_link = access fltstatmtn_hf,
+    set fltstatmtn_hf:unitnumber=inv:unitnumber,
+    one to one, generic, null fill on failure
+
+
+   file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+   file rrm_link = access rrm, 
+    set rrm:ranumber=inv:ranumber,
+    with rrm:rastatus=2,
+    one to one,exact, null fill on failure
+
+
+  string key_str = str(inv:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+   number idle_cdays = if idle_flag <> "Checkin" then 0 else if invtrx_link:dateout = null  then (todaysdate - inv:lastmovementdate) else 
+     if stat_desc:statustype one of 3,6 then (todaysdate - inv:lastmovementdate) else -- idle days from last checkin unless On Rent or Sold
+        (todaysdate - invtrx_link:datein)
+
+   number idle_mdays = todaysdate - inv:lastmovementdate
+
+   number idle_select = if idle_flag = "Movement" then idle_mdays else idle_cdays  
+
+   string idle_label = if idle_flag = "Movement" then "Last Movement Date" else "Last Check In"
+
+      
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+
+
+list/domain="inv"/nobanner/pageof/title="Fleet Status Report"/duplicates/noreporttotals/noheadings   include "fltstat_i6.cq"
+  inv:unitnumber/displaywidth=15 /name="a"
+  inv:licensenumber/displaywidth=10 /name="b"
+  inv:licensest/displaywidth=4 /name="c"
+  inv:year/displaywidth=4 /nocommas /name="d"
+  inv:make/displaywidth=12/name="e"
+  inv:model/displaywidth=12 /name="f"
+  inv:invclass/displaywidth=10 /name="g"
+  inv:unitcolor/displaywidth=10 /name="h"
+  inv:serialnumber/displaywidth=20 /name="i"
+  inv:locationcode/displaywidth=10 /name="j"
+  inv:odometer/displaywidth=10 /name="k"
+  mtn_link:mtn_flag/displaywidth=10 /center /name="l"
+  inv:ranumber/displaywidth=10 /name="m"
+  inv:datedue/displaywidth=12 /name="n"
+  idle_select/displaywidth=10 /name="o"
+  inv_stall:stall /displaywidth=10/name="p"
+  inv:lastmovementdate/hidden
+  idle_cdays/name="cdays"/hidden
+  idle_mdays/name="mdays"/hidden
+
+  include "fltstat_i2.cq"
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+sorted by
+
+include "fltstat_i3.cq"
+
+include "fltstat_i4.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Sorted by: "+str(csort) + "   Include Foreign Vehicles: " + str(inc_foreign)
+ end box/newlines=4
+
+  "Unit" /align=a
+  "License" /align=b
+  "St" /align=c
+  "Year" /align=d
+  "Make" /align=e
+  "Model" /align=f
+  "Class" /align=g
+  "Color" /align=h
+  "VIN" /align=i
+  "Location" /align=j
+  "Odom" /align=k
+  "Maint Due" /align=l
+  "RA#" /align=m
+  "Due Date" /align=n
+  "Idle Days" /align=o
+  "Stall" /align=p
+
+include "fltstat_i5.cq"
+
+""/newline
+
+end of report
+  ""/newline=2
+  count[inv:unitnumber,report]/right/align=b
+  " Total Units"/align=c/newline
+if idle_flag = "Checkin" then {
+  total[cdays]/right/align=b
+  " Idle Days Since Last Checkin" /align=c/newline
+ }
+  total[mdays]/right/align=b
+  " Idle Days Since Last Movement" /align=c
+
+;
+replace fltstat.eq
+
+/*------------------------------------------------------------------------
+ Output Report -Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+include "fltstat_i1.inc"
+define 
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+  string stat_str = stat_desc:description
+
+   file invtrx_link = access fltstatrent_hf,
+    set fltstatrent_hf:invid=inv:invid,
+    one to one,generic, null fill on failure
+
+   file inv_stall = access readystall,
+    set readystall:invid=inv:invid,
+    one to one, generic, null fill on failure
+
+   file mtn_link = access fltstatmtn_hf,
+    set fltstatmtn_hf:unitnumber=inv:unitnumber,
+    one to one, generic, null fill on failure
+
+
+   file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+   file rrm_link = access rrm, 
+    set rrm:ranumber=inv:ranumber,
+    with rrm:rastatus=2,
+    one to one,exact, null fill on failure
+
+   number idle_cdays = if idle_flag <> "Checkin" then 0 else if invtrx_link:dateout = null  then (todaysdate - inv:lastmovementdate) else 
+     if stat_desc:statustype one of 3,6 then (todaysdate - inv:lastmovementdate) else -- idle days from last checkin unless On Rent or Sold
+        (todaysdate - invtrx_link:datein)
+
+   number idle_mdays = todaysdate - inv:lastmovementdate
+
+   number idle_select = if idle_flag = "Movement" then idle_mdays else idle_cdays  
+
+   string idle_label = if idle_flag = "Movement" then "Last Movement Date" else "Last Check In"
+
+      
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+
+list/domain="inv"/nobanner/pagelength=0/title="Fleet Status Report"/duplicates/noreporttotals/noheadings   
+  inv:unitnumber/displaywidth=15 /name="a"
+  inv:licensenumber/displaywidth=10 /name="b"
+  inv:licensest/displaywidth=4 /name="c"
+  inv:year/displaywidth=4 /nocommas /name="d"
+  inv:make/displaywidth=12/name="e"
+  inv:model/displaywidth=12 /name="f"
+  inv:invclass/displaywidth=10 /name="g"
+  inv:unitcolor/displaywidth=10 /name="h"
+  inv:serialnumber/displaywidth=20 /name="i"
+  inv:locationcode/displaywidth=10 /name="j"
+  inv:odometer/displaywidth=10 /name="k"
+  mtn_link:mtn_flag/displaywidth=10 /center /name="l"
+  inv:ranumber/displaywidth=10 /name="m"
+  inv:datedue/displaywidth=12 /name="n"
+  idle_select/displaywidth=10 /name="o"
+  inv_stall:stall /displaywidth=10/name="p"
+  inv:lastmovementdate/hidden
+  idle_cdays/name="cdays"/hidden
+  idle_mdays/name="mdays"/hidden
+
+  include "fltstat_i2.cq"
+  stat_str/displaywidth=20/name="aaa"
+  inv:altid/displaywidth=15/name="bbb"
+  inv:financelocation/displaywidth=10/name="ccc"
+
+
+sorted by
+
+  switch(csort)
+    case "Status"          : stat_str
+    case "Location"        : inv:locationcode
+    case "Owning Location" : inv:ownedlocationcode
+    case "Movement"        : str(inv:lastmovementdate)
+    case "Unit"            : inv:product
+    case "Renter"          : rrm_link:customerlastname
+    case "Company"         : rrm_link:company
+
+    inv:unitnumber
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Sorted by: "+str(csort) + "   Include Foreign Vehicles: " + str(inc_foreign)
+ end box/newlines=4
+
+  "Unit" /align=a
+  "License" /align=b
+  "St" /align=c
+  "Year" /align=d
+  "Make" /align=e
+  "Model" /align=f
+  "Class" /align=g
+  "Color" /align=h
+  "VIN" /align=i
+  "Location" /align=j
+  "Odom" /align=k
+  "Maint Due" /align=l
+  "RA#" /align=m
+  "Due Date" /align=n
+  "Idle Days" /align=o
+  "Stall" /align=p
+
+include "fltstat_i5.cq"
+  "Description"/align=aaa
+  "Alt-ID"/align=bbb
+  "Finance Loc"/align=ccc
+
+
+
+end of report
+  ""/newline=2
+  count[inv:unitnumber,report]/right/align=b
+  " Total Units"/align=c/newline
+if idle_flag = "Checkin" then {
+  total[cdays]/right/align=b
+  " Idle Days Since Last Checkin" /align=c/newline
+ }
+  total[mdays]/right/align=b
+  " Idle Days Since Last Movement" /align=c
+;
+replace fltstat_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "fltstat_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=fltstat_1 fltstat.eq"/newline
+} else {
+"run/xls/parameterfile=fltstat_1 fltstat_xl.eq"/newline
+}
+"rrepl fltstat"/newline
+"view"/newline 
+;
+run/parameterfile=fltstat_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Status Sheet Report" -- Report Title
+   string rptname1    = "fltstat" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltstat_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

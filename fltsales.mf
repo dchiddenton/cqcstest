@@ -1,0 +1,239 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Sales Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/2/2018
+Modified:
+
+Notes:
+$Workfile: fltsales.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltsales.mf $
+$Revision: 2 $
+$History: fltsales.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="banks"
+if itemnumber=1 then '"'+banks:bankid+'"' else
+   ',"'+banks:bankid+'"'
+
+sorted by
+   banks:bankid
+top of report
+'string cbank[8192] = multivalue parameter prompt "Bank IDs: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_banks"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  include "param_banks.cq"
+  include "param_product.cq"
+  date dtsdate = parameter prompt "Satrting date: " default todaysdate-day(todaysdate)+1  
+  date dtedate = parameter prompt "Ending or Cutoff date: " default todaysdate-1
+  string csort = parameter prompt "Sorted by: " valid "Unit Number","Date Sold" default "Unit Number"
+;
+replace fltsales_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve sold inv records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltsales_i1.inc"
+define  
+
+  file bank_link = access banks,
+   set banks:bankid=invsold:bankid,
+   one to one, null fill on failure
+
+  string bank_id = if invsold:bankid = "" or invsold:bankid = "None" then "None" else
+        if (invsold:bankid <> "" and bank_link:bankid = null) then "Not on File" else invsold:bankid
+
+
+where 
+ (invsold:bankid = cBank or cBank = "ALL") and
+ (invsold:Product  = cProduct or cProduct = "ALL" ) and
+ (invsold:datesold >= dtsdate and invsold:datesold <= dtedate)
+
+
+list/domain="invsold"/hold="inv_hf"
+  invsold:invid/keyelement=1.1
+  invsold:unitnumber/keyelement=2.1
+  bank_id
+  invsold:product
+  invsold:year
+  invsold:make
+  invsold:model
+  invsold:invclass
+  invsold:serialnumber
+  invsold:ownedlocationcode
+  invsold:datesold
+  invsold:inservicedate
+  invsold:outservicedate
+  invsold:acquisitionprice
+  invsold:opaccumdep
+  invsold:remainingbalance
+  invsold:licenseamount
+  invsold:opaccumdeplic
+  invsold:salesprice
+  invsold:payoffdate
+  invsold:soldto
+
+;
+replace fltsales_1.eq
+run/setparameter fltsales_1.eq
+
+run/parameterfile=fltsales_1 fltsales_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltsales_i1.inc"
+ define  
+
+  number veh_book = inv_hf:acquisitionprice - inv_hf:opaccumdep
+  number lic_book = inv_hf:licenseamount - inv_hf:opaccumdeplic
+  number profit = inv_hf:salesprice - veh_book - lic_book
+
+  number iresult = if inv_hf:outservicedate <> null then inv_hf:outservicedate - inv_hf:inservicedate else  -- days in service
+                     if inv_hf:datesold <> null then inv_hf:datesold - inv_hf:inservicedate else 1
+
+  number deactualcost = round(((inv_hf:acquisitionprice - inv_hf:salesprice) divide iresult * 30.4),2)
+
+  string sort_str = if csort = "Unit Number" then "Product/Unit#" else "Date Sold"
+
+list/domain="inv_hf"/nobanner/noheadings/pageof/title="Fleet Sales Report"/count
+  inv_hf:product/displaywidth=10
+  inv_hf:unitnumber/displaywidth=10
+  inv_hf:ownedlocationcode/displaywidth=10
+  inv_hf:year/nocommas/displaywidth=4
+  inv_hf:model/displaywidth=10
+  inv_hf:acquisitionprice/displaywidth=12
+  inv_hf:inservicedate/displaywidth=12
+  inv_hf:remainingbalance/displaywidth=12
+  inv_hf:payoffdate/displaywidth=12
+  inv_hf:salesprice/displaywidth=12
+  inv_hf:datesold/displaywidth=12
+  inv_hf:opaccumdep/displaywidth=12
+  veh_book/displaywidth=12
+  lic_book/displaywidth=12
+  profit/displaywidth=12
+  deactualcost/displaywidth=12/newline
+
+  inv_hf:serialnumber/align=inv_hf:unitnumber/heading="VIN"/displaywidth=17/newline
+
+  inv_hf:soldto/align=inv_hf:unitnumber/heading="Sold To"/displaywidth=20 /newline 
+
+sorted by
+  inv_hf:bank_id/total/count/heading="Bank ID: @"/page
+  if csort = "Unit Number" then inv_hf:product
+  if csort = "Unit Number" then inv_hf:unitnumber
+  if csort = "Date Sold" then inv_hf:datesold
+
+top of inv_hf:bank_id
+  "Bank ID: "+str(inv_hf:bank_id)/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+  box/center/column=1
+
+   "Date Range: "+str(dtsdate)+" to "+str(dtedate)+"   Sorted by:"+str(sort_str)/newline
+   "Product: " + str(cProduct)+"   "
+   "Bank ID: " + str(cbank)/newline
+  end box /newline=4
+
+  "Product"/align=inv_hf:product
+  "Unit #"/align=inv_hf:unitnumber
+  "Own Loc"/align=inv_hf:ownedlocationcode
+  "Year"/align=inv_hf:year
+  "Model"/align=inv_hf:model 
+  "Purchase Amout"/align=inv_hf:acquisitionprice
+  "Purchase Date"/align=inv_hf:inservicedate
+  "Payoff Amount"/align=inv_hf:remainingbalance
+  "Payoff Date"/align=inv_hf:payoffdate
+  "Sale Amount"/align=inv_hf:salesprice
+  "Sale Date"/align=inv_hf:datesold
+  "Accum Depr"/align=inv_hf:opaccumdep
+  "Veh Book Value"/align=veh_book
+  "License Book"/align=lic_book
+  "Profit"/align=profit
+  "Cost/Month"/align=deactualcost/newline
+
+;
+replace fltsales.eq
+run/parameterfile=fltsales_1 fltsales.eq
+rrepl fltsales
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltsales
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Sales Report" -- Report Title
+   string rptname1    = "fltsales" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltsales_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,309 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Turnaround Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/30/2017
+Modified:
+
+Notes:
+$Workfile: turnaround.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/turnaround.mf $
+$Revision: 2 $
+$History: turnaround.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_invclass.cq"
+  string cunit = range parameter prompt "Enter Unit Range (Start..End or ALL): " default ALL
+  string csoldto = range parameter prompt "Enter Sold To Range (Start..End or ALL): " default ALL
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace turnaround_i1.inc
+/*------------------------------------------------------------------------
+ Retieve invsold records - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "turnaround_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:ownedlocationcode,
+    null fill on failure
+
+   file invtrx_link = access invtrx,
+    set invtrx:invid = invsold:invid,
+    with invtrx:trxtypeout=1
+
+
+where 
+ (invsold:Product  = cProduct or cProduct = "ALL" )
+  and (invsold:invclass = CClass or cClass = "ALL")
+  and (invsold:ownedlocationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (invsold:unitnumber = cunit or cunit = "ALL")
+  and (invsold:datesold >= dtsdate and invsold:datesold <= dtedate) 
+      
+list/domain="invsold"/nodetail/hold="turnaround_hf"
+
+  invsold:product
+  invsold:unitnumber
+  invsold:invid 
+
+
+sorted by
+  invsold:unitnumber
+  invtrx_link:datein
+
+end of invsold:unitnumber
+if (invsold:soldto = csoldto or csoldto = "ALL")then {
+  invsold:product
+  invsold:unitnumber
+  invsold:serialnumber
+  invsold:model
+  invsold:datesold
+  invsold:odometer
+  invsold:salesprice
+  invsold:soldto
+  invsold:invid 
+  invtrx_link:datein/name="checkin_date"
+}
+
+;
+replace turnaround_1.eq
+run/setparameter turnaround_1.eq
+
+run/parameterfile=turnaround_1 turnaround_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve inv records with sold dates
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "turnaround_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+   file invtrx_link = access invtrx,
+    set invtrx:invid = inv:invid,
+    with invtrx:trxtypeout=1
+    
+
+where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (inv:unitnumber = cunit or cunit = "ALL")
+  and (inv:datesold >= dtsdate and inv:datesold <= dtedate) 
+      
+list/domain="inv"/nodetail/hold="turnaround_hf"/append
+
+  inv:product
+  inv:unitnumber
+  inv:invid 
+
+sorted by
+  inv:unitnumber
+  invtrx_link:datein
+
+end of inv:unitnumber
+if (inv:soldto = csoldto or csoldto = "ALL")then {
+  inv:product
+  inv:unitnumber
+  inv:serialnumber
+  inv:model
+  inv:datesold
+  inv:odometer
+  inv:salesprice
+  inv:soldto
+  inv:invid 
+  invtrx_link:datein/name="checkin_date"
+}
+;
+run/parameterfile=turnaround_1
+
+/*------------------------------------------------------------------------
+ Create case statement for Inv statuses
+------------------------------------------------------------------------*/
+viewpoint native;
+
+list/domain="invstatus"/nobanner/nodefaults
+
+  'case ' str(invstatus:invstatus) + ' : "' + str(invstatus:description)+'"'
+
+top of report
+'string stat_desc = switch(invtrx_link:invstatin)'
+;
+run/parameterfile=turnaround_1 
+rreplace "turnaround_i2"
+;
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "turnaround_i1.inc"
+
+define
+
+   file invtrx_link = access invtrx,
+    set invtrx:invid = turnaround_hf:invid,
+    sorted by invtrx:dateout,
+    one to many
+   
+  include "turnaround_i2.cq"
+
+   number idle_days = if turnaround_hf:checkin_date = null then 0 else turnaround_hf:datesold - turnaround_hf:checkin_date
+
+
+list/domain="turnaround_hf"/nobanner/pageof/title="Turnaround Report"/duplicates/noreporttotals/noheadings/pagelength=120
+
+  turnaround_hf:datesold/displaywidth=10/name="a"
+  turnaround_hf:checkin_date/displaywidth=10 /name="b"
+  idle_days/displaywidth=6 /name="c"
+  turnaround_hf:unitnumber/displaywidth=15 /name="d"
+  turnaround_hf:serialnumber/displaywidth=20/name="e"
+  turnaround_hf:model/displaywidth=12 /name="f"
+  turnaround_hf:odometer/displaywidth=10 /name="g"
+  turnaround_hf:salesprice/displaywidth=12/decimalplaces=2 /name="h"
+  turnaround_hf:soldto/displaywidth=30 /name="i"/newline=2
+ if csummary = "Summary" then {""} else {
+  "Date"/displaywidth=10/column=15/name="aa"
+  "Type"/displaywidth=15/name="bb"
+  "Employee"/displaywidth=8/name="cc"
+  "Location"/displaywidth=10/name="dd"
+  "Odometer"/displaywidth=10/name="ee"
+  "Status"/displaywidth=15/name="ff"/newline
+}
+followed by
+if (invtrx_link:datein >= turnaround_hf:checkin_date and turnaround_hf:checkin_date <> null and csummary = "Detail") then {
+  invtrx_link:datein/align=aa
+  invtrx_link:trxorigin/align=bb
+  invtrx_link:employeenumberin/align=cc
+  invtrx_link:locationcodein/align=dd
+  invtrx_link:odometerin/align=ee
+  stat_desc/duplicates/align=ff
+}
+
+
+sorted by
+  turnaround_hf:unitnumber
+
+end of turnaround_hf:unitnumber
+  ""/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/displaywidth=100/newline
+  "Unit Range: " + str(cunit) + "   Sold to Range: " + str(csoldto)/displaywidth=100/newline
+  end box /newline=4
+
+
+  "Date Sold" /align=a
+  "Chkin Date" /align=b
+  "Idle" /align=c
+  "Unit" /align=d
+  "VIN" /align=e
+  "Model" /align=f
+  "Odometer" /align=g
+  "Sales Price" /align=h
+  "Sold to" /align=i/newline
+
+end of report
+  ""/newline
+  "Total Records: " + str(count[turnaround_hf:unitnumber,report])/newline
+  "Avg Idle Days: " + str(total[idle_days,report] div count[turnaround_hf:unitnumber,report])/newline
+
+;
+replace turnaround.eq
+run/parameterfile=turnaround_1 turnaround.eq
+rrepl turnaround
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view turnaround
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "turnaround" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "turnaround_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

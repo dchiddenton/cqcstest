@@ -1,0 +1,177 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2018.
+  All rights reserved.
+
+  Report: Parameter selection list creation
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+
+/*------------------------------------------------------------------------
+
+Created: 6/29/2018
+Modified:
+
+Notes:
+   
+$Workfile: parameters.mf $                              
+
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/parameters.mf $
+
+$Revision: 2 $
+
+$History: parameters.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+
+------------------------------------------------------------------------*/
+
+
+--#--retrieve Job parameters
+
+--#run parameters_1.eq
+
+--#rreplace jobparams
+
+-- setup phone mask based on customer settings
+
+define
+  
+ file sys_set = access systemsettings,
+    set systemsettings:dbid = "";
+
+  file country_link = access country,
+   set country:country=sys_set:defaultcountry;
+ 
+  string num_phone = replace(country_link:phoneformat,"X","9")
+
+  string phone_mask = '"'+num_phone+'"'
+
+list/domain="dummy"/nodefaults/nobanner/noendofreport
+if phone_mask <> "" then phone_mask else '"(999) 999-9999"'
+;
+run/parameterfile
+rrepl phone_mask
+
+-- setup date mask based on -dmy settings
+
+define
+  string jobparameters = include "jobparams.cq"
+  string dmy_format = trim(subfield(jobparameters,"|",4))
+  string date_mask = if dmy_format = "dmy" then '"dd/mm/yy"' else '"mm/dd/yy"'
+list/domain="dummy"/nodefaults/nobanner/noendofreport
+date_mask
+;
+run/parameterfile
+rrepl date_mask
+
+--Owned locations
+where location:owned = 1
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="location"
+if itemnumber=1 then '"'+location:locationcode+'"' else
+   ',"'+location:locationcode+'"'
+
+sorted by
+   location:locationcode
+top of report
+'string cloc[1024] = multivalue parameter prompt "Locations: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_loc"
+
+--All locations
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="location"
+if itemnumber=1 then '"'+location:locationcode+'"' else
+   ',"'+location:locationcode+'"'
+
+sorted by
+   location:locationcode
+top of report
+'string caloc[1024] = multivalue parameter prompt "Locations: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_aloc"
+
+--Group locations
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="locgroup"
+   '"'+locGroup:groupname+'",'
+
+sorted by
+   locGroup:groupname
+top of report
+'string clocgroup[1024] = parameter prompt "Location Group: "'
+"Valid "
+end of report
+'"" default ""'
+;
+run/parameterfile
+rrepl "param_locgroup"
+
+-- Products
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="product"
+if itemnumber=1 then '"'+product:product+'"' else 
+   ',"'+product:product+'"'
+
+sorted by
+   product:product
+top of report
+'string cproduct[1024] = multivalue parameter prompt "Products: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_product"
+
+-- Inventory Class
+where invclass:inactive = 0
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invclass"
+if itemnumber=1 then '"'+invclass:invclass+'"' else
+   ',"'+invclass:invclass+'"'
+
+sorted by
+   invclass:invclass
+top of report
+'string cclass[1024] = multivalue parameter prompt "Car Classes: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_invclass"
+
+-- Vehicle Status
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invstatus"
+if itemnumber=1 then '"'+invstatus:description+'"' else
+   ',"'+invstatus:description+'"'
+
+sorted by
+   invstatus:description
+top of report
+'string cstatus[1024] = multivalue parameter prompt "Inv Statuses: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_invstatus"

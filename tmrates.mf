@@ -1,0 +1,209 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Time and Mileage Rate List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/22/2019
+Modified:
+
+Notes:
+$Workfile: tmrates.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/tmrates.mf $
+$Revision: 2 $
+$History: tmrates.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="ratehead"
+if itemnumber=1 then '"'+ratehead:ratecode+'"' else
+   ',"'+ratehead:ratecode+'"'
+
+sorted by
+   ratehead:ratecode
+top of report
+'string cratecode[8192] = multivalue parameter prompt "Rate Codes: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_ratecode"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq" --comment
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_ratecode.cq"
+  string csort = parameter prompt "Sort by Location, Rate Code, Vehicle Class: " valid "Location","Rate Code","Vehicle Class" default "Location"
+
+;
+replace tmrates_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "tmrates_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = ratehead:locationcode,
+    null fill on failure
+
+  file rate_link = access rateline,
+    set rateline:rateid=ratehead:rateid,
+    one to many, null fill on failure
+
+  file rule_link = access raterule,
+   set raterule:ruleid=ratehead:ruleid,
+   one to one, null fill on failure
+
+  string on_sale = if ratehead:onsale = 1 then "Yes" else "No"
+  string VP = if rate_link:ovp = 1 then "Yes" else "No"
+  string assc_rate = if ratehead:assocratecode = "" then "None" else ratehead:assocratecode
+
+where 
+ (ratehead:Product  = cProduct or cProduct = "ALL" )
+  and (ratehead:invclass = cClass or cClass = "ALL")
+  and (ratehead:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (ratehead:ratecode = cratecode or cratecode = "ALL")
+
+list/domain="ratehead"/nobanner/noreporttotals/pagelength=70/duplicates/pageof/title="Time Mileage Rates List"
+
+box
+box/column=1/inline/width=30
+  ratehead:ratecode/displaywidth=20/heading="Rate Code"/newline
+  ratehead:product /displaywidth=20/heading=" Product"/newline
+  ratehead:rateplan/displaywidth=20/heading="    Plan"/newline
+  ratehead:chgmile/left /displaywidth=20/heading="Chg/Mile"/newline
+  rule_link:name /displaywidth=20/heading="    Rule"/newline
+end box
+
+box/column=30/inline/width=30
+  ratehead:description  /displaywidth=20/heading="  Desc."/newline
+  ratehead:locationcode /displaywidth=20/heading="   Loc."/newline
+  on_sale /displaywidth=20/heading="On Sale"/newline
+  ratehead:depositamount/left/displaywidth=20/heading="Deposit"/newline 
+  assc_rate /left /displaywidth=20/heading=" Assoc."/newline
+end box
+
+box/column=60/inline/width=20
+  ratehead:invclass /displaywidth=10/heading="  Class"/newline=3
+  ratehead:noshowcharge/left/displaywidth=10/heading="No-Show"/newline
+end box
+
+
+box/column=82/needs=10
+rate_link:description/displaywidth=10
+rate_link:rateper/displaywidth=10
+rate_link:units/displaywidth=5
+rate_link:timeunit/displaywidth=8
+rate_link:maxunits/displaywidth=5
+rate_link:type/displaywidth=8
+VP/displaywidth=5
+rate_link:ovlimit/displaywidth=10
+rate_link:freemi/displaywidth=10
+end box/newlines=2
+
+end box
+
+sorted by 
+
+  if csort = "Location" then ratehead:locationcode
+    else if csort = "Rate Code" then ratehead:ratecode
+      else ratehead:invclass
+
+  if csort = "Location" then ratehead:ratecode
+    else if csort = "Rate Code" then ratehead:locationcode
+      else ratehead:locationcode
+
+  if csort = "Location" then ratehead:invclass
+    else if csort = "Rate Code" then ratehead:invclass
+      else ratehead:ratecode
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Rate Codes: " + str(cratecode)/newline
+  end box /newline=4
+
+;
+replace tmrates_1.eq
+replace tmrates.eq
+run/setparameter tmrates_1.eq
+
+run/parameterfile=tmrates_1 tmrates_1.eq
+
+run/parameterfile=tmrates_1 tmrates.eq
+rrepl tmrates
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view tmrates
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Time and Mileage Rate List" -- Report Title
+   string rptname1    = "tmrates" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "tmrates_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

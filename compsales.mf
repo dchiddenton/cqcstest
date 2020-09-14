@@ -1,0 +1,503 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Company Sales Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/5/2018
+Modified:
+
+Notes:
+$Workfile: compsales.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/compsales.mf $
+$Revision: 2 $
+$History: compsales.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+define
+   number num_params = countfields(systemsettings:companycategory,",") 
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="systemsettings"
+  if i_counter:position <= num_params then
+     if itemnumber=1 then '"ALL"'
+     ',"'+subfield(systemsettings:companycategory,",",i_counter:position)+'"'
+
+
+sorted by
+   subfield(systemsettings:companycategory,",",i_counter:position)
+top of report
+'string ccategory[8192] = multivalue parameter prompt "Categories: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl param_category
+
+define
+  sales_rep = str(employee:employeefirstname) + " " + str(employee:employeelastname)
+  sales_repLast =  str(employee:employeelastname)+ " " + str(employee:employeefirstname)
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"ALL","NONE"'
+   ',"'+sales_rep+'"'
+
+sorted by
+   sales_repLast
+top of report
+'string csalesrep[8192] = multivalue parameter prompt "Sales Rep: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl param_salesrep
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string ccomprange = range parameter prompt "Company Range (Start..End or ALL): " default ALL
+  include "param_salesrep.cq"
+  include "param_category.cq"
+  date dtsdaterent = parameter prompt "Last Rental Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedaterent = parameter Prompt "Last Rental Ending Date"  error "Error: End date < Start date"  if dtEdaterent < dtSdaterent default todaysdate
+  date dtsdateclose = parameter prompt "Contracts Closed Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedateclose = parameter Prompt "Contracts Closed Ending Date"  error "Error: End date < Start date" if dtEdateclose < dtSdateclose default todaysdate
+  number crentals = range parameter prompt "Enter # Rentals Range (Min..Max or ALL): " default ALL
+  number crevenue = range parameter prompt "Enter Revenue $ Range (Min..Max or ALL): " default ALL
+  string csort = parameter valid "Company Name","Sales Rep","Follow-up Date" prompt "Sorted By:" default "Company Name"
+;
+replace compsales_i1.inc
+
+/*------------------------------------------------------------------------
+ Get applicable company records
+------------------------------------------------------------------------*/
+
+include "compsales_i1.inc"
+
+  
+where company:company = ccomprange or ccomprange = "ALL"
+
+list/domain="company"/hold="compsales1_hf"
+if ((company:salesrep = csalesrep or csalesrep = "ALL") and (company:category = ccategory or ccategory = "ALL")) then {
+company:company/keyelement=1.1
+company:salesrep
+company:category
+company:followupdate
+}
+
+;
+replace compsales_1.eq
+run/setparameter compsales_1.eq
+
+run/parameterfile=compsales_1 compsales_1.eq
+
+/*------------------------------------------------------------------------
+ Create dynamic include files
+------------------------------------------------------------------------*/
+include "compsales_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Sales Rep" then {
+'sorted by'/newline
+  'compsales1_hf:salesrep'/newline
+
+'end of compsales1_hf:salesrep'/newline
+  '""/newline'/newline
+  'str(compsales1_hf:salesrep) +" Totals: "'/newline
+  'total[rev_link:numra,compsales1_hf:salesrep]/align=rev_link:numra'/newline
+  'total[rev_link:tottpm,compsales1_hf:salesrep]/align=rev_link:tottpm'/newline
+  'total[rev_link:totcdw,compsales1_hf:salesrep]/align=rev_link:totcdw'/newline
+  'total[rev_link:totupg,compsales1_hf:salesrep]/align=rev_link:totupg'/newline
+  'total[rev_link:totpec,compsales1_hf:salesrep]/align=rev_link:totpec'/newline
+  'total[rev_link:totpac,compsales1_hf:salesrep]/align=rev_link:totpac'/newline
+  'total[rev_link:totsli,compsales1_hf:salesrep]/align=rev_link:totsli'/newline
+  'total[rev_link:totfuel,compsales1_hf:salesrep]/align=rev_link:totfuel'/newline
+  'total[rev_link:totother,compsales1_hf:salesrep]/align=rev_link:totother'/newline
+  'total[tot_rev,compsales1_hf:salesrep]/align=tot_rev/newline'/newline
+}
+else if csort = "Follow-up Date" then {
+'sorted by'/newline
+  'compsales1_hf:followupdate'/newline
+
+'end of compsales1_hf:followupdate'/newline
+  '""/newline'/newline
+  'str(compsales1_hf:followupdate) +" Totals: "'/newline
+  'total[rev_link:numra,compsales1_hf:followupdate]/align=rev_link:numra'/newline
+  'total[rev_link:tottpm,compsales1_hf:followupdate]/align=rev_link:tottpm'/newline
+  'total[rev_link:totcdw,compsales1_hf:followupdate]/align=rev_link:totcdw'/newline
+  'total[rev_link:totupg,compsales1_hf:followupdate]/align=rev_link:totupg'/newline
+  'total[rev_link:totpec,compsales1_hf:followupdate]/align=rev_link:totpec'/newline
+  'total[rev_link:totpac,compsales1_hf:followupdate]/align=rev_link:totpac'/newline
+  'total[rev_link:totsli,compsales1_hf:followupdate]/align=rev_link:totsli'/newline
+  'total[rev_link:totfuel,compsales1_hf:followupdate]/align=rev_link:totfuel'/newline
+  'total[rev_link:totother,compsales1_hf:followupdate]/align=rev_link:totother'/newline
+  'total[tot_rev,compsales1_hf:followupdate]/align=tot_rev/newline'/newline
+}
+else {""}
+;
+run/parameterfile=compsales_1
+rrepl compsales_i2
+
+/*------------------------------------------------------------------------
+ Retrieve contract information and charges
+------------------------------------------------------------------------*/
+ 
+include "compsales_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file rcmift_link = access rcmift,
+  set rcmift:commonid=rrm:commonid,
+  one to many, generic,
+  null fill on failure
+
+
+
+where (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and 
+      rrm:rastatus = 3 and
+      (rrm:datein >= dtsdateclose and rrm:datein <= dtedateclose)
+ 
+
+
+list/domain="rrm"/hold="compsales2_hf"
+  rrm:commonid/width=11/keyelement=1.1
+  rrm:ranumber/width=20
+  rrm:company/width=60
+  rrm:dateout/width=10
+  rrm:locationcodeout/width=25
+  rcmift_link:type/width=11
+  rcmift_link:total/width=14/decimalplaces=2/name="total_amt"
+  rcmift_link:rev/width=4
+
+;
+run/parameterfile=compsales_1 
+
+/*------------------------------------------------------------------------
+ Add dummy records for place holding of all rev types
+------------------------------------------------------------------------*/
+     
+list/domain="rrm"/maxrecords=1/hold="compsales2_hf"/append
+  rrm:commonid/width=11/keyelement=1.1
+  rrm:ranumber/width=20
+  rrm:company/width=60
+  rrm:dateout/width=10
+  rrm:locationcodeout/width=25
+  2/width=11/name="type"
+  0/width=14/decimalplaces=2/name="total_amt"
+  0/width=4/name="rev"
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  3/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  4/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  5/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  8/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  10/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  2/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  rrm:company
+  rrm:dateout
+  rrm:locationcodeout
+  99/width=11
+  0/width=14
+  0/width=4
+
+;
+run/parameterfile=compsales_1 
+
+/*------------------------------------------------------------------------
+ Summarize revenue items
+------------------------------------------------------------------------*/
+
+define
+
+  string chgtype = switch(compsales2_hf:type)
+    case 2 : "CDW"
+    case 3 : "PAC"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 8 : "UPG"
+    case 10,11,12 : "Fuel"
+    default : "Other"
+
+
+sum/domain="compsales2_hf"/hold="compsales3_hf"
+  compsales2_hf:total_amt
+
+across chgtype/showall
+
+by
+  compsales2_hf:locationcodeout
+  compsales2_hf:company
+  compsales2_hf:ranumber
+  compsales2_hf:dateout
+  compsales2_hf:commonid/keyelement=1.1
+
+;
+run/parameterfile=compsales_1 
+
+/*------------------------------------------------------------------------
+ Consolidate revenue by company for final report output
+------------------------------------------------------------------------*/
+ 
+define
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=compsales3_hf:commonid,
+   one to one, zero fill on failure
+
+  number tpm = rental_link:totaltpm - rental_link:rentaldiscountamt
+
+
+list/domain="compsales3_hf"/nodetail/hold="compsales4_hf"
+  compsales3_hf:company
+  compsales3_hf:ranumber/hidden
+  tpm
+  compsales3_hf:total_amt_cdw
+  compsales3_hf:total_amt_pac
+  compsales3_hf:total_amt_other
+  compsales3_hf:total_amt_pec
+  compsales3_hf:total_amt_sli
+  compsales3_hf:total_amt_upg
+  compsales3_hf:total_amt_fuel
+  compsales3_hf:dateout
+
+sorted by 
+compsales3_hf:locationcodeout
+compsales3_hf:company
+compsales3_hf:dateout
+
+
+end of compsales3_hf:company
+  compsales3_hf:company/keyelement=1.1
+  compsales3_hf:locationcodeout
+  total[tpm]/name="tottpm"
+  total[compsales3_hf:total_amt_cdw,compsales3_hf:company]/name="totcdw"
+  total[compsales3_hf:total_amt_pac,compsales3_hf:company]/name="totpac"
+  total[compsales3_hf:total_amt_other,compsales3_hf:company]/name="totother"
+  total[compsales3_hf:total_amt_pec,compsales3_hf:company]/name="totpec"
+  total[compsales3_hf:total_amt_sli,compsales3_hf:company]/name="totsli"
+  total[compsales3_hf:total_amt_upg,compsales3_hf:company]/name="totupg"
+  total[compsales3_hf:total_amt_fuel,compsales3_hf:company]/name="totfuel"
+  count[compsales3_hf:ranumber,compsales3_hf:company]/name="numra"
+  compsales3_hf:dateout/name="lastrental"
+
+;
+run/parameterfile=compsales_1 
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "compsales_i1.inc"
+
+define
+   file rev_link = access compsales4_hf,
+    set compsales4_hf:company=compsales1_hf:company,
+    one to one,zero fill on failure
+
+   file emp_link = access employee,
+    set employee:employeenumber=compsales1_hf:salesrep,
+    one to one, null fill on failure
+
+   string sales_rep = str(emp_link:employeefirstname) + " " + str(emp_link:employeelastname)
+
+   number tot_rev = rev_link:tottpm+rev_link:totcdw+rev_link:totupg+rev_link:totpec
+                    +rev_link:totpac+rev_link:totsli+rev_link:totfuel+rev_link:totother
+
+where (rev_link:lastrental >= dtsdaterent and rev_link:lastrental <= dtedaterent) and
+      (tot_rev = crevenue) and
+      (rev_link:numra = crentals) and
+      (csalesrep = sales_rep or csalesrep = "ALL" or (csalesrep = "NONE" and compsales1_hf:salesrep = "None")) 
+
+list/domain="compsales1_hf"/nobanner/pageof/title="Company Sales Report"/noreporttotals/noheadings
+  rev_link:locationcodeout
+  compsales1_hf:company 
+  if compsales1_hf:salesrep ="None" then compsales1_hf:salesrep else sales_rep/displaywidth=30/name="a"
+  rev_link:lastrental
+  compsales1_hf:followupdate
+  rev_link:numra
+  rev_link:tottpm
+  rev_link:totcdw
+  rev_link:totupg
+  rev_link:totpec
+  rev_link:totpac
+  rev_link:totsli
+  rev_link:totfuel
+  rev_link:totother
+  tot_rev/newline
+  compsales1_hf:category
+
+include "compsales_i2.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Last Rental from: "+str(dtsdaterent)+" to "+str(dtedaterent)/newline
+  "Contracts Closed from: "+str(dtsdateclose)+" to "+str(dtedateclose)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Categories: " + str(ccategory)/displaywidth=100/newline
+  end box /newline=4
+ 
+
+  "Location"/align=rev_link:locationcodeout
+  "Company"/align=compsales1_hf:company 
+  "Sales Rep"/align=a
+  "Last Rental"/align=rev_link:lastrental
+  "Follow Up"/align=compsales1_hf:followupdate
+  "Rentals"/align=rev_link:numra
+  "T&M"/align=rev_link:tottpm
+  "CDW"/align=rev_link:totcdw
+  "UPG"/align=rev_link:totupg
+  "PEC"/align=rev_link:totpec
+  "PAC"/align=rev_link:totpac
+  "SLI"/align=rev_link:totsli
+  "Fuel"/align=rev_link:totfuel
+  "Other"/align=rev_link:totother
+  "Total"/align=tot_rev/newline
+  "Categories"/align=compsales1_hf:category 
+  "Date"/align=compsales1_hf:followupdate
+
+
+end of report
+  ""/newline
+  "Report Totals: "
+  total[rev_link:numra,report]/align=rev_link:numra
+  total[rev_link:tottpm,report]/align=rev_link:tottpm
+  total[rev_link:totcdw,report]/align=rev_link:totcdw
+  total[rev_link:totupg,report]/align=rev_link:totupg
+  total[rev_link:totpec,report]/align=rev_link:totpec
+  total[rev_link:totpac,report]/align=rev_link:totpac
+  total[rev_link:totsli,report]/align=rev_link:totsli
+  total[rev_link:totfuel,report]/align=rev_link:totfuel
+  total[rev_link:totother,report]/align=rev_link:totother
+  total[tot_rev,report]/align=tot_rev/newline
+;
+replace compsales.eq
+ run/parameterfile=compsales_1 compsales.eq
+rrepl compsales
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view compsales
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Company Sales Report" -- Report Title
+   string rptname1    = "compsales" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "compsales_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,278 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Loaner Vehicle Usage Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/15/2017
+Modified:
+
+Notes:
+$Workfile: loanerusage.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/loanerusage.mf $
+$Revision: 2 $
+$History: loanerusage.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtSdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string crange = range parameter prompt "Enter Unit# Range (Start..End or ALL): " default ALL
+  string ra_type = parameter valid "ALL", "Open", "Closed" prompt "Open, Closed or ALL Contracts: " default "ALL"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace loanerusage_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters - Ouput report
+------------------------------------------------------------------------*/
+
+viewpoint native;
+
+
+ include "loanerusage_i1.inc"
+
+define
+
+    file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file system_link = access systemsettings,
+    set systemsettings:dbid="",
+    approximate
+
+  number ra_stat_inp = switch(ra_type)
+    case "Open" : 2
+    case "Closed" : 3
+    default : 3
+
+
+  number work_days = working_days_between(dtSdate,dtEdate)
+
+  file inv_to_rrm = access invtrx,
+    set invtrx:ranumber=rrm:ranumber,
+    one to one,generic,
+    null fill on failure
+
+  
+  number ra_mile = if rrm:rastatus = 2 then 0 else (inv_to_rrm:odometerin - inv_to_rrm:odometerout)
+  
+  string ra_stat = if rrm:rastatus = 2 then "Open" else "Closed"
+  
+  number closed_count = if rrm:rastatus = 3 then 1 else 0
+  
+  number now_time = val(str(systemtime,"hh.mm"))
+  
+  number ra_time_in = if rrm:rastatus = 2 then (now_time div 1) + ((now_time - (now_time div 1)) divide 0.6) else
+   (rrm:timein div 1) + ((rrm:timein - (rrm:timein div 1)) divide 0.6)
+  
+  number ra_time_out = (rrm:timeout div 1) + ((rrm:timeout - (rrm:timeout div 1) ) divide 0.6)
+  
+  number ra_hours_bal = ra_time_in - ra_time_out
+  
+  number ra_days = if rrm:rastatus = 2 then round(((todaysdate - rrm:dateout) + (ra_hours_bal divide 24)),1) else
+   round(((rrm:datein - rrm:dateout) + (ra_hours_bal divide 24)),1)
+  
+  number ra_days_closed = if rrm:rastatus = 3 then ra_days else 0
+
+  number ra_closed_days = round(ra_days_closed,0)
+  
+  number ra_hours = if rrm:rastatus = 2 then round(((todaysdate-rrm:dateout)*24) + ra_hours_bal,1) else
+   round(((rrm:datein-rrm:dateout)*24) + ra_hours_bal,1)
+  
+  number ra_hours_closed = if rrm:rastatus = 3 then ra_hours else 0
+  
+where 
+  ( rrm:dateout >= dtSdate and rrm:dateout <= dtEdate )
+  and (rrm:rastatus = ra_stat_inp or (ra_type = "ALL" and (rrm:rastatus=2 or rrm:rastatus=3)))
+  and (rrm:locationcodeout = cLoc)
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:product=cproduct)
+  and (rrm:invclass = cClass)
+  and (inv_to_rrm:unitnumber = crange) 
+  and (rrm:sourcecode = system_link:dftloanersource)
+ 
+
+list/title="Loaner Vehicle Usage Report"/noheadings/noendofreport/noreporttotals/nobanner/domain="rrm"/pageof/pagelength=100
+if csummary = "Detail" then {
+  rrm:ranumber/displaywidth=10/name="a" 
+  rrm:customerlastname  + ", " + rrm:customerfirstname/displaywidth=30/name="b" 
+  ra_stat/displaywidth=10/name="c" 
+  rrm:dateout/name="d" 
+  rrm:timeout/displaywidth=5/name="e" 
+  rrm:datein/name="f" 
+  rrm:timein/displaywidth=5/name="g" 
+  ra_mile/displaywidth=10/name="h" 
+  ra_hours/displaywidth=5/name="i" 
+  ra_days/displaywidth=5/name="j" 
+  rrm:agentid/displaywidth=10/name="k"
+}
+
+sorted by
+  inv_to_rrm:unitnumber/newline
+
+
+top of inv_to_rrm:unitnumber 
+  inv_to_rrm:unitnumber/heading="Unit"/newline
+  inv_to_rrm:serialnumber/noheading/newline
+  str(inv_to_rrm:year) + " " + str(inv_to_rrm:make) + " " + str(inv_to_rrm:model)/newline
+
+
+end of inv_to_rrm:unitnumber 
+  count[rrm:ranumber]/heading="RA count"/align=a
+  total[ra_closed_days]/heading="Closed Days"/align=f
+  total[ra_mile]/align=h
+  total[ra_hours]/align=i
+  total[ra_days]/align=j
+
+
+
+end of report 
+  ""/newline
+  "Grand Total:"
+  count[inv_to_rrm:unitnumber]
+  count[rrm:ranumber]/heading="RA count "/align=c
+  total[ra_closed_days]/heading="Closed Days"/align=f
+  total[ra_mile]/align=h
+  total[ra_hours]/align=i
+  total[ra_days]/align=j/newline
+  ""/newpage
+box
+  ""/newline=2
+  "Utilization Summary:"/newlines=2
+  "Total Rented Fleet"/column=1
+  count[inv_to_rrm:unitnumber]/noheading/column=40/width=12/right/newline
+  "Working Days in Period"/column=1
+  work_days/noheading/column=40/width=12/right/newline
+  "Total Possible Car Days"/column=1
+  count[inv_to_rrm:unitnumber] * work_days/noheading/column=40/width=12/right/newline
+
+  "Available Car Days"/column=1
+  (count[inv_to_rrm:unitnumber] * work_days)-(running total[ra_closed_days,report])/noheading/column=40/width=12/right/newline
+
+  "Days on Contract"/column=1
+  total[ra_days]/noheading/column=40/width=12/right/newline
+  "Total Utilization"/column=1
+  round((total[ra_days] divide (count[inv_to_rrm:unitnumber] * work_days)*100),1)/noheading/column=40/width=12/right/newlines=2
+  "Total Contracts in Period"/column=1
+  count[rrm:ranumber]/noheading/column=40/width=12/right/newline
+  "Total Closed Contracts"/column=1
+  running total[closed_count,report]/noheading/column=40/width=12/right/newline
+  "Average Days per Contract"/column=1
+  round(total[ra_days] divide count[rrm:ranumber],1)/noheading/column=40/width=12/right/newline
+  "Average Days per Closed Contract"/column=1
+  round(running total[ra_days_closed,report] divide running total[closed_count,report],1)/noheading/column=40/width=12/right/newline
+  "Total Contract Miles"/column=1
+  running total[ra_mile,report]/noheading/column=40/width=12/right/newline
+  "Average Miles per Closed Contract"/column=1
+  round(running total[ra_mile,report] divide running total[closed_count,report],1)/noheading/column=40/width=12/right/newline
+  "Total Contract Hours"/column=1
+  total[ra_hours]/noheading/column=40/width=12/right/newline
+  "Average Hours per Contract"/column=1
+  round(total[ra_hours] divide count[rrm:ranumber],1)/noheading/column=40/width=12/right/newline
+  "Average Hours per Closed Contract"/column=1
+  round(running total[ra_hours_closed,report] divide running total[closed_count,report],1)/noheading/column=40/width=12/right/newline
+end box
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+  box/center/column=1
+  "Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct) /newline
+  "Vehicle Classes: "+str(cclass)/displaywidth=100/newline
+  "Unit Range: " + str(crange)/displaywidth=100
+end box/newlines=4
+  
+  "RA#"/align=a
+  "Renter Name"/align=b
+  "Contract Status"/align=c
+  "Date Out"/align=d
+  "Time Out"/align=e
+  "Date In"/align=f
+  "Time In"/align=g
+  "Miles"/align=h
+  "Hours"/align=i
+  "Days"/align=j
+  "Advisor"/align=k/newline
+
+
+;
+replace loanerusage_1.eq
+run/setparameter loanerusage_1.eq
+
+replace loanerusage.eq
+run/parameterfile=loanerusage_1 loanerusage.eq
+rrepl loanerusage
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view loanerusage
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Loaner Vehicle Usage Report" -- Report Title
+   string rptname1    = "loanerusage" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "loanerusage_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

@@ -1,0 +1,246 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Foreign Drop Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/7/2019
+Modified:
+
+Notes:
+$Workfile: fgndrop.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fgndrop.mf $
+$Revision: 1 $
+$History: fgndrop.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 11/08/19   Time: 4:12p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+ 
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_aloc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cshow = multivalue parameter prompt "Drop Type to Show" valid "Owned Vehicles Rented Away","Foreign Vehicles Rented Back to Owning Location",
+    "Foreign Vehicles Rented to Other Locations" default "ALL"
+;
+replace fgndrop_i1.inc
+/*------------------------------------------------------------------------
+ Create owned location list - setup parameters
+------------------------------------------------------------------------*/
+include "fgndrop_i1.inc"
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = location:locationcode,
+    null fill on failure
+
+where 
+   location:owned=1
+
+list/domain="location"/nodefaults/nobanner/noheadings
+  if itemnumber=1 then '"'+location:locationcode+'"' else
+     ',"'+location:locationcode+'"'
+;
+replace fgndrop_1.eq
+run/setparameter fgndrop_1.eq
+
+run/parameterfile=fgndrop_1 fgndrop_1.eq
+rrepl ownloc
+
+/*------------------------------------------------------------------------
+ Retrieve invtrx records 
+------------------------------------------------------------------------*/
+include "fgndrop_i1.inc"
+define
+
+  file system_set = access systemsettings,
+   set systemsettings:dbid=""
+
+  number ifgnstat = system_set:foreignstat
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invtrx:locationcodein,
+    null fill on failure
+
+    number pctype = if (invtrx:ownedlocationcode one of include "ownloc.cq" and
+                       invtrx:locationcodein not one of include "ownloc.cq") then 1 else -- Owned Away
+                    if (invtrx:ownedlocationcode not one of include "ownloc.cq" and
+                       invtrx:locationcodein = invtrx:ownedlocationcode) then 2 else     -- Foreign Back
+                    if (invtrx:ownedlocationcode not one of include "ownloc.cq" and
+                       invtrx:locationcodein not one of include "ownloc.cq" and
+                       invtrx:locationcodein <> invtrx:ownedlocationcode) then 3 else 0  -- Foreign Other
+
+   string ra_num = if invtrx:trxorigin = "CHECKOUT" then invtrx:ranumber else
+                      if invtrx:trxorigin = "NON-REV" then invtrx:ticketnumber else
+                      if invtrx:trxorigin = "MODIFY" then "Status Modify" else "N/A"
+
+
+where 
+   (invtrx:datein >= dtsdate and invtrx:datein <= dtedate) and
+   (invtrx:product = cproduct or cproduct = "ALL") and
+   (invtrx:invclass = cclass or cclass = "ALL") and
+   (invtrx:locationcodeout = caloc or caloc = "ALL") and
+   (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="invtrx"/hold="fgndrop_hf"
+if invtrx:invstatin=ifgnstat and invtrx:trxorigin <> "DELETE" and pctype > 0 then {
+  invtrx:invid
+  invtrx:datein 
+  invtrx:timein 
+  invtrx:invstatin 
+  invtrx:product 
+  invtrx:unitnumber
+  invtrx:year
+  invtrx:make
+  invtrx:model
+  invtrx:unitcolor
+  invtrx:invclass 
+  invtrx:trxorigin
+  invtrx:ownedlocationcode
+  invtrx:locationcodeout
+  invtrx:locationcodein
+  pctype
+  ra_num
+invtrx:invstatin
+}
+;
+run/parameterfile=fgndrop_1
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "fgndrop_i1.inc"
+
+
+define 
+   string drop_type = switch(fgndrop_hf:pctype)
+     case 1 : "Owned vehicles dropped at foreign locations:"
+     case 2 : "Foreign vehicles dropped at their owning location:"
+     case 3 : "Foreign vehicles dropped at other locations:"
+     default : "Unknown"
+
+where (fgndrop_hf:pctype = 1 and cshow = "Owned Vehicles Rented Away") or
+      (fgndrop_hf:pctype = 2 and cshow = "Foreign Vehicles Rented Back to Owning Location") or
+      (fgndrop_hf:pctype = 3 and cshow = "Foreign Vehicles Rented to Other Locations") or cshow = "ALL"
+  
+
+list/domain="fgndrop_hf"/title="Foreign Drop Report"/nobanner/noheadings/pageof/noreporttotals/pagelength=85
+
+  fgndrop_hf:unitnumber 
+  fgndrop_hf:invclass
+  fgndrop_hf:year 
+  fgndrop_hf:make 
+  fgndrop_hf:model 
+  fgndrop_hf:unitcolor 
+  fgndrop_hf:ra_num
+  fgndrop_hf:datein 
+  fgndrop_hf:timein 
+  fgndrop_hf:locationcodein 
+  fgndrop_hf:ownedlocationcode 
+ 
+
+sorted by
+  fgndrop_hf:pctype 
+  fgndrop_hf:unitnumber
+
+top of fgndrop_hf:pctype
+  drop_type/noheading/newline
+
+end of fgndrop_hf:pctype
+  ""/newline
+  "Total records: "+str(count[fgndrop_hf:pctype,fgndrop_hf:pctype])/newline
+
+end of report
+  ""/newline
+  "Grand Total: "+str(count[fgndrop_hf:pctype,report])/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(caLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Class: "+str(cclass)/displaywidth=100/newline
+  end box /newline=4
+
+  "Unit #"/align=fgndrop_hf:unitnumber 
+  "Class"/align=fgndrop_hf:invclass
+  "Year"/align=fgndrop_hf:year 
+  "Make"/align=fgndrop_hf:make 
+  "Model"/align=fgndrop_hf:model 
+  "Color"/align=fgndrop_hf:unitcolor 
+  "RA/NR #"/align=fgndrop_hf:ra_num
+  "Date In"/align=fgndrop_hf:datein 
+  "Time In"/align=fgndrop_hf:timein 
+  "Loc In"/align=fgndrop_hf:locationcodein 
+  "Own Loc"/align=fgndrop_hf:ownedlocationcode /newline
+
+;
+replace fgndrop.eq
+run/parameterfile=fgndrop_1 fgndrop.eq
+rrepl fgndrop
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fgndrop
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Foreign Drop Report" -- Report Title
+   string rptname1    = "fgndrop" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fgndrop_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

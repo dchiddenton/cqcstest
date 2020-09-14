@@ -1,0 +1,165 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Loaner Age Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/27/2018
+Modified:
+
+Notes:
+$Workfile: loanerage.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/loanerage.mf $
+$Revision: 2 $
+$History: loanerage.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_invstatus.cq"
+  number cdays = parameter prompt "Enter minimum days remaining: " default 999999  valid if cdays >= 0
+;
+replace loanerage_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters - Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "loanerage_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+  number days_left = if inv:expectedoutservicedate = null then 0 else inv:expectedoutservicedate - todaysdate
+  
+  number life_days = if inv:expectedoutservicedate = null then 0 else inv:expectedoutservicedate-inv:inservicedate
+  
+  number per_left = (days_left divide life_days)*100
+
+where 
+  (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:ownedlocationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) 
+  and (str(inv:vehiclestatusowned) = cstatus or cstatus = "ALL")
+  and (days_left <= cdays) 
+
+  
+list/title="Loaner Age Report"/domain="inv"/noreporttotals/nobanner/pageof/count
+  inv:unitnumber /displaywidth=10
+  inv:serialnumber /displaywidth=20
+  inv:year /nocommas/displaywidth=4
+  inv:make /displaywidth=10
+  inv:model /displaywidth=10
+  inv:odometer /displaywidth=8
+  stat_desc:description/displaywidth=10/duplicates/heading="Status"
+  inv:inservicedate /displaywidth=10
+  inv:expectedoutservicedate/heading="Expected-O/S Date"/name="a" /displaywidth=10
+  life_days/heading="Life-Days"/displaywidth=8
+  days_left/heading="Days-Remaining" /displaywidth=8 
+  per_left/mask="z99.9%"/heading="% Life-Remaining" /displaywidth=6
+  days_left/bulletchart/chartminimum=1/chartmaximum=life_days/heading="Life Remaining"/backgroundcolors=("#FF1919","#E6E600","#33AD33")/stackcolors/backgroundthresholds=(life_days * 0.2,life_days * 0.66)/barheight=20/noaxis
+
+sorted by
+  inv:ownedlocationcode/count/heading="@"/page
+  inv:serialnumber
+
+top of inv:ownedlocationcode
+""/newline
+  "Owning Location: "+str(inv:ownedlocationcode)/newline
+
+top of page 
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Minimum days left: " + str(cdays)/newline
+  end box /newline=3
+
+  legend(labels="Age,<20% left,20%-66% left,>66% Left",colors="black,#FF1919,#E6E600,#33AD33")/right/displaywidth=140/newline
+
+;
+replace loanerage_1.eq
+run/setparameter loanerage_1.eq
+
+replace loanerage.eq
+run/parameterfile=loanerage_1 loanerage.eq
+rrepl loanerage
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view loanerage
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Loaner Age Report" -- Report Title
+   string rptname1    = "loanerage" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "loanerage_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,616 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Payments Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/6/2017
+Modified:
+
+Notes:
+$Workfile: pymts.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/pymts.mf $
+$Revision: 3 $
+$History: pymts.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 8/11/20    Time: 2:54p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel output formatting.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="paymentstype"
+if itemnumber=1 then '"'+paymentstype:paymenttype+'"' else
+   ',"'+paymentstype:paymenttype+'"'
+
+sorted by
+   paymentstype:paymenttype
+top of report
+'string cpaytype[8192] = multivalue parameter prompt "Payment Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_paytype"
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate 
+  time dtstime = parameter prompt "Start Time: " default 0:00 
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  time dtetime = parameter prompt "End Time: " default 23:59
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cdateloc = parameter prompt "Select by Date/Loc: " valid "Reported","Received" default "Reported"
+  include "param_paytype.cq"
+  string corigin = parameter prompt "Payment Origin: " valid "Paid Deposits/Payments","Payments","Deposits","Credits","Zero Amounts","Paid Deposits","Auth Deposits", "Reservation Paid Deposits" default "Paid Deposits/Payments"
+  string crangetype = parameter prompt "Enter Range Group: " valid "Employee","Last 4 CC#","RA#","Res#","None" default "None"
+  string crange = range parameter prompt "Enter Range (Start..End or ALL): " default ALL
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace pymts_i1.inc
+
+/*------------------------------------------------------------------------
+ Setup parameters with times
+------------------------------------------------------------------------*/
+include "pymts_i1.inc"
+define  
+
+  string time_st = str(dtSTime,"HH.MM")
+  string time_en = str(dtETime,"HH.MM")
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+end of report
+
+dtSdate /newline
+dtSTime/newline
+dtEdate /newline
+dtETime /newline
+str(cLoc) /newline
+cLocGroup/newline
+str(cProduct) /newline
+cdateloc/newline
+str(cpaytype)/newline
+corigin/newline
+crangetype/newline
+str(crange)/newline
+csummary/newline
+timestamp(dtSdate,time(time_st))/newline
+timestamp(dtEdate,time(time_en))/newline
+;
+replace pymts_1.eq
+run/setparameter pymts_1.eq
+
+run/parameterfile=pymts_1 pymts_1.eq
+
+/*------------------------------------------------------------------------
+ retrieve payment records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "pymts_i1.inc"
+define
+
+   file paytype_link = access paymentstype,
+    set paymentstype:paymenttype=payments:paymenttype,
+    one to one,generic, null fill on failure
+
+   file rrm_link = access rrm,
+    set rrm:commonid=payments:commonid,
+    one to one, null fill on failure
+
+   number sort_order = 1
+
+   string res_flag = if payments:resnumber = "" then "C" else "R"
+
+   string rec_flag1 = if payments:paymentamount = 0 then "0" + str(payments:paiddeposit) + str(payments:deposit) + res_flag else
+   if payments:paymentamount > 0 then "+" + str(payments:paiddeposit) + str(payments:deposit)+ res_flag else
+   if payments:paymentamount < 0 then "-" + str(payments:paiddeposit) + str(payments:deposit)+ res_flag 
+
+   string compare_flag = switch(corigin)
+     case "Paid Deposits/Payments" : "1"
+     case "Payments" : "10"
+     case "Deposits" : "1"
+     case "Credits"  : "-10"
+     case "Zero Amounts" : "0"
+     case "Paid Deposits" : "11"
+     case "Auth Deposits" : "01"
+     case "Reservation Paid Deposits" : "11R"
+
+   string rec_flag = switch(corigin)
+     case "Paid Deposits/Payments" : rec_flag1[2,2]
+     case "Payments" : rec_flag1[2,3]
+     case "Deposits" : rec_flag1[3,3]
+     case "Credits"  : rec_flag1[1,3]
+     case "Zero Amounts" : rec_flag1[1,1]
+     case "Paid Deposits" : rec_flag1[2,3]
+     case "Auth Deposits" : rec_flag1[2,3]
+     case "Reservation Paid Deposits" : rec_flag1[2,4]
+
+   string ccDebit = if (payments:pbdata contains "DEBIT" or payments:pbdata contains "PREPAID") then "Y" else ""
+
+   string comp_loc = if cdateloc = "Reported" then payments:rptloccode else payments:locationcode
+   date comp_date = if cdateloc = "Reported" then payments:rptdate else payments:datereceived
+   number comp_time = if cdateloc = "Reported" then payments:rpttime else payments:rpttime
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = comp_loc,
+    null fill on failure
+  
+   timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+   timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+   timestamp pmt_time = timestamp(comp_date,time(replace(str(comp_time,"99.99"),".",":")))
+
+   string comp_range = switch(crangetype)
+    case "Employee"    : payments:recievedbyemployeenumber
+    case "Last 4 CC#"  : payments:last4
+    case "RA#"         : payments:ranumber 
+    case "Res#"        : payments:resnumber
+
+where 
+  ((payments:rptdate >= dtsdate and payments:rptdate <= dtedate and cdateloc = "Reported")
+  or (payments:datereceived >=dtsdate and payments:datereceived <= dtedate and cdateloc = "Received"))
+  and (comp_loc = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="payments"/hold="pay_hf"
+  if (pmt_time >= time_st and pmt_time <= time_en)
+    and (payments:paymenttype = cpaytype or cpaytype = "ALL")
+    and comp_range = crange  
+    and compare_flag = rec_flag then {
+  sort_order/width=4
+  1/width=4/name="sub_sort"
+  payments:rptloccode/width=20
+  payments:rptdate
+  payments:paymenttype/width=40
+  payments:paymentamount/width=14/decimalplaces=2
+  payments:paymentid/width=11/keyelement=1.1
+  payments:recievedbyemployeenumber/width=30
+  payments:counter/width=20
+  payments:position/width=20
+  payments:ccauthcode/width=18
+  payments:draftdate
+  payments:dateposted
+  payments:commonid/width=20
+  payments:checknumber/width=20
+  payments:last4/width=10
+  payments:arcust/width=20
+  payments:company/width=40
+  payments:deposit/width=2
+  paytype_link:paytype/width=2
+  ccdebit/width=2
+  rrm_link:rastatus/width=2
+  rrm_link:resnumber/width=20
+  rrm_link:ranumber/width=20
+  rrm_link:customerlastname/width=40
+  rrm_link:customerfirstname/width=30
+}
+
+sorted by
+  payments:rptloccode
+  payments:rptdate
+  payments:paymenttype
+
+;
+run/parameterfile=pymts_1 
+
+/*------------------------------------------------------------------------
+ Payment type totals by date
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define 
+   number sort_order = 2
+
+sum/domain="pay_hf"/hold="paytot_hf"
+pay_hf:paymentamount/width=14/decimalplaces=2
+by 
+sort_order/width=4
+1/width=4/name="sub_sort"
+pay_hf:rptloccode/width=20
+pay_hf:rptdate
+pay_hf:paymenttype/width=40
+
+end of pay_hf:paymenttype
+pay_hf:paymentid/width=11/keyelement=1.1
+
+;
+run/parameterfile=pymts_1 
+
+
+/*------------------------------------------------------------------------
+ Date totals
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+   number sort_order = 2
+
+  
+
+sum/domain="pay_hf"/hold="paytot_hf"/append
+pay_hf:paymentamount/width=14/decimalplaces=2
+by 
+sort_order/width=4
+2/width=4/name="sub_sort"
+pay_hf:rptloccode/width=20
+pay_hf:rptdate
+"Total Payments"/width=40/name="paymenttype"
+
+end of pay_hf:rptdate
+pay_hf:paymentid/width=11/keyelement=1.1
+
+;
+run/parameterfile=pymts_1 
+
+/*------------------------------------------------------------------------
+ Location totals
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define 
+   number sort_order = 3
+
+sum/domain="pay_hf"/hold="paytot_hf"/append
+  pay_hf:paymentamount/width=14/decimalplaces=2
+by 
+  sort_order/width=4
+  1/width=4/name="sub_sort"
+  pay_hf:rptloccode/width=20
+  todaysdate/name="rptdate"
+  pay_hf:paymenttype/width=40
+
+end of pay_hf:paymenttype
+  pay_hf:paymentid/width=11/keyelement=1.1
+;
+run/parameterfile=pymts_1 
+
+/*------------------------------------------------------------------------
+ Location totals
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+define 
+   number sort_order = 3
+
+
+sum/domain="pay_hf"/hold="paytot_hf"/append
+  pay_hf:paymentamount/width=14/decimalplaces=2
+by 
+  sort_order/width=4
+  2/width=4/name="sub_sort"
+  pay_hf:rptloccode/width=20
+  todaysdate/name="rptdate"
+  "Total Payments"/width=40/name="paymenttype"
+
+end of pay_hf:rptloccode
+  pay_hf:paymentid/width=11/keyelement=1.1
+;
+run/parameterfile=pymts_1 
+
+
+/*------------------------------------------------------------------------
+ Grand totals
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define 
+   number sort_order = 4
+ 
+
+sum/domain="pay_hf"/hold="paytot_hf"/append
+pay_hf:paymentamount/width=14/decimalplaces=2
+by 
+sort_order/width=4
+1/width=4/name="sub_sort"
+"ZZZZZZZZZZZZZZZZZZZZ"/width=20/name="rptloccode"
+todaysdate/name="rptdate"
+pay_hf:paymenttype/width=40
+
+end of pay_hf:paymenttype
+pay_hf:paymentid/width=11/keyelement=1.1
+
+end of report
+sort_order/width=4
+2/width=4/name="sub_sort"
+"ZZZZZZZZZZZZZZZZZZZZ"/width=20
+todaysdate
+"Total Payments"/width=40
+total[pay_hf:paymentamount]/width=14/decimalplaces=2
+pay_hf:paymentid/width=11
+
+;
+run/parameterfile=pymts_1 
+
+/*------------------------------------------------------------------------
+ Combine totals with payment data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+list/domain="paytot_hf"/hold="pay_hf"/append
+  paytot_hf:sort_order
+  paytot_hf:sub_sort
+  paytot_hf:rptloccode
+  paytot_hf:rptdate 
+  paytot_hf:paymenttype
+  paytot_hf:paymentamount
+  paytot_hf:paymentid/width=11/keyelement=1.1
+  ""/name="recievedbyemployeenumber"/width=30
+  ""/name="counter"/width=20
+  ""/name="position"/width=20
+  ""/name="ccauthcode"/width=18
+  todaysdate/name="draftdate"
+  todaysdate/name="dateposted"
+  0/name="commonid"/width=20
+  ""/name="checknumber"/width=20
+  ""/name="last4"/width=10
+  ""/name="arcust"/width=20
+  ""/name="company"/width=40
+  0/name="deposit"/width=2
+  0/name="paytype"/width=2
+  ""/name="ccdebit"/width=2
+  0/name="rastatus"/width=2
+  ""/name="resnumber"/width=20
+  ""/name="ranumber"/width=20
+  ""/name="customerlastname"/width=40
+  ""/name="customerfirstname"/width=30
+
+;
+run/parameterfile=pymts_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "pymts_i1.inc"
+define
+
+
+   string ra_res = if pay_hf:rastatus=0 then pay_hf:resnumber else pay_hf:ranumber
+
+   string ref_string = switch(pay_hf:paytype)
+     case 1 : pay_hf:checknumber
+     case 2 : "XXXXXXXXXXXX"+str(pay_hf:last4,"9999")
+     case 3 : pay_hf:arcust + " " + pay_hf:company
+     case 4 : pay_hf:checknumber
+     default : ""
+
+
+  timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+  timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+  string origin_col = if pay_hf:deposit = 1 then "D" else "P"
+
+
+
+list/domain="pay_hf"/noreporttotals/nobanner/pageof/pagelength=80/title="Payments Report"
+if (pay_hf:sort_order = 1 and csummary = "Detail") then {
+  ra_res/displaywidth=15/heading="RA#/Res#"
+  str(pay_hf:customerlastname)+", "+str(pay_hf:customerfirstname)/displaywidth=25/heading="Name"
+  pay_hf:recievedbyemployeenumber/displaywidth=6
+  pay_hf:counter/displaywidth=6
+  pay_hf:position/displaywidth=6
+  origin_col/heading="Origin"/displaywidth=6
+  pay_hf:paymenttype/displaywidth=8
+  ccdebit/displaywidth=5/heading="Debit"
+  pay_hf:paymentamount
+  ref_string/displaywidth=20/heading="Reference"  
+  pay_hf:ccauthcode/displaywidth=6
+  pay_hf:draftdate
+  pay_hf:dateposted
+  }
+followed by
+if pay_hf:sort_order = 2 then {
+  pay_hf:paymenttype /noheading
+  pay_hf:paymentamount/noheading
+}
+
+followed by
+if pay_hf:sort_order = 3 then {
+  pay_hf:paymenttype /noheading
+  pay_hf:paymentamount/noheading
+}
+
+followed by
+if pay_hf:sort_order = 4 then {
+  pay_hf:paymenttype /noheading
+  pay_hf:paymentamount/noheading
+}
+
+sorted by
+  pay_hf:rptloccode 
+  pay_hf:rptdate 
+  pay_hf:sort_order
+  pay_hf:sub_sort
+  pay_hf:paymenttype
+
+top of sort_order
+  if pay_hf:sort_order=2 then {
+""/newline
+"Day Totals"/width=20
+pay_hf:rptloccode/width=30/heading="Location"
+pay_hf:rptdate/heading="Date"/newline
+
+}
+  if pay_hf:sort_order=3 then {
+""/newline
+"Location Totals"/width=20
+pay_hf:rptloccode/width=30/heading="Location"
+str(dtSdate)+" to "+str(dtEdate)/heading="Date"/newline   
+
+}
+
+  if pay_hf:sort_order=4 then {
+""/newline
+"Grand Totals"/width=20
+"All Locations"/width=30/heading="Location"
+str(dtSdate)+" to "+str(dtEdate)/heading="Date" /newline   
+
+}
+
+top of pay_hf:rptdate
+if sort_order < 3 then {
+pay_hf:rptloccode/heading="Location"
+pay_hf:rptdate/heading="Date"/newline=2
+}
+
+end of pay_hf:rptdate
+ ""/newline=2
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Range: "+str(time_st)+" to "+str(time_en)+ "   Product: " + str(cProduct)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  str(corigin) + " by " + str(cdateloc) + " Date/Location"
+  end box/newline=4
+
+;
+replace pymts.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+include "pymts_i1.inc"
+define
+
+
+   string ra_res = if pay_hf:rastatus=0 then pay_hf:resnumber else pay_hf:ranumber
+
+   string ref_string = switch(pay_hf:paytype)
+     case 1 : pay_hf:checknumber
+     case 2 : "XXXXXXXXXXXX"+str(pay_hf:last4,"9999")
+     case 3 : pay_hf:arcust + " " + pay_hf:company
+     case 4 : pay_hf:checknumber
+     default : ""
+
+
+  timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+  timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+  string origin_col = if pay_hf:deposit = 1 then "D" else "P"
+
+
+
+list/domain="pay_hf"/noreporttotals/nobanner/pagelength=0/title="Payments Report"
+  pay_hf:rptloccode/width=30/heading="Location"
+  pay_hf:rptdate/heading="Date"
+  ra_res/displaywidth=15/heading="RA#/Res#"
+  str(pay_hf:customerlastname)+", "+str(pay_hf:customerfirstname)/displaywidth=25/heading="Name"
+  pay_hf:recievedbyemployeenumber/displaywidth=6
+  pay_hf:counter/displaywidth=6
+  pay_hf:position/displaywidth=6
+  origin_col/heading="Origin"/displaywidth=6
+  pay_hf:paymenttype/displaywidth=8
+  ccdebit/displaywidth=5/heading="Debit"
+  pay_hf:paymentamount
+  ref_string/displaywidth=20/heading="Reference"  
+  pay_hf:ccauthcode/displaywidth=6
+  pay_hf:draftdate
+  pay_hf:dateposted
+
+sorted by
+  pay_hf:rptloccode 
+  pay_hf:rptdate 
+  pay_hf:paymenttype
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Range: "+str(time_st)+" to "+str(time_en)+ "   Product: " + str(cProduct)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  str(corigin) + " by " + str(cdateloc) + " Date/Location"
+  end box/newline=4
+
+;
+replace pymts_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "pymts_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=pymts_1 pymts.eq"/newline
+} else {
+"run/xls/parameterfile=pymts_1 pymts_xl.eq"/newline
+}
+"rrepl pymts"/newline
+"view"/newline 
+;
+run/parameterfile=pymts_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Payments Report" -- Report Title
+   string rptname1    = "pymts" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "pymts_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

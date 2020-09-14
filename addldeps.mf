@@ -1,0 +1,283 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Addtional Deposits Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/17/2016
+Modified:
+
+Notes:
+$Workfile: addldeps.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/addldeps.mf $
+$Revision: 2 $
+$History: addldeps.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting date" default 1.1.1990;
+  date dtedate = parameter Prompt "Ending date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  number cPct = parameter prompt "Only when deposits are less then __% of estimated charges (0=ALL): " valid if cPct >= 0 default 0
+  string ccompbill = parameter/uppercase prompt "Include contracts with billable companies: " valid "Y","N" default "N"
+  string carpmt = parameter/uppercase prompt "Include contracts with A/R payments: " valid "Y","N" default "N"
+  string ctour = parameter/uppercase prompt "Include tour contracts: " valid "Y","N" default "N"
+  string cpending = parameter/uppercase prompt "Include pending contracts: " valid "Y","N" default "N"
+  number auth_days = parameter prompt "Days for authorization expiry (0 = no expiry): " default 14
+;
+replace addldeps_i1.inc
+
+/*------------------------------------------------------------------------
+ Routine to calculate and store total deposits for final report
+------------------------------------------------------------------------*/
+
+viewpoint native;
+
+include "addldeps_i1.inc"
+
+    date exp_date = todaysdate - auth_days
+
+    file alt_locgroup = access locgroup,
+     set locgroup:groupname = clocgroup,
+     locgroup:locationcode = rrm:locationcodeout,
+     null fill on failure
+  
+   file ra_deposit = access payments,
+    set payments:commonid=rrm:commonid,
+    one to many
+
+  number paid_deposit = if (ra_deposit:paiddeposit = 1) then
+     ra_deposit:paymentamount
+
+  number auth_deposit = if ((auth_days = 0 and (ra_deposit:paiddeposit = 0 and ra_deposit:deposit=1))
+   or (ra_deposit:datereceived >= exp_date and (ra_deposit:paiddeposit = 0 and ra_deposit:deposit=1))) then
+     ra_deposit:paymentamount
+
+  number exp_deposit = if (auth_days <> 0 and (ra_deposit:datereceived < exp_date and (ra_deposit:paiddeposit = 0 and ra_deposit:deposit=1))) then
+     ra_deposit:paymentamount
+
+
+where 
+  (rrm:dateout >= dtSDate and rrm:dateout <= dtEdate)
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:product = cProduct or cProduct = "ALL")
+
+  and rrm:rastatus one of 1,2
+  
+
+list/domain="rrm"/noheadings/hold="ra_deposits1"
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber/keyelement=2.1
+  paid_deposit
+  auth_deposit
+  exp_deposit
+
+  ra_deposit:paymenttype
+
+
+sorted by 
+  rrm:ranumber
+
+--#end of rrm:ranumber
+--#  rrm:commonid/keyelement=1
+--#  rrm:ranumber/keyelement=2
+--#  total[paid_deposit]/heading="paid_dep"
+--#  total[auth_deposit]/heading="auth_dep"
+--#  total[exp_deposit]/heading="exp_dep"
+
+;
+replace addldeps_1.eq
+run/setparameter addldeps_1.eq
+
+run/parameterfile=addldeps_1 addldeps_1.eq
+
+/*------------------------------------------------------------------------
+ Consolidate data by RA#
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define 
+   file paytype = access paymentstype,
+    set paymentstype:paymenttype=ra_deposits1:paymenttype,
+    one to one, generic, zero fill on failure
+
+   number ar_count = if paytype:paytype = 3 then 1 else 0
+
+list/domain="ra_deposits1"/nodetail/hold="ra_deposits"
+  ra_deposits1:commonid 
+  ra_deposits1:ranumber 
+  ra_deposits1:paid_deposit 
+  ra_deposits1:auth_deposit 
+  ra_deposits1:exp_deposit 
+  ra_deposits1:paymenttype
+  ar_count
+
+sorted by ra_deposits1:ranumber
+
+  end of ra_deposits1:ranumber
+  ra_deposits1:commonid/keyelement=1.1
+  ra_deposits1:ranumber/keyelement=2.1
+  total[paid_deposit]/heading="paid_dep"
+  total[auth_deposit]/heading="auth_dep"
+  total[exp_deposit]/heading="exp_dep"
+  if total[ar_count] = 0 then 0 else 1/name="ar_flag"
+
+;
+run/parameterfile=addldeps_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "addldeps_i1.inc"
+
+
+    file alt_locgroup = access locgroup,
+     set locgroup:groupname = clocgroup,
+     locgroup:locationcode = rrm:locationcodeout,
+     null fill on failure
+  
+    file deposit = access ra_deposits,
+    set ra_deposits:commonid=rrm:commonid,
+    one to one, zero fill on failure
+
+    file rental_link = access rentaldb,
+     set rentaldb:commonid=rrm:commonid,
+     one to one, null fill on failure
+
+
+   file company_link = access company,
+    set company:company=rrm:company,
+    one to one, null fill on failure
+
+
+  date exp_date = todaysdate - auth_days
+
+  number over_days = if (todaysdate - rrm:datedue > 0) then (todaysdate - rrm:datedue) else 0
+
+  number diff_amt = (deposit:auth_dep + deposit:paid_dep) - rental_link:totalestimate 
+
+  number diff_pct = if diff_amt => 0 then 0 else (((deposit:auth_dep + deposit:paid_dep) divide rental_link:totalestimate)*100)/decimalplaces=0
+
+  number comp_flag = if company_link:arcust <> "" then 1 else 0
+
+  
+where 
+  (rrm:dateout >= dtSDate and rrm:dateout <= dtEdate)
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:product = cProduct or cProduct = "ALL")
+  and
+ (cCompbill = "Y" or comp_flag = 0)  
+  and (cArpmt = "Y" or deposit:ar_flag = 0)
+  and (cTour = "Y" or rrm:tour = 0)
+  and ((cPending = "Y" and rrm:rastatus one of 1,2) or (rrm:rastatus = 2))
+  and (diff_pct < cPct or cPct = 0)
+  
+
+list/domain="rrm"/nobanner/title="Additional Deposit Report"/pageof/count/pagelength=70
+
+  rrm:ranumber
+  rrm:customerlastname + ", " + rrm:customerfirstname/width=30/heading="Renter"
+  rrm:locationcodeout
+  rrm:dateout
+  rental_link:employeenumberout/heading="Employee"
+  rental_link:totalestimate
+  deposit:auth_dep/total/heading="Auth-Deposits"
+  deposit:exp_dep/total/heading="Expired-Deposits"
+  deposit:paid_dep/total/heading="Paid-Deposits"
+
+  diff_amt/heading="Difference-Amount"
+  diff_pct/nototal/mask="zz9%"/heading="Difference-Percent"
+  over_days/nototal/zerosuppress/heading="Days-Overdue"
+
+
+sorted by
+  rrm:locationcodeout/total/count/heading="@"
+  rrm:dateout
+
+
+top of page 
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct) + "   Include Billable Company: "+str(Ccompbill)+"  A/R pmts: "+str(cArpmt)+"  Tour: "+str(cTour)+"  Pending: "+str(cPending)/newline
+  if auth_days = 0 then "No C/C auth expiry" else "C/C auth expiry after "+str(auth_days)+" days"
+  end box/newlines=4
+
+;
+replace addldeps.eq
+run/parameterfile=addldeps_1 addldeps.eq
+rrepl addldeps
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view addldeps
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Addtional Deposits Report" -- Report Title
+   string rptname1    = "addldeps" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "addldeps_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

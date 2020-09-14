@@ -1,0 +1,484 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Cash Drawer Report - Runtime
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/5/2019
+Modified:
+
+Notes: runs at cash drawer close/balance out
+$Workfile: cashdrawerRT.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/cashdrawerRT.mf $
+$Revision: 1 $
+$History: cashdrawerRT.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 12/05/19   Time: 4:03p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve date/time of last close/balance out
+------------------------------------------------------------------------*/
+
+define
+
+  number cdrawer = parameter   --e.g. 568151 PMANOCT4
+
+  date index_date = todaysdate
+
+  file trx_link = access cashtrx,  /* Find last open */
+   set cashtrx:trxdate=index_date,
+   with cashtrx:cashid=cashdrawer:cashid
+   and cashtrx:trxtype=1,
+   one to one, approximate, reverse
+
+  file trx_link2 = access cashtrx, /* Find last close */
+   set cashtrx:trxdate=index_date,
+   with cashtrx:cashid=cashdrawer:cashid
+   and cashtrx:trxtype=2,
+   one to one, approximate, reverse
+
+  file trx_link3 = access cashtrx, /* Find last balance out */
+   set cashtrx:trxdate=index_date,
+   with cashtrx:cashid=cashdrawer:cashid
+   and cashtrx:trxtype=3,
+   one to one, approximate, reverse
+
+  date dtsdate = trx_link:trxdate
+  number dstarttime = trx_link:trxtime
+  date dtedate = if (trx_link2:trxdate >= dtsdate or (trx_link2:trxdate = dtsdate and trx_link2:trxtime >= dstarttime)) then trx_link2:trxdate else
+                    if (trx_link3:trxdate >= dtsdate or (trx_link3:trxdate = dtsdate and trx_link3:trxtime >= dstarttime)) then trx_link3:trxdate else null
+  number dendtime = if (trx_link2:trxdate >= dtsdate or (trx_link2:trxdate = dtsdate and trx_link2:trxtime >= dstarttime)) then trx_link2:trxtime else
+                    if (trx_link3:trxdate >= dtsdate or (trx_link3:trxdate = dtsdate and trx_link3:trxtime >= dstarttime)) then trx_link3:trxtime else 0
+
+where
+   cashdrawer:cashid=cdrawer
+ 
+list/domain="cashdrawer"/nobanner/nodefaults/noheadings
+
+'define'/newline
+  'date dtsdate = '+ str(dtsdate,"dd.mmm.yy")/newline  
+  'date dtedate = '+ str(dtedate,"dd.mmm.yy")/newline
+  'number dstarttime = '+str(dstarttime)/newline
+  'number dendtime = '+str(dendtime)/newline
+  'string cselect = "Cash Drawer"'/newline
+  'string cloc = ""'/newline
+  'number cdrawerid = '+str(cashdrawer:cashid)/newline
+  'string cdrawer = "'+str(cashdrawer:code)+'"'/newline 
+  'string csummary = "Detail"'/newline
+  'string csort = "Time"'/newline
+;
+run
+rrepl cashdrawer_i1
+
+/*------------------------------------------------------------------------
+ Select payment records and create temp file
+------------------------------------------------------------------------*/
+include "cashdrawer_i1.cq"
+define
+
+  file pay_types = access paymentstype,
+   set paymentstype:paymenttype=payments:paymenttype,
+   one to one, null fill on failure
+
+  number cashtype = if pay_types:paytype=1 then 1 else 0
+
+  string descr1 = if payments:deposit = 1 then "Deposit " else "Payment "
+  string descr = if payments:checknumber <> "" then descr1+payments:checknumber else
+                    if payments:ccnumber <> "" then "XXXXXXXXXXXX"+payments:last4+"  Exp:"+str(payments:ccexpdate)+"  Auth:"+payments:ccauthcode else
+                    if payments:company <> "" then descr1+payments:company+"  PO#:"+payments:ponumber else descr1
+
+  timestamp time_st = timestamp(dtSdate,time(replace(str(dstarttime,"99.99"),".",":")))
+  timestamp time_en = timestamp(dtEdate,time(replace(str(dendtime,"99.99"),".",":")))
+  timestamp payment_time = timestamp(payments:rptdate,time(replace(str(payments:rpttime,"99.99"),".",":")))
+  timestamp cash_time = timestamp(payments:cashdate,time(replace(str(payments:cashtime,"99.99"),".",":")))
+
+  string ranum = if payments:ranumber <> "" then payments:ranumber else payments:resnumber
+
+where   ((payments:rptdate >= dtsdate and payments:rptdate <= dtedate) or
+        (payments:cashdate >= dtsdate and payments:cashdate <= dtedate)) and
+        (payments:paymentamount <> 0) and
+        (payments:paiddeposit = 1)
+
+list/domain="payments"/hold="cash_hf"
+if (((cash_time >= time_st and cash_time <= time_en) or
+    (payment_time >= time_st and payment_time <= time_en)) and
+    (payments:cashid = cdrawerid)) then {
+  payments:locationcode/width=30/name="rptloccode"
+  payments:rptdate/width=10/name="rptdate"
+  payments:rpttime/width=6/name="rpttime"
+  payments:cashdate/width=10/name="trxdate"
+  payments:cashtime/width=6/name="trxtime"
+  "Contract"/width=20/name="trxtypestr"
+  payments:paymenttype/width=30/name="paytype"
+  payments:paymentamount/width=14/decimalplaces=2/name="amt"
+  ranum/width=20/name="ranum"
+  payments:recievedbyemployeenumber/width=10/name="emp"
+  payments:cashid/width=10/name="cashdrawercode"
+  cashtype/width=2
+  descr/width=60/name="descr"
+  if cashtype = 1 then 2 else 7/width=2/name="sort_order"
+}
+
+;
+run/parameterfile=cashdrawer_1
+
+/*------------------------------------------------------------------------
+ Select cash transaction records and append to temp file
+------------------------------------------------------------------------*/
+include "cashdrawer_i1.cq"
+define
+
+  string trxtypestr = switch(CashTrx:TrxType)
+     case 1 : "Open Drawer"
+     case 2 : "Close Drawer"
+     case 3 : "Balance Out"
+     case 4 : "Cash Drop"
+     case 5 : "Petty Cash"
+     default : "Other"
+
+  number sort_order = switch(CashTrx:TrxType)
+     case 1 : 1
+     case 2 : 6
+     case 3 : 5
+     case 4 : 4
+     case 5 : 3
+     default : 8
+
+  string descr = cashtrx:description;
+
+  timestamp time_st = timestamp(dtSdate,time(replace(str(dstarttime,"99.99"),".",":")))
+  timestamp time_en = timestamp(dtEdate,time(replace(str(dendtime,"99.99"),".",":")))
+  timestamp cashtrx_time = timestamp(cashtrx:trxdate,time(replace(str(cashtrx:trxtime,"99.99"),".",":")))
+
+where  cashtrx:trxdate >= dtsdate and cashtrx:trxdate <= dtedate
+
+list/domain="cashtrx"/hold="cash_hf"/append
+if ((cashtrx_time >= time_st and cashtrx_time <= time_en) and
+    (cashtrx:cashid = cdrawerid)) then {
+  cashtrx:locationcode/width=30/name="rptloccode"
+  cashtrx:trxdate/width=10/name="rptdate"
+  cashtrx:trxtime/width=6/name="rpttime"
+  cashtrx:trxdate/width=10/name="trxdate"
+  cashtrx:trxtime/width=6/name="trxtime"
+  trxtypestr/width=20
+  ""/width=30/name="paytype"
+  cashtrx:amt/width=14/decimalplaces=2/name="amt"
+  ""/width=20/name="ranum"
+  cashtrx:emplnum/width=10/name="emp"
+  cashtrx:cashid/width=10/name="cashdrawercode"
+  1/width=2/name="cashtype"
+  descr/width=60
+  sort_order/width=2
+}
+;
+
+run/parameterfile=cashdrawer_1
+
+/*------------------------------------------------------------------------
+ Create dummy record to account for all transaction types
+------------------------------------------------------------------------*/
+list/domain="paymentstype"/hold="cash_hf"/append
+if recordnumber=1 then {
+  ""/width=30/name="rptloccode"
+  todaysdate/width=10/name="rptdate"
+  0/width=6/decimalplaces=2/name="rpttime"
+  todaysdate/width=10/name="trxdate"
+  0/width=6/decimalplaces=2/name="trxtime"
+  "Open Drawer"/width=20/name="trxtypestr"
+  ""/width=30/name="paytype"
+  0/width=14/decimalplaces=2/name="amt"
+  ""/width=20/name="ranum"
+  ""/width=10/name="emp"
+  0/width=10/name="cashdrawercode"
+  1/width=2/name="cashtype"
+  ""/width=60/name="descr"
+  1/width=2/name="sort_order"
+}
+followed by
+if recordnumber=1 then {
+  ""/width=30
+  todaysdate/width=10
+  0/width=6
+  todaysdate/width=10
+  0/width=6
+  "Petty Cash"/width=20
+  ""/width=30
+  0/width=14/decimalplaces=2
+  ""/width=20
+  ""/width=10
+  0/width=10
+  1/width=2
+  ""/width=60
+  3/width=2
+}
+followed by
+if recordnumber=1 then {
+  ""/width=30
+  todaysdate/width=10
+  0/width=6
+  todaysdate/width=10
+  0/width=6
+  "Cash Drop"/width=20
+  ""/width=30
+  0/width=14/decimalplaces=2
+  ""/width=20
+  ""/width=10
+  0/width=10
+  1/width=2
+  ""/width=60
+  4/width=2
+}
+followed by
+if recordnumber=1 then {
+  ""/width=30
+  todaysdate/width=10
+  0/width=6
+  todaysdate/width=10
+  0/width=6
+  "Balance Out"/width=20
+  ""/width=30
+  0/width=14/decimalplaces=2
+  ""/width=20
+  ""/width=10
+  0/width=10
+  1/width=2
+  ""/width=60
+  5/width=2
+}
+followed by
+if recordnumber=1 then {
+  ""/width=30
+  todaysdate/width=10
+  0/width=6
+  todaysdate/width=10
+  0/width=6
+  "Close Drawer"/width=20
+  ""/width=30
+  0/width=14/decimalplaces=2
+  ""/width=20
+  ""/width=10
+  0/width=10
+  1/width=2
+  ""/width=60
+  6/width=2
+}
+followed by
+  ""/width=30
+  todaysdate/width=10
+  0/width=6
+  todaysdate/width=10
+  0/width=6
+  ""/width=20
+  paymentstype:paymenttype/width=30
+  0/width=14/decimalplaces=2
+  ""/width=20
+  ""/width=10
+  0/width=10
+  if paymentstype:paytype=1 then 1 else 0/width=2
+  ""/width=60
+  if paymentstype:paytype=1 then 2 else 7/width=2
+
+;
+run/parameterfile=cashdrawer_1 
+
+/*------------------------------------------------------------------------
+ Create dynamic code for summary output
+------------------------------------------------------------------------*/
+where paymentstype:paytype=1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+'number Cpmt'+str(recordnumber)+'= if cash_hf:paytype = "'+paymentstype:paymenttype+'" then cash_hf:amt'  --cash type
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary1
+
+where paymentstype:paytype=1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+'+total[Cpmt'+str(recordnumber)+',cash_hf:trxdate]' --cash type total
+top of report
+'number cashtotal = total[opendrawer,cash_hf:trxdate]+total[pettycash,cash_hf:trxdate]+total[cashdrop,cash_hf:trxdate]+total[balanceout,cash_hf:trxdate]+total[closedrawer,cash_hf:trxdate]'
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary1t
+
+where paymentstype:paytype<>1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+'number NCpmt'+str(recordnumber)+'= if cash_hf:paytype = "'+paymentstype:paymenttype+'" then cash_hf:amt'  --non cash type
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary2
+
+where paymentstype:paytype<>1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+if recordnumber=1 then 'number noncashtotal = total[NCpmt'+str(recordnumber)+',cash_hf:trxdate]' else
+'+total[NCpmt'+str(recordnumber)+',cash_hf:trxdate]' --non cash type total
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary2t
+
+where paymentstype:paytype=1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+'"'+str(paymentstype:paymenttype)+'"/column=3'/newline
+'total[Cpmt'+str(recordnumber)+',cash_hf:trxdate]/column=20/newline'/newline
+
+top of report
+'box/column=5/noheadings'/newline
+'"Cash:"/newline'/newline
+'"Open Drawer"/column=3'/newline
+'total[opendrawer,cash_hf:trxdate]/name="a"/column=20/newline'/newline
+end of report
+'"Petty Cash"/column=3'/newline
+'total[pettycash,cash_hf:trxdate]/column=20/newline'/newline
+'"Cash Drop"/column=3'/newline
+'total[cashdrop,cash_hf:trxdate]/column=20/newline'/newline
+'"Balance Out"/column=3'/newline
+'total[balanceout,cash_hf:trxdate]/column=20/newline'/newline
+'"Close Drawer"/column=3'/newline
+'total[closedrawer,cash_hf:trxdate]/column=20/newline=2'/newline
+'end box'/newline
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary3
+
+where paymentstype:paytype<>1
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="paymentstype"
+
+'"'+str(paymentstype:paymenttype)+'"/column=3'/newline
+if recordnumber = 1 then 'total[NCpmt'+str(recordnumber)+',cash_hf:trxdate]/name="aa"/column=20/newline' else
+'total[NCpmt'+str(recordnumber)+',cash_hf:trxdate]/column=20/newline'/newline
+
+top of report
+'box/column=80/noheadings'/newline
+'"Non-Cash:"/newline'/newline
+end of report
+
+'end box/newline=2'/newline
+;
+run/parameterfile=cashdrawer_1 
+rrepl summary4
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "cashdrawer_i1.cq"
+define
+  number opendrawer = if cash_hf:trxtypestr = "Open Drawer" then cash_hf:amt
+  number pettycash = if cash_hf:trxtypestr = "Petty Cash" then cash_hf:amt
+  number cashdrop = if cash_hf:trxtypestr = "Cash Drop" then cash_hf:amt
+  number balanceout = if cash_hf:trxtypestr = "Balance Out" then cash_hf:amt
+  number closedrawer = if cash_hf:trxtypestr = "Close Drawer" then cash_hf:amt
+  include "summary1.cq"
+  include "summary2.cq"
+  include "summary1t.cq"
+  include "summary2t.cq"
+
+where cash_hf:rptloccode <> ""
+
+list/domain="cash_hf"/nobanner/pageof/pagelength=80/noheadings/noreporttotals/title="Cash Drawer Report"
+ 
+  cash_hf:trxtime /displaywidth=6
+  cash_hf:trxtypestr/displaywidth=15
+  if cash_hf:cashtype=1 then cash_hf:amt/name="cash" /displaywidth=14/decimalplaces=2
+  if cash_hf:cashtype=0 then cash_hf:amt/name="noncash"/displaywidth=14/decimalplaces=2
+  cash_hf:paytype/displaywidth=15 
+  cash_hf:ranum/displaywidth=20 
+  cash_hf:emp /displaywidth=15
+  cash_hf:descr/displaywidth=40
+
+
+sorted by 
+cash_hf:trxdate/page
+if csort = "Employee" then cash_hf:emp
+cash_hf:trxtime
+
+top of cash_hf:trxdate
+"Detailed cash drawer transaction for report date: "+str(cash_hf:trxdate)/newline
+
+end of cash_hf:trxdate
+
+""/newline
+total[cash,cash_hf:trxdate]/align=cash
+total[noncash,cash_hf:trxdate]/align=noncash/newline
+
+""/newline
+"Summary for "+str(cash_hf:trxdate)+":"/newline 
+
+box
+include "summary3.cq"
+include "summary4.cq"
+end box/newlines=2
+cashtotal/noheading/align=a
+noncashtotal/noheading/align=aa/newline
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Dates: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cselect = "Cash Drawer" then "Cash Drawer: "+str(cdrawer) else "Location: " + str(cLoc)/displaywidth=100/newline
+  "Sort by: "+str(csort)/newline
+  end box/newline=4
+
+  "Time"/align=cash_hf:trxtime 
+  "Trx. Type"/align=cash_hf:trxtypestr 
+  "Cash Amt"/align=cash
+  "Non-Cash Amt"/align=noncash
+  "Pay Type"/align=cash_hf:paytype 
+  "RA#/Res#"/align=cash_hf:ranum 
+  "Emp."/align=cash_hf:emp 
+  "Description"/align=cash_hf:descr/newline
+
+end of report
+"Total records: "+str(count[cash_hf:trxtime,report])
+;
+replace cashdrawer.eq
+run/parameterfile=cashdrawer_1 cashdrawer.eq
+rrepl cashdrawer
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view cashdrawer
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Cash Drawer Report" -- Report Title
+   string rptname1    = "cashdrawer" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

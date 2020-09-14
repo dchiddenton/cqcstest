@@ -1,0 +1,575 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Credit Limit Report
+  Author: David Chiddenton;
+  
+/*------------------------------------------------------------------------
+Created: 11/20/2019
+Modified:
+
+Notes:
+$Workfile: creditlimit.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/creditlimit.mf $
+$Revision: 3 $
+$History: creditlimit.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 12/02/19   Time: 2:55p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add companies that have no outstanding credit to the report.
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 11/22/19   Time: 4:00p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+define
+   sales_rep = str(employee:employeefirstname) + " " + str(employee:employeelastname)
+
+
+where employee:groups contains "Sales Reps"
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+sales_rep+'"' else
+   ',"'+sales_rep+'"'
+
+sorted by
+   sales_rep
+top of report
+'string csalesrep[8192] = multivalue parameter prompt "Sales Reps: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_rep"
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+  date dtedate = parameter prompt "Maximum Reservation Date: " default dateadd(todaysdate,0,1)
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cctype[1024] = multivalue parameter prompt "Company Type:" valid "Body Shop","Corp-Cust","Corporate","Insurance",
+      "Renter","Repair Shop","Tour","Vendor","Other" default "ALL"
+  string ccompany [8192] =  range parameter prompt "Companies (First..Last): "  default "ALL"
+  include "param_rep.cq"
+;
+replace creditlimit_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve AR payment types
+------------------------------------------------------------------------*/
+where paymentstype:paytype = 3
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="paymentstype"
+if linenumber = 1 then '"'+paymentstype:paymenttype +'"' else
+   ',"'+paymentstype:paymenttype +'"'
+;
+run/parameterfile
+rrepl "paytypes"
+
+/*------------------------------------------------------------------------
+ Retrieve AR payment records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "creditlimit_i1.inc"
+
+
+list/domain="paymentline"/hold="creditlimit_pmt_hf"
+  paymentline:datereceived
+  paymentline:reference
+  paymentline:amount*-1/name="amount"
+  paymentline:paymentid/keyelement=1.1
+
+;
+replace creditlimit_1.eq
+run/setparameter creditlimit_1.eq
+
+run/parameterfile=creditlimit_1 creditlimit_1.eq
+
+/*------------------------------------------------------------------------
+ Convert company type to DB values
+------------------------------------------------------------------------*/
+
+include "creditlimit_i1.inc"
+define
+
+  number num_params = countfields(str(cctype),",")  
+
+  file i_counter = access counter,
+    set min=1,max=num_params
+
+  string cctypestr = subfield(str(cctype),",",i_counter:position)
+  
+  string cctypedesc = switch(cctypestr)
+     case "Body Shop"    : "B"
+     case "Corp-Cust"    : "P"  
+     case "Corporate"    : "C"
+     case "Insurance"    : "I"
+     case "Renter"       : "N"
+     case "Repair Shop"  : "R"
+     case "Tour"         : "T"
+     case "Vendor"       : "V"
+     case "Other"        : "Other"
+     case "ALL"          : "ALL"
+  
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if i_counter:position <= num_params then
+   subfield(str(cctype),",",i_counter:position)/hidden
+   if i_counter:position = 1 then '"'+cctypedesc+'"' else ',"'+cctypedesc+'"'/concatenate
+;
+run/parameterfile=creditlimit_1 
+rrepl comp_type
+
+/*------------------------------------------------------------------------
+ Summary or Detail
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve invoice records and combine with AR payment records
+------------------------------------------------------------------------*/
+
+include "creditlimit_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = payments:rptloccode,
+    null fill on failure
+
+  file pl_to_pmt = access creditlimit_pmt_hf,
+    set creditlimit_pmt_hf:paymentid=payments:paymentid, one to many,
+    zero fill on failure
+
+where 
+  (payments:company = ccompany or ccompany = "ALL") and
+  (payments:datepaid=null and payments:company <> "") and
+  (payments:rptloccode = cLoc or cLoc = "ALL" ) and
+  (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="payments"/noheadings/hold="creditlimit_comb_hf"
+if  (((payments:deposit=1 and payments:paiddeposit = 1) or payments:deposit = 0)
+  and payments:datepaid = null  
+  and paymentstype:paytype =  3) then {
+  payments:paymentamount/width=14/decimalplaces=2
+  payments:ranumber/width=20
+  payments:invoicenumber/width=20
+  payments:company/width=60 
+  payments:commonid/width=20
+  payments:paymentid/width=20
+  payments:datereceived
+  payments:datereceived/name="original_date"
+  str(payments:invoicenumber)/width=60/name="reference"
+  str(payments:ponumber)/width=20/name="po_num"
+  "Invoice"/width=20/name="source"
+  0/name="ra_count"/width=10
+  0/name="res_count"/width=10
+}
+followed by
+if  (((payments:deposit=1 and payments:paiddeposit = 1) or payments:deposit = 0)
+  and payments:datepaid = null  
+  and paymentstype:paytype =  3) then {
+if pl_to_pmt:amount <> 0 then {
+  pl_to_pmt:amount/width=14/decimalplaces=2
+  payments:ranumber/width=20
+  payments:invoicenumber/width=20
+  payments:company/width=60
+  payments:commonid/width=20
+  pl_to_pmt:paymentid/width=20
+  pl_to_pmt:datereceived
+  payments:datereceived
+  pl_to_pmt:reference/width=60
+  ""/width=20
+  "Payment"/width=20
+  0/width=10
+  0/width=10
+}
+}
+sorted by 
+   payments:ranumber
+   payments:invoicenumber
+
+;
+run/parameterfile=creditlimit_1 
+
+/*------------------------------------------------------------------------
+ Retrieve open/pending contracts and open reservations with AR pmts
+------------------------------------------------------------------------*/
+include "creditlimit_i1.inc"
+
+define
+   file pay_link = access payments,
+    set payments:commonid=rrm:commonid,
+    one to many
+
+   string ranumber = if rrm:rastatus = 2 then rrm:ranumber else rrm:resnumber
+   number ra_count = if rrm:rastatus = 2 then 1 else 0
+   number res_count = if rrm:resstatus = 20 then 1 else 0
+
+where 
+  (rrm:rastatus = 2) or 
+  (rrm:resstatus = 20 and rrm:dateout <= dtedate)
+   
+
+list/domain="rrm"/nodetail/hold="creditlimit_comb_hf"/append
+if (pay_link:paymenttype one of include "paytypes.cq") then {
+  rrm:totalcharges
+  ranumber 
+  ranumber 
+  pay_link:company
+  pay_link:commonid
+  pay_link:paymentid
+  pay_link:datereceived
+  pay_link:datereceived
+  str(pay_link:invoicenumber)
+  str(pay_link:ponumber)
+  if rrm:rastatus = 2 then "OpenRA" else "OpenRes"
+  ra_count/width=10
+  res_count/width=10
+} 
+sorted by
+  rrm:commonid
+end of rrm:commonid
+if (pay_link:paymenttype one of include "paytypes.cq") then {
+  rrm:totalcharges /width=14/decimalplaces=2/name="paymentamount"
+  ranumber /width=20
+  ranumber /width=20/name="invoicenumber"
+  pay_link:company /width=60
+  pay_link:commonid /width=20
+  pay_link:paymentid /width=20
+  pay_link:datereceived
+  pay_link:datereceived /name="original_date"
+  str(pay_link:invoicenumber)/width=60/name="reference"
+  str(pay_link:ponumber) /width=20/name="po_num"
+  if rrm:rastatus = 2 then "OpenRA" else "OpenRes"/width=20/name="source"
+  ra_count/width=10
+  res_count/width=10
+}
+;
+run/parameterfile=creditlimit_1 
+
+/*------------------------------------------------------------------------
+ Subtract paid AR payments already included in AR balance previously
+------------------------------------------------------------------------*/
+include "creditlimit_i1.inc"
+define
+   file pay_link = access payments,
+    set payments:commonid=rrm:commonid,
+    one to many
+
+  file pl_to_pmt = access creditlimit_pmt_hf,
+    set creditlimit_pmt_hf:paymentid=pay_link:paymentid, one to many,
+    zero fill on failure
+
+   string ranumber = if rrm:rastatus = 2 then rrm:ranumber else rrm:resnumber
+
+where 
+  (rrm:rastatus = 2) or 
+  (rrm:resstatus = 20 and rrm:dateout <= dtedate)
+
+list/domain="rrm"/hold="creditlimit_comb_hf"/append
+if (pay_link:paymenttype one of include "paytypes.cq") and
+   (pay_link:datepaid = null) and
+   ((pay_link:deposit=1 and pay_link:paiddeposit = 1) or pay_link:deposit = 0) then {
+  pay_link:paymentamount*-1 /width=14/decimalplaces=2 /name="paymentamount"
+  ranumber /width=20
+  pay_link:invoicenumber /width=20
+  pay_link:company /width=60
+  pay_link:commonid /width=20
+  pay_link:paymentid /width=20
+  pay_link:datereceived
+  pay_link:datereceived /name="original_date"
+  str(pay_link:invoicenumber)/width=60/name="reference"
+  str(pay_link:ponumber) /width=20/name="po_num"
+  if rrm:rastatus = 2 then "OpenRApmt" else "OpenRespmt"/width=20/name="source"
+  0/name="ra_count"/width=10
+  0/name="res_count"/width=10
+
+}
+followed by
+if (pay_link:paymenttype one of include "paytypes.cq") and
+   (pay_link:datepaid = null) and
+   ((pay_link:deposit=1 and pay_link:paiddeposit = 1) or pay_link:deposit = 0) then {
+  pl_to_pmt:amount*-1 /width=14/decimalplaces=2 
+  ranumber /width=20
+  pay_link:invoicenumber /width=20
+  pay_link:company /width=60
+  pay_link:commonid /width=20
+  pay_link:paymentid /width=20
+  pay_link:datereceived
+  pay_link:datereceived 
+  str(pay_link:invoicenumber)/width=60
+  str(pay_link:ponumber) /width=20
+  if rrm:rastatus = 2 then "OpenRApmtPd" else "OpenRespmtPd"/width=20
+  0/width=10
+  0/width=10
+}
+;
+run/parameterfile=creditlimit_1 
+
+/*------------------------------------------------------------------------
+ Add place holder record for all billing companies
+------------------------------------------------------------------------*/
+
+where 
+  company:directbill = 
+    1
+
+list/domain="company"/hold="creditlimit_comb_hf"/append
+
+0/width=14/decimalplaces=2 /name="paymentamount"
+  "" /width=20 /name="ranumber"
+  ""/width=20 /name="invoicenumber"
+  company:company/width=60 /name="company"
+  0 /width=20 /name="commonid"
+  0 /width=20 /name="paymentid"
+  todaysdate /name="datereceived"
+  todaysdate /name="original_date"
+  "" /width=60/name="reference"
+  "" /width=20/name="po_num"
+  "Invoice" /width=20/name="source"
+  0/name="ra_count"/width=10
+  0/name="res_count"/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "Payment" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRA" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRes" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRApmt" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRespmt" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRApmtPd" /width=20
+  0/width=10
+  0/width=10
+followed by
+  0/width=14/decimalplaces=2
+  "" /width=20 
+  ""/width=20 
+  company:company/width=60 
+  0 /width=20 
+  0 /width=20 
+  todaysdate 
+  todaysdate 
+  "" /width=60
+  "" /width=20
+  "OpenRespmtPd" /width=20
+  0/width=10
+  0/width=10
+;
+run/parameterfile=creditlimit_1 
+
+/*------------------------------------------------------------------------
+ Create final data table
+------------------------------------------------------------------------*/
+
+sum/domain="creditlimit_comb_hf"/hold="credit_final_hf"
+  creditlimit_comb_hf:paymentamount
+
+across
+  creditlimit_comb_hf:source/total
+
+by
+  creditlimit_comb_hf:company/keyelement=1.1
+
+end of creditlimit_comb_hf:company
+  total[creditlimit_comb_hf:ra_count,creditlimit_comb_hf:company]/name="count_ra"
+  total[creditlimit_comb_hf:res_count,creditlimit_comb_hf:company]/name="count_res"
+;
+run/parameterfile=creditlimit_1 
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "creditlimit_i1.inc"
+define
+  file comp_link = access company,
+   set company:company=credit_final_hf:company
+
+  file emp_link = access employee,
+    set employee:employeenumber=comp_link:salesrep,
+    one to one, null fill on failure
+
+  string sales_rep = str(emp_link:employeefirstname) + " " + str(emp_link:employeelastname)
+
+  number ar_bal = credit_final_hf:paymentamount_invoice + credit_final_hf:paymentamount_payment
+  number openra_bal = credit_final_hf:paymentamount_openra + credit_final_hf:paymentamount_openrapmt + credit_final_hf:paymentamount_openrapmtpd
+  number operes_bal = credit_final_hf:paymentamount_openres + credit_final_hf:paymentamount_openrespmt + credit_final_hf:paymentamount_openrespmtpd
+  number onacct = comp_link:onaccount * -1
+  number cred_bal = ar_bal+openra_bal+operes_bal+onacct
+  number over_credit =  if comp_link:creditlimit <> 0 then comp_link:creditlimit - cred_bal
+
+where (credit_final_hf:company = ccompany or ccompany = "ALL") and
+      (sales_rep = csalesrep or csalesrep = "ALL") and
+      (comp_link:type one of include "comp_type.cq" or cctype = "ALL") and 
+      (credit_final_hf:company <> "")
+      
+
+list/domain="credit_final_hf"/noheadings/nobanner/pageof/pagelength=80/title="Credit Limit Report"
+  credit_final_hf:company /displaywidth=30
+  ar_bal /displaywidth=14
+  credit_final_hf:count_ra/total /displaywidth=5
+  openra_bal /displaywidth=14
+  credit_final_hf:count_res/total /displaywidth=5
+  operes_bal /displaywidth=14
+  onacct/displaywidth=14
+  cred_bal  /displaywidth=14
+  comp_link:creditlimit /displaywidth=14
+  over_credit /displaywidth=14
+  
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Company Types: "+str(cctype)/newline
+  "Sales Reps: "+str(csalesrep)/newline
+  "Open Reservations up to "+str(dtedate)+" included"/newline
+  end box/newlines=4
+
+  "Company"/align=credit_final_hf:company 
+  "A/R"/align=ar_bal
+  "Open RA "/align=credit_final_hf:count_ra
+  "Open RA"/align=openra_bal
+  "Open Res "/align=credit_final_hf:count_res
+  "Open Res"/align=operes_bal
+  "On Account" /align=onacct
+  "Total Credit"/align=cred_bal  
+  "Credit Limit"/align=comp_link:creditlimit
+  "Availale Credit"/align=over_credit/newline
+
+  "Balance"/align=ar_bal
+  "Count"/align=credit_final_hf:count_ra
+  "Balance"/align=openra_bal
+  "Count"/align=credit_final_hf:count_res
+  "Balance"/align=operes_bal
+  "Balance" /align=onacct
+  "Balance"/align=cred_bal/newline
+;
+replace creditlimit.eq
+ run/parameterfile=creditlimit_1 creditlimit.eq
+rrepl creditlimit
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view creditlimit
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action[100]      = "Report" -- Post or Report
+   string rptdesc[100]     = "Credit Limit Report" -- Report Title
+   string rptname1[100]    = "creditlimit" -- output file1
+   string rptname2[100]    = "" -- output file2 if applicable
+   string rptname3[100]    = "" -- output file3 if applicable
+   string parfile[100]     = "creditlimit_1.par" -- parameter.par file
+   string xmlname[100]     = "" -- xml for posting if applicable
+   string exportname[100]  = "" -- posting export file if applicable
+   string startdate[100]   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate[100]     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

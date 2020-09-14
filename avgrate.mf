@@ -1,0 +1,314 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2020.
+  All rights reserved.
+
+  Report: Monthly Average Rate Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 7/14/2020
+Modified:
+
+Notes:
+$Workfile: avgrate.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/avgrate.mf $
+$Revision: 1 $
+$History: avgrate.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 7/14/20    Time: 4:59p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation.
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_invclass.cq"
+
+  string inp_month = parameter prompt "Month: " default monthname(todaysdate) valid "January","February","March","April","May","June","July","August","September","October","November","December"
+  number inp_year = parameter prompt "Year: " default year(todaysdate)
+
+  string rate_flag = parameter prompt "Reserved or Actual Rate: " default "Both" valid "Reserved","Actual","Both"
+  string cexcel = "N"
+
+;
+replace avgrate_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters create custom title
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+
+list/domain="dummy"/nodefaults
+   if rate_flag = 'Reserved' then {
+   "string title_str = 'Average Reserved Rate Report for '+str(inp_month)+' '+str(inp_year)" /newline
+   } else
+   if rate_flag = 'Actual' then {
+   "string title_str = 'Average Actual Rate Report for '+str(inp_month)+' '+str(inp_year)" /newline
+   } else {
+   "string title_str = 'Average Actual/Reserved Rate Report for '+str(inp_month)+' '+str(inp_year)" /newline
+   }
+
+;
+replace avgrate_1.eq
+run/setparameter avgrate_1.eq
+
+run/parameterfile=avgrate_1 avgrate_1.eq
+rreplace avgrate_i2
+
+/*------------------------------------------------------------------------
+ Create MTD contract data
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+
+   string start_date = str(inp_month)+"-"+"1-"+str(inp_year)
+
+   number lpr_yr = year(date(start_date)) * 100
+   number lpr_mon = month(date(start_date))
+   number lpr_yymm = lpr_yr + lpr_mon
+   
+   
+   number max_day = day(dateadd(date(start_date)-day(date(start_date)),1))
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = locra:locationcode,
+    null fill on failure
+
+   file counter_i = access counter,
+    set min=1, max=max_day
+
+  number num_res_run1 =  sumarray(locra:res,1,counter_i:position)
+  number num_ra_run1 = sumarray(locra:rented,1,counter_i:position)
+
+  number avg_res_rate1 = (sumarray(locra:resavgrate,1,counter_i:position))/decimalplaces=2
+  number avg_ra_rate1 = (sumarray(locra:rentedavgrate,1,counter_i:position))/decimalplaces=2
+
+where 
+  (locra:invclass = CClass or cClass = "ALL")
+  and (locra:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and locra:yrmn=lpr_yymm 
+
+list/domain="locra"/nodetail/hold="avg_rate_hf"
+if counter_i:position <= max_day then {
+locra:invclass
+counter_i:position
+num_res_run1
+avg_res_rate1
+num_ra_run1
+avg_ra_rate1
+}
+sorted by
+counter_i:position
+locra:invclass
+
+end of locra:invclass/noheading
+locra:invclass
+counter_i:position/name="day"
+total[num_res_run1]/name="num_res_run"
+round(total[avg_res_rate1] divide total[num_res_run1],2)/name="avg_res_rate"
+total[num_ra_run1]/name="num_ra_run"
+round(total[avg_ra_rate1] divide total[num_ra_run1],2)/name="avg_ra_rate"
+
+;
+run/parameterfile=avgrate_1
+
+/*------------------------------------------------------------------------
+ Summarize data
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+
+sum/domain='avg_rate_hf'/hold="avgrate_hf"
+avg_ra_rate
+avg_res_rate
+
+across
+invclass
+ 
+by
+day
+;
+run/parameterfile=avgrate_1
+
+/*------------------------------------------------------------------------
+ Get field names
+------------------------------------------------------------------------*/
+
+define
+  string cd1 = replace(str(avg_rate_hf:invclass )," ","_")  -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_") 
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_") 
+  string cd9 = replace(str(cd8),"#","_") 
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_") 
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  string cd29 = replace(str(cd28),".","_")
+  string cd_final = replace(str(cd29),"*","_")
+
+list/domain="avg_rate_hf"/nodetail/hold="avgrate_detail_hf"
+  avg_rate_hf:invclass 
+
+sorted by
+  avg_rate_hf:invclass
+
+end of avg_rate_hf:invclass
+  avg_rate_hf:invclass/name="header"
+  cd_final/name="fieldname"
+;
+run/parameterfile=avgrate_1 
+
+/*------------------------------------------------------------------------
+ Create detail lines
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+list/domain="avgrate_detail_hf"/nodetail/nobanner/nodefaults
+  avgrate_detail_hf:header 
+
+sorted by
+  avgrate_detail_hf:header 
+
+end of avgrate_detail_hf:header 
+  if (rate_flag = "Actual" or rate_flag = "Both") then 'avg_ra_rate_'+avgrate_detail_hf:fieldname+'/heading="'+avgrate_detail_hf:header+'-RA Avg"'/newline
+  if (rate_flag = "Reserved" or rate_flag = "Both") then 'avg_res_rate_'+avgrate_detail_hf:fieldname+'/heading="'+avgrate_detail_hf:header+'-Res Avg"'
+;
+run/parameterfile=avgrate_1 
+rrepl avgrate_detail.cq
+
+/*------------------------------------------------------------------------
+ Calculate averages
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+list/domain="avgrate_detail_hf"/nodetail/nobanner/nodefaults
+  avgrate_detail_hf:header 
+
+sorted by
+  avgrate_detail_hf:header 
+
+end of avgrate_detail_hf:header 
+  if (rate_flag = "Actual" or rate_flag = "Both") then 'average[avg_ra_rate_'+avgrate_detail_hf:fieldname+',report]/align=avg_ra_rate_'+avgrate_detail_hf:fieldname/newline
+  if (rate_flag = "Reserved" or rate_flag = "Both") then 'average[avg_res_rate_'+avgrate_detail_hf:fieldname+',report]/align=avg_res_rate_'+avgrate_detail_hf:fieldname
+;
+run/parameterfile=avgrate_1 
+rrepl avgrate_avg.cq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+define
+ include "avgrate_i2.cq"
+
+list/domain="avgrate_hf"/noreporttotals/title=title_str/nobanner/pagelength=0
+  avgrate_hf:day/heading="Day"
+
+  include "avgrate_detail.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  end box /newline=4
+ 
+end of report
+  ""/newline
+  "Averages"/align=avgrate_hf:day
+  include "avgrate_avg.cq"
+;
+replace avgrate.eq
+
+/*------------------------------------------------------------------------
+ Output Report -Excel
+------------------------------------------------------------------------*/
+
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "avgrate_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=avgrate_1 avgrate.eq"/newline
+} else {
+"run/xls/parameterfile=avgrate_1 avgrate_xl.eq"/newline
+}
+"rrepl avgrate"/newline
+"view"/newline 
+;
+run/parameterfile=avgrate_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "avgrate" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "avgrate_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

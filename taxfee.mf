@@ -1,0 +1,633 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Taxes and Fees Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/26/2017
+Modified:
+
+Notes:
+$Workfile: taxfee.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/taxfee.mf $
+$Revision: 2 $
+$History: taxfee.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+where rtmift:type >= 50
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Fees/Taxes to include or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_code"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_code.cq"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string csort = parameter prompt "Sort by: " valid "Report Date","RA#" default "Report Date"
+
+;
+replace taxfee_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RCMIFT records - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+
+  include "taxfee_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rcmift:rptloccode,
+    null fill on failure
+
+  file misc_rcm = access miscsales,
+    set miscsales:commonid = rcmift:commonid,
+    one to one,
+    zero fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rcmift:commonid,
+    one to one, null fill on failure
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rcmift:commonid,
+    one to one, null fill on failure
+
+  number chg_days1 = rcmift:chgdays + (rcmift:chgweeks*7) + (rcmift:chgmonths*28)
+
+  number act_days = if (rrm_link:datein - rrm_link:dateout = 0) then 1 else (rrm_link:datein - rrm_link:dateout)
+
+  number sort_order = if misc_rcm:commonid = 0 then 1 else 3
+
+  
+where 
+  (rcmift:rptdate >= dtSdate and rcmift:rptdate <= dtEdate)
+  and (rcmift:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rcmift:Product  = cProduct or cProduct = "ALL" )
+
+
+list/domain="rcmift"/nodetail/hold="rcmift_hf"
+  rcmift:commonid 
+  rcmift:accountid 
+  rrm_link:rptdate
+  rrm_link:customerfirstname
+  rrm_link:customerlastname
+  rental_link:totaltime
+  rental_link:totaltpm - rental_link:totaltime
+  rental_link:rentaldiscountamt*-1/width=14
+  rrm_link:totalcharges
+  rcmift:type
+  rcmift:code 
+  rcmift:calcmeth
+  rcmift:ratepct 
+  rcmift:total 
+  rcmift:rptdate
+  rcmift:rptloccode
+  misc_rcm:ticketnumber
+  chg_days1
+  act_days
+  rcmift:appchgs
+  sort_order
+
+sorted by 
+  rcmift:commonid
+  rrm_link:rptdate
+  rcmift:accountid
+
+end of rcmift:accountid
+  rcmift:commonid/width=11 /keyelement=1.1
+  rcmift:accountid/width=11 /keyelement=1.2
+  rrm_link:rptdate/name="startdate"/keyelement=1.3
+  rrm_link:customerfirstname
+  rrm_link:customerlastname
+  rental_link:totaltime
+  rental_link:totaltpm - rental_link:totaltime/name="tot_mileage"
+  rental_link:rentaldiscountamt*-1/width=14/name="rentaldiscountamt"
+  rrm_link:totalcharges
+  rcmift:type
+  rcmift:code 
+  rcmift:calcmeth
+  rcmift:ratepct 
+  running total[rcmift:total,rcmift:accountid]/width=14/name="total_rev"
+  rcmift:rptdate
+  rcmift:rptloccode
+  misc_rcm:ticketnumber
+  running total[chg_days1,rcmift:accountid]/width=19/name="chg_days"
+  act_days
+  rcmift:appchgs
+  sort_order
+
+;
+replace taxfee_1.eq
+run/setparameter taxfee_1.eq
+
+run/parameterfile=taxfee_1 taxfee_1.eq
+
+/*------------------------------------------------------------------------
+ Summary or Detail and sort criteria
+------------------------------------------------------------------------*/
+include "taxfee_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if csummary = "Detail" then "" else "/nodetail";
+
+run/parameterfile=taxfee_1
+rreplace detail
+
+include "taxfee_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if csort = "RA#" then "ra_ticket" else "rcmift_hf:rptdate";
+
+run/parameterfile=taxfee_1
+rreplace sort_detail
+
+
+/*------------------------------------------------------------------------
+ Collect previously booked fees/taxes
+------------------------------------------------------------------------*/
+
+define
+   file booked_link = access bookedrev,
+    set bookedrev:commonid=rcmift_hf:commonid,
+    one to many, zero fill on failure
+where booked_link:commonid <>0
+
+list/domain="rcmift_hf"/hold="prevbooked_hf"
+if itemnumber[rcmift_hf:commonid]=1 and booked_link:revid > 1 then {
+  rcmift_hf:commonid/keyelement=1.1
+  booked_link:revid/keyelement=1.2
+  booked_link:rptdate
+  booked_link:totalrevenue
+}
+sorted by rcmift_hf:commonid
+
+;
+run/parameterfile=taxfee_1 
+
+/*------------------------------------------------------------------------
+ Calculate misc tickets grand total
+------------------------------------------------------------------------*/
+
+
+define
+   file misc_link = access miscsales,
+    set miscsales:commonid=rcmift_hf:commonid,
+    one to one, zero fill on failure
+
+where misc_link:commonid <>0
+
+list/domain="rcmift_hf"/nodetail/hold="misctotal_hf"
+  rcmift_hf:commonid
+  rcmift_hf:total_rev
+
+sorted by rcmift_hf:commonid
+
+end of rcmift_hf:commonid
+  rcmift_hf:commonid/keyelement=1.1
+  running total[rcmift_hf:total_rev]/name="totalcharges"
+
+;
+run/parameterfile=taxfee_1 
+
+/*------------------------------------------------------------------------
+ Get rollover revenue by period
+------------------------------------------------------------------------*/
+
+  include "taxfee_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = bookedrev:rptloccode,
+    null fill on failure
+
+  file rrm_link = access rrm,
+    set rrm:commonid=bookedrev:commonid,
+    one to one, null fill on failure
+
+  number tot_time = if bookedrev:revid = 1 then totalrevenue
+
+  
+where 
+  (bookedrev:rptdate >= dtSdate and bookedrev:rptdate <= dtEdate)
+  and (bookedrev:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm_link:Product  = cProduct or cProduct = "ALL" )
+
+list/domain="bookedrev"/nodetail/hold="bookedtotal_hf"
+  bookedrev:commonid 
+  bookedrev:totalrevenue
+  bookedrev:rptdate
+  tot_time
+
+sorted by
+  bookedrev:commonid
+  bookedrev:rptdate
+  bookedrev:startdate
+
+end of bookedrev:startdate
+  bookedrev:commonid /keyelement=1.1
+  running total[bookedrev:totalrevenue,bookedrev:startdate]/name="total_rev"
+  bookedrev:rptdate /keyelement=1.2
+  bookedrev:startdate/keyelement=1.3
+  running total[tot_time,bookedrev:startdate]/name="totaltime"
+;
+run/parameterfile=taxfee_1 
+
+/*------------------------------------------------------------------------
+ Get rollover revenue by period
+------------------------------------------------------------------------*/
+
+  include "taxfee_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = bookedrev:rptloccode,
+    null fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=bookedrev:commonid,
+   one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=bookedrev:commonid,
+   with rcmift:accountid=bookedrev:revid,
+   one to one,generic, null fill on failure
+
+  file booked_total = access bookedtotal_hf,
+   set bookedtotal_hf:commonid=bookedrev:commonid,
+   bookedtotal_hf:rptdate=bookedrev:rptdate,
+   bookedtotal_hf:startdate=bookedrev:startdate,
+   one to one, generic, zero fill on failure
+
+  file booked_tm = access bookedtotal_hf,
+   set bookedtotal_hf:commonid=bookedrev:commonid,
+   bookedtotal_hf:rptdate=bookedrev:rptdate,
+   bookedtotal_hf:startdate=bookedrev:startdate,
+   one to one, generic, zero fill on failure
+
+  number chg_days = bookedrev:enddate - bookedrev:startdate
+  number act_days = bookedrev:enddate - bookedrev:startdate
+
+  
+where 
+  (bookedrev:rptdate >= dtSdate and bookedrev:rptdate <= dtEdate)
+  and (bookedrev:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm_link:Product  = cProduct or cProduct = "ALL" )
+  and bookedrev:revid <> 1
+
+
+list/domain="bookedrev"/hold="rcmift_hf"/append
+  bookedrev:commonid/width=11 /keyelement=1.1
+  if bookedrev:revid = 1 then 1 else rcmift_link:accountid/width=11/name="accountid" /keyelement=1.2
+  bookedrev:startdate/keyelement=1.3
+  rrm_link:customerfirstname
+  rrm_link:customerlastname
+  booked_tm:totaltime/width=14/decimalplaces=2/name="totaltime"
+  0/decimalplaces=2/width=15/name="tot_mileage"
+  0/decimalplaces=2/width=14/name="rentaldiscountamt"
+  booked_total:total_rev/name="totalcharges"/width=14/decimalplaces=2
+  rcmift_link:type
+  rcmift_link:code 
+  rcmift_link:calcmeth
+  rcmift_link:ratepct 
+  bookedrev:totalrevenue/width=14/name="total_rev"
+  bookedrev:rptdate
+  bookedrev:rptloccode
+  ""/width=20/name="ticketnumber" -- misc ticket number
+  chg_days
+  act_days
+  rcmift_link:appchgs
+  2/name="sort_order" -- sort order
+
+sorted by bookedrev:startdate
+
+;
+run/parameterfile=taxfee_1 
+
+
+/*------------------------------------------------------------------------
+ Extract applicable charges from string
+------------------------------------------------------------------------*/
+
+define
+  
+   field_count = if len(rcmift_hf:appchgs) = 0 then 0 else countfields(rcmift_hf:appchgs,",")
+
+   file counter_i = access counter,
+    set min=0,max=field_count
+
+
+list/domain="rcmift_hf"/hold="appchrgs_hf"
+if counter_i:position < field_count then {
+  rcmift_hf:commonid /keyelement=1.1
+  rcmift_hf:accountid /keyelement=1.2
+  rcmift_hf:totaltime
+  rcmift_hf:tot_mileage
+  rcmift_hf:rentaldiscountamt
+  rcmift_hf:code 
+  rcmift_hf:ratepct 
+  rcmift_hf:total_rev 
+  rcmift_hf:rptdate 
+  rcmift_hf:startdate/keyelement=1.3
+  val(subfield(rcmift_hf:appchgs,",",counter_i:position+1))/name="chrgID"
+}
+
+;
+run/parameterfile=taxfee_1 
+
+/*------------------------------------------------------------------------
+ Calculate taxable amount
+------------------------------------------------------------------------*/
+
+include "taxfee_i1.inc"
+
+define
+   file appchrg_link = access appchrgs_hf,
+    set appchrgs_hf:commonid=rcmift_hf:commonid,
+    appchrgs_hf:accountid=rcmift_hf:accountid,
+    appchrgs_hf:startdate=rcmift_hf:startdate,
+    one to many, zero fill on failure
+
+   file rcmift_link = access rcmift_hf,
+    set rcmift_hf:commonid=rcmift_hf:commonid,
+    rcmift_hf:accountid=appchrg_link:chrgid,
+    zero fill on failure
+
+   number app_chg = switch(appchrg_link:chrgid)
+     case 1  : appchrg_link:totaltime
+     case 2  : appchrg_link:tot_mileage
+     case 3  : appchrg_link:rentaldiscountamt
+     default : rcmift_link:total_rev
+  
+
+where rcmift_hf:type >=50
+   and (rcmift_hf:code = cCode or cCode = "ALL")
+
+  
+list/domain="rcmift_hf"/nodetail/hold="taxamt_hf"
+  rcmift_hf:commonid
+  rcmift_hf:accountid
+  rcmift_hf:rptdate
+  rcmift_hf:rptloccode
+  rcmift_hf:code
+  rcmift_hf:total_rev
+  app_chg
+
+sorted by
+  rcmift_hf:startdate
+  rcmift_hf:commonid
+  rcmift_hf:accountid
+
+
+end of rcmift_hf:accountid
+  rcmift_hf:commonid/keyelement=1.1
+  rcmift_hf:accountid/keyelement=1.2
+  rcmift_hf:rptdate
+  rcmift_hf:rptloccode
+  rcmift_hf:code
+  rcmift_hf:total_rev
+  running total[app_chg,rcmift_hf:accountid]/name="tax_amt"
+
+;
+run/parameterfile=taxfee_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "taxfee_i1.inc"
+
+
+define
+   file appchrg_link = access appchrgs_hf,
+    set appchrgs_hf:commonid=rcmift_hf:commonid,
+    appchrgs_hf:accountid=rcmift_hf:accountid,
+    appchrgs_hf:startdate=rcmift_hf:startdate,
+    one to many, zero fill on failure
+  
+   file tax_link = access taxamt_hf,
+    set taxamt_hf:commonid=rcmift_hf:commonid,
+    taxamt_hf:accountid=rcmift_hf:accountid,
+    one to one, zero fill on failure
+
+   file rcmift_link = access rcmift_hf,
+    set rcmift_hf:commonid=rcmift_hf:commonid,
+    rcmift_hf:accountid=appchrg_link:chrgid,
+    zero fill on failure
+
+   file prev_booked = access prevbooked_hf,
+    set prevbooked_hf:commonid=rcmift_hf:commonid,
+    prevbooked_hf:revid=rcmift_hf:accountid,
+    one to many, null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rcmift_hf:commonid,
+    one to one
+ 
+   file misc_link = access misctotal_hf,
+    set misctotal_hf:commonid=rcmift_hf:commonid,
+    one to one, zero fill on failure
+
+   number app_chg = switch(appchrg_link:chrgid)
+     case 1  : appchrg_link:totaltime
+     case 2  : appchrg_link:tot_mileage
+     case 3  : appchrg_link:rentaldiscountamt
+     default : rcmift_link:total_rev
+
+   string app_heading = switch(appchrg_link:chrgid)
+     case 1  : "Time: "
+     case 2  : "Mileage: "
+     case 3  : "Discount: "
+     default : rcmift_link:code + ": "
+
+   string source_type = switch(rcmift_hf:sort_order)
+     case 1 : "Closed Contracts"
+     case 2 : "Booked Revenue"
+     case 3 : "Misc Sales"
+
+  string ra_ticket = if rcmift_hf:ticketnumber = "" then  rental_link:ranumber else rcmift_hf:ticketnumber
+
+  number nontax_amt = rcmift_hf:totalcharges - tax_link:tax_amt - rcmift_hf:total_rev
+
+  number prebook_amt = prev_booked:totalrevenue * -1
+    
+
+where rcmift_hf:type >=50
+   and (rcmift_hf:code = cCode or cCode = "ALL")
+
+  
+list/domain="rcmift_hf"/duplicates/pageof/nobanner/noheadings/pagelength=70/title="Taxes and Fees Report" include "detail.cq"
+  rcmift_hf:rptdate/name="a"
+  rcmift_hf:rptloccode/name="b"
+  ra_ticket/name="c"
+  rcmift_hf:customerlastname+", "+rcmift_hf:customerfirstname/displaywidth=40/name="d"
+  rcmift_hf:act_days/total/displaywidth=8/name="e"
+  if rcmift_hf:calcmeth<>10 then rcmift_hf:chg_days/total/zerosuppress/displaywidth=8/name="f"
+  if rcmift_hf:calcmeth=10 then {
+  rcmift_hf:ratepct/mask="zzz9.9"/nototal/displaywidth=8/name="g"
+  nontax_amt/total/name="h"
+  tax_link:tax_amt/total/name="i"
+  }
+  rcmift_hf:total_rev/total/name="j" 
+  if rcmift_hf:sort_order  = 3 then misc_link:totalcharges else rcmift_hf:totalcharges/name="k"
+
+followed by
+
+if (prev_booked:commonid <> 0 and rcmift_hf:sort_order <> 2) then {
+
+  "Rollover reported: "/align=d
+  prev_booked:rptdate/mask="mm/dd/yyyy"
+  "  "
+  prebook_amt/nototal
+
+}
+
+followed by
+if (rcmift_link:total_rev <> 0 or
+  (appchrg_link:chrgid = 1 and rental_link:totaltime <> 0) or
+  (appchrg_link:chrgid = 2 and (rental_link:totaltpm - rental_link:totaltime <> 0)) or
+  (appchrg_link:chrgid = 3 and rental_link:rentaldiscountamt <> 0)) then {
+box/fill/column=5
+  app_heading/notoggle 
+  app_chg/noheading
+  "  "
+end box
+}
+
+sorted by 
+rcmift_hf:code/total/page/heading="@"
+rcmift_hf:sort_order
+include "sort_detail.cq"
+
+
+top of sort_order
+  ""/newline
+  source_type/noheading/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "Product: " + str(cProduct)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100
+  end box/newline=4
+
+  "Report" /align=a
+  "Location" /align=b
+  "RA/Ticket#" /align=c
+  "Name" /align=d
+  "Actual" /align=e
+  if rcmift_hf:calcmeth<>10 then "Charged" /align=f
+  if rcmift_hf:calcmeth=10 then "% Used" /align=g
+  "Non-Taxable" /align=h
+  "Taxable" /align=i
+  if rcmift_hf:calcmeth=10 then "Tax Amt" else "Fee Amt"/align=j
+  "Contract Total" /align=k/newline
+  
+  "Date"/align=a
+  "Days"/align=e
+   if rcmift_hf:calcmeth<>10 then "Days" /align=f
+
+  ""/newline=2
+  rcmift_hf:code/heading
+
+end of rcmift_hf:code
+  if running total[prebook_amt,rcmift_hf:code] <> 0 then {
+  ""/newline
+  running total[prebook_amt,rcmift_hf:code]/heading="Rollover Adjustment"/align=j/newline
+  running total[rcmift_hf:total_rev,rcmift_hf:code] + running total[prebook_amt,rcmift_hf:code]/heading="Net"/align=j
+}
+
+end of report
+  if running total[prebook_amt,report] <> 0 then {
+  ""/newline
+  running total[prebook_amt,report]/heading="Rollover Adjustment"/align=j/newline
+  running total[rcmift_hf:total_rev,report] + running total[prebook_amt,report]/heading="Net"/align=j
+}
+
+;
+replace taxfee.eq
+run/parameterfile=taxfee_1 taxfee.eq
+rrepl taxfee
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view taxfee
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Taxes and Fees Report" -- Report Title
+   string rptname1    = "taxfee" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "taxfee_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,1547 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Missing Charges Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/5/2019
+Modified:
+
+Notes: 
+$Workfile: misschgs.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/misschgs.mf $
+$Revision: 1 $
+$History: misschgs.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/17/19    Time: 11:32a
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+viewpoint native;
+define
+
+    string cCodeList1 = "Misc Charge Days,CDW Days,PAC Days,PEC Days,SLI Days,Addl Driver Days,"+
+    "Underage Driver Days,Upgrade Days,Drop Charge Days,Fuel Days,Prepaid Fuel Days,FF Recovery Fee Days,"+
+    "Equipment Charge Days,Misc Fee Days,Sales Tax Days,Federal Tax Days,Other Tax Days"
+
+    string ccodelist2 =  
+        "*Blank*,"+
+        "Agent,"+
+        "Arriv Airl,"+
+        "Arriv Flt#,"+
+        "Arriv Date,"+       
+        "Arriv Time,"+       
+        "Bonus,"+            
+        "Bonus2,"+           
+        "Class,"+           
+        "Classes,"+          
+        "COI/InsType,"+      
+        "Company,"+         
+        "Corp ID,"+         
+        "Cust Name,"+       
+        "Date In,"+         
+        "Date Out,"+        
+        "Disc Reason,"+     
+        "Emp# Out,"+         
+        "Emp# In,"+   
+        "Fuel Dist,"+
+        "Fuel Units,"+
+        "Prepaid Fuel Units,"+       
+        "FF Account,"+      
+        "FF Airline,"+      
+        "Ins Co,"+          
+        "Inv License,"+      
+        "PO#,"+              
+        "Promo Code,"+      
+        "Rate Code,"+      
+        "Rental Reason,"+     
+        "Referred By," +     
+        "Reference#,"+       
+        "Referral,"+       
+        "RentalType,"+      
+        "Rented As Class,"+ 
+        "Res Number,"+      
+        "RO#,"+          
+        "Serv Order#,"+      
+        "Source,"+         
+        "Tax ID#,"+        
+        "Taxable,"+        
+        "Tour Code,"+        
+        "Unit#,"+           
+        "VIN,"+             
+        "VIP#,"+            
+        "Voucher#"  
+
+   string ccodelist3 =
+       "Time Charges,"+
+       "Daily Rate,"+
+       "Mileage Charges,"+
+       "Number Miles,"+
+       "T&M Discount,"+
+       "Charged Days,"+
+       "Actual Days,"+
+       "T&M Upgrade,"+
+       "Trx Time,"+
+       "Gross T&M,"+
+       "Net T&M,"
+
+    string ccodelist = ccodelist1 +"," + ccodelist2 + "," + ccodelist3
+    string ccodetype = "i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,i,i,i,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,i,i,i,i,i,i,i,i,c,i,i"
+
+    number field_count = countfields(ccodelist,",")
+    
+    file counter_i = access counter,
+     set min=1,max=field_count
+
+    number type_counter = counter_i:position*2
+
+list/domain="dummy"/hold="hclist_hf"
+
+  subfield(ccodelist,",",counter_i:position)/name="field_name"/width=30
+  subfield(ccodetype,",",counter_i:position)/name="field_type"/width=30
+  "Fixed"/name="type"/width=10
+;
+run/parameterfile
+
+list/domain="rtmift"/nodetail/hold="hclist_hf"/append
+  rtmift:code
+  "Variable"
+sorted by rtmift:code
+end of rtmift:code
+  rtmift:code/name="field_name"/width=30
+  "i"/name="field_type"/width=30
+  "Variable"/name="type"/width=10
+;
+run/parameterfile
+
+viewpoint native;
+define
+   string ccodelist =
+       "Miles/Day,"+
+       "T&M/Day,"+
+       "Rev/RA,"+
+       "Rev/Day,"+
+       "Total Rev,"+
+       "Total Yield,"+
+       "Non-TM Yld,"+
+       "T&M/RA,"+
+       "Days/RA,"+
+       "Miles/RA"
+
+    number field_count = countfields(ccodelist,",")
+    
+    file counter_i = access counter,
+     set min=1,max=field_count
+
+list/domain="dummy"/hold="hclist_hf"/append
+
+  subfield(ccodelist,",",counter_i:position)/name="field_name"/width=30
+  "i"/name="field_type"/width=30
+  "Report"/name="type"/width=10
+;
+run/parameterfile
+cli copy hclist_hf.* ..\hclist_hf.*
+
+
+where hclist_hf:field_name<>""
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="hclist_hf"
+if itemnumber=1 then '"'+hclist_hf:field_name+'"' else
+   ',"'+hclist_hf:field_name+'"'
+
+sorted by
+   hclist_hf:field_name
+top of report
+'string ccode[8192] = multivalue parameter/noall prompt "Choose Columns to Print: "'
+"Valid "
+end of report
+'Default "*Blank*"'
+;
+run/parameterfile
+rrepl "param_code"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string cchrgs[8192] = multivalue parameter/noall prompt "Selected Charges:"'
+"Valid "
+;
+run/parameterfile
+rrepl "param_chrgs"
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cconsolidate =  parameter/uppercase prompt "Consolidate Locations: " valid "Y","N" default "Y"
+  include "param_product.cq"
+  include "param_chrgs.cq"
+  string cincexc = parameter prompt "Select Contracts With or Without Selected Charges?" valid "With","Without" default "Without"
+  string callany = parameter prompt "Use All or Any Selected Charges?" valid "All","Any" default "Any" 
+  string czero =  parameter/uppercase prompt "Consider Zero Amounts as Not on Contract: " valid "Y","N" default "Y" 
+  include "param_code.cq"
+  string csort = parameter prompt "Sort by: " valid "Local Company","Contract","Renter Last Name","Rate Code","Inv Class","Unit#" default "Contract"
+  string cpage = parameter/uppercase prompt "New Page per Sort Break: " valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace misschgs_i1.inc
+/*------------------------------------------------------------------------
+ RA selection  - setup parameters
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+  
+where 
+
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate and rrm:rastatus = 3) 
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product =cProduct or cProduct = "ALL" )
+
+
+    
+list/domain="rrm"/hold = "rrm1_hf"
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber
+  rrm:dateout
+  rrm:timeout
+  rrm:datedue
+  rrm:timedue
+  rrm:datein
+  rrm:timein
+
+;
+replace misschgs_1.eq
+run/setparameter misschgs_1.eq
+
+run/parameterfile=misschgs_1 misschgs_1.eq
+
+/*------------------------------------------------------------------------
+ Determine contract eligbility
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm1_hf:commonid,
+   one to many
+
+
+list/domain="rrm1_hf"/noheadings/nodetail/hold="rrmpass_hf"
+  rrm1_hf:commonid
+  rcmift_link:code
+  rcmift_link:total
+
+sorted by  
+  rrm1_hf:commonid
+  rcmift_link:code
+
+end of rcmift_link:code
+  rrm1_hf:commonid/keyelement=1.1
+  rcmift_link:code
+  if rcmift_link:code one of cchrgs then 
+     if (czero = "Y" and total[rcmift_link:total,rcmift_link:code]=0)then 0 else 1 else 0/name="flag"
+
+;
+run/parameterfile=misschgs_1 
+
+include "misschgs_i1.inc"
+
+define
+   number itemcount = countfields(str(cchrgs),",")
+
+list/domain="rrmpass_hf"/nodetail/hold="rrmpass2_hf"
+  rrmpass_hf:commonid 
+  rrmpass_hf:code 
+  rrmpass_hf:flag
+
+sorted by rrmpass_hf:commonid
+
+end of rrmpass_hf:commonid
+  rrmpass_hf:commonid/keyelement=1.1
+  if ((cincexc = "With" and callany = "Any") and (total[rrmpass_hf:flag,rrmpass_hf:commonid] > 0 and total[rrmpass_hf:flag,rrmpass_hf:commonid] =< itemcount)) then 1 else
+    if ((cincexc = "With" and callany = "All") and (total[rrmpass_hf:flag,rrmpass_hf:commonid] = itemcount)) then 1 else
+     if ((cincexc = "Without" and callany = "Any") and (total[rrmpass_hf:flag,rrmpass_hf:commonid] < itemcount and total[rrmpass_hf:flag,rrmpass_hf:commonid] >= 0)) then 1 else
+      if ((cincexc = "Without" and callany = "All") and (total[rrmpass_hf:flag,rrmpass_hf:commonid] = 0)) then 1 else 0/name="pass"
+;
+run/parameterfile=misschgs_1 
+
+define
+  file pass_link = access rrmpass2_hf,
+   set rrmpass2_hf:commonid=rrm1_hf:commonid,
+   one to one, zero fill on failure
+
+where pass_link:pass=1
+
+list/domain="rrm1_hf"/hold="rrm_hf"
+  rrm1_hf:commonid/keyelement=1.1
+  rrm1_hf:ranumber 
+  rrm1_hf:dateout 
+  rrm1_hf:timeout 
+  rrm1_hf:datedue 
+  rrm1_hf:timedue 
+  rrm1_hf:datein 
+  rrm1_hf:timein
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Contract rate information for T&M upgrade calculation
+------------------------------------------------------------------------*/
+
+define
+  file rate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   one to many,zero fill on failure
+
+list/domain="rrm_hf"/hold="rarate_hf"
+if rate_link:totcharge > 0 and rate_link:res = 0 and rate_link:type <> "OT" then {
+  rate_link:rateid/keyelement=1.2
+  rate_link:description 
+  rate_link:freemi 
+  rate_link:lineno 
+  rate_link:minsperx /keyelement=1.4
+  rate_link:ovlimit 
+  rate_link:ovp 
+  rate_link:rateid 
+  rate_link:rateper 
+  rate_link:timeunit 
+  rate_link:type /keyelement=1.3
+  rate_link:units 
+  rate_link:commonid/keyelement=1.1 
+  rate_link:totcharge 
+  rate_link:totmiles 
+  rate_link:totunits 
+  rate_link:res 
+ }
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ T&M upgrade calculations contract rates to reservation rates
+ and calculate difference
+------------------------------------------------------------------------*/
+
+define
+  file rate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   one to many,zero fill on failure
+
+  file rarate_link = access rarate_hf,
+   set rarate_hf:commonid=rate_link:commonid, 
+   rarate_hf:rateid=rate_link:rateid,
+   rarate_hf:type=rate_link:type,
+   rarate_hf:minsperx=rate_link:minsperx,
+   one to many, zero fill on failure
+
+
+list/domain="rrm_hf"/nodetail/hold="upg_hf"
+if rate_link:res = 1 and rate_link:type <> "OT" then {
+  rrm:ranumber
+  rate_link:commonid
+  rate_link:totcharge
+  rate_link:res
+  rate_link:type
+
+  rate_link:description
+  rate_link:rateid
+  rate_link:rateper
+  rate_link:totunits
+
+  rarate_link:description
+  rarate_link:rateid
+  rarate_link:rateper
+  rarate_link:totunits
+
+  (rarate_link:rateper * rarate_link:totunits) -  (rate_link:rateper * rarate_link:totunits)/name="tm_upg"
+
+}
+sorted by rrm_hf:commonid
+
+end of rrm_hf:commonid
+  rrm_hf:commonid/keyelement=1.1
+  total[tm_upg]/name="tpm_upg"
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ T&M and revenue day calculation
+------------------------------------------------------------------------*/
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm_link:commonid,
+    one to many,generic,
+    null fill on failure
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+
+   number ot_hours = system_set:extraactday
+
+   date date_in = if rrm_link:datein = null then rrm_link:datedue else rrm_link:datein
+   number time_in = if rrm_link:datein = null then rrm_link:timedue else rrm_link:timein
+
+   number ot_day = if ((date_in-rrm_link:dateout>0) and (time_in - rrm_link:timeout > system_set:extraactday)) then 1 else 0 -- 0 if same day
+   number tot_actdays = if (date_in - rrm_link:dateout + ot_day = 0) then 1 else (date_in - rrm_link:dateout + ot_day) -- same day = 1
+
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+    
+sum/domain="rrm_hf"/hold = "revtm_hf"
+  mileage/heading="mileage"
+  rentaldb:totaltime/heading="time"
+  rentaldb:rentaldiscountamt/heading="discount"
+  tot_revdays/heading="rev_days"
+  tot_actdays/heading="act_days"
+  
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ranumber/name="ra_number"/keyelement=2.1
+  rrm_link:rptdate/name="rpt_date"
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Calculate various day counts
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+   file revtm_link = access revtm_hf,
+    set revtm_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+
+   number ot_hours = system_set:extraactday
+
+   date pdate_in = if rrm_link:datein = null then rrm_link:datedue else rrm_link:datein
+   number ptime_in = if rrm_link:datein = null then rrm_link:timedue else rrm_link:timein
+
+   number ot_pday = if ((pdate_in-rrm_link:dateout>0) and (ptime_in - rrm_link:timeout > ot_hours)
+    and (pdate_in <= dtedate and rrm_link:dateout >= dtsdate)) then 1 else 0 -- 0 if same day add only if in date range open/close
+
+   number prorate_days1 = 
+      -- start and ends during date range
+      if (rrm_link:dateout >= dtsdate and pdate_in <= dtedate) then (pdate_in - rrm_link:dateout) else 
+      -- start before ends during +1 OR 1st day of report
+      if (rrm_link:dateout < dtsdate and (pdate_in >= dtsdate and pdate_in <= dtedate)) then (pdate_in - dtsdate + 1) else
+      -- start during ends after +1 OR last day 
+      if ((rrm_link:dateout >= dtsdate and rrm_link:dateout <= dtedate) and (pdate_in > dtedate)) then (dtedate - rrm_link:dateout + 1) else
+      -- starts before ends after +1 OR last day
+      if (rrm_link:dateout <= dtsdate and pdate_in >= dtedate) then (dtedate - dtsdate + 1)
+
+   number prorate_days = if (prorate_days1 = 0) then 1 else prorate_days1 + ot_pday
+
+  number rev_days = revtm_link:tot_revdays 
+  number act_days = revtm_link:tot_actdays
+  date rpt_date = if revtm_link:rpt_date = null then rcmift_link:rptdate else revtm_link:rpt_date
+
+  number ChgTypeDays = if rcmift_link:calcmeth not one of 2,3,4,11 then 0 else
+     if (rcmift_link:ChgDays + (rcmift_link:ChgHours divide 24) +  (rcmift_link:ChgMonths * 30) + (rcmift_link:ChgWeeks * 7)) < 1 then 1 else
+      round((rcmift_link:ChgDays + (rcmift_link:ChgHours divide 24) +  (rcmift_link:ChgMonths * 30) + (rcmift_link:ChgWeeks * 7)),0)
+
+  number Misc_Charge_Days = if rcmift_link:type = 1 then chgtypedays else 0
+  number CDW_Days = if rcmift_link:type = 2 then chgtypedays else 0
+  number PAC_Days = if rcmift_link:type = 3 then chgtypedays else 0
+  number PEC_Days = if rcmift_link:type = 4 then chgtypedays else 0
+  number SLI_Days = if rcmift_link:type = 5 then chgtypedays else 0
+  number Addl_Driver_Days = if rcmift_link:type = 6 then chgtypedays else 0
+  number Underage_Driver_Days = if rcmift_link:type = 7 then chgtypedays else 0
+  number Upgrade_Days = if rcmift_link:type = 8 then chgtypedays else 0
+  number Drop_Charge_Days = if rcmift_link:type = 9 then chgtypedays else 0
+  number Fuel_Days = if rcmift_link:type = 10 then chgtypedays else 0
+  number Prepaid_Fuel_Days = if rcmift_link:type = 11 then chgtypedays else 0
+  number FF_Recovery_Days = if rcmift_link:type = 13 then chgtypedays else 0
+  number Equipment_Charge_Days = if rcmift_link:type = 14 then chgtypedays else 0
+  number Misc_Fee_Days = if rcmift_link:type = 50 then chgtypedays else 0
+  number Sales_Tax_Days = if rcmift_link:type = 51 then chgtypedays else 0
+  number Federal_Tax_Days = if rcmift_link:type = 52 then chgtypedays else 0
+  number Other_Tax_Days = if rcmift_link:type = 53 then chgtypedays else 0
+
+    
+list/domain="rrm_hf"/nodetail/hold="days_hf"
+
+  rrm_hf:commonid/width=11 
+  rrm_link:rptloccode
+  misc_charge_days
+  cdw_days
+  pac_days
+  pec_days
+  sli_days
+  addl_driver_days
+  underage_driver_days
+  upgrade_days
+  drop_charge_days
+  fuel_days
+  prepaid_fuel_days
+  ff_recovery_days
+  equipment_charge_days
+  misc_fee_days
+  sales_tax_days
+  federal_tax_days
+  other_tax_days
+
+sorted by rrm_hf:commonid
+
+end of rrm_hf:commonid
+
+  rrm_hf:commonid/keyelement=1.1
+  rrm_link:rptloccode/keyelement=1.2
+  total[Misc_Charge_Days]/name="Tot_Misc_Charge_Days"/width=12/decimalplaces=4 
+  total[CDW_Days]/name="Tot_CDW_Days"/width=12/decimalplaces=4
+  total[PAC_Days]/name="Tot_PAC_Days"/width=12/decimalplaces=4 
+  total[PEC_Days]/name="Tot_PEC_Days"/width=12/decimalplaces=4
+  total[SLI_Days]/name="Tot_SLI_Days"/width=12/decimalplaces=4
+  total[Addl_Driver_Days]/name="Tot_Addl_Driver_Days"/width=12/decimalplaces=4
+  total[Underage_Driver_Days]/name="Tot_Underage_Driver_Days"/width=12/decimalplaces=4
+  total[Upgrade_Days]/name="Tot_Upgrade_Days"/width=12/decimalplaces=4
+  total[Drop_Charge_Days]/name="Tot_Drop_Charge_Days"/width=12/decimalplaces=4
+  total[Fuel_Days]/name="Tot_Fuel_Days"/width=12/decimalplaces=4
+  total[Prepaid_Fuel_Days]/name="Tot_Prepaid_Fuel_Days"/width=12/decimalplaces=4
+  total[FF_Recovery_Days]/name="Tot_FF_Recovery_Days"/width=12/decimalplaces=4
+  total[equipment_charge_days]/name="Tot_Equipment_Charge_Days"/width=12/decimalplaces=4
+  total[Misc_Fee_Days]/name="Tot_Misc_Fee_Days"/width=12/decimalplaces=4
+  total[Sales_Tax_Days]/name="Tot_Sales_Tax_Days"/width=12/decimalplaces=4
+  total[Federal_Tax_Days]/name="Tot_Federal_Tax_Days"/width=12/decimalplaces=4
+  total[Other_Tax_Days]/name="Tot_Other_Tax_Days"/width=12/decimalplaces=4
+  rev_days/width=12/decimalplaces=4
+  act_days/width=12/decimalplaces=4
+  prorate_days/width=12/decimalplaces=4
+
+;
+run/parameterfile=misschgs_1 
+
+
+/*------------------------------------------------------------------------
+ Select fuel unit numbers
+------------------------------------------------------------------------*/
+
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+
+  number fdist = if rcmift_link:type = 10 and rcmift_link:description begins "Fuel by Mileage" then rcmift_link:chgunits else 0
+  number funits = if rcmift_link:type = 10 and rcmift_link:description not begins with "Fuel by Mileage" then rcmift_link:chgunits else 0
+  number pfunits = if rcmift_link:type = 11 then rcmift_link:chgunits else 0
+    
+list/domain="rrm_hf"/nodetail/hold="fuelunits_hf"
+
+  rrm_hf:commonid
+  fdist
+  funits
+  pfunits
+
+sorted by rrm_hf:commonid
+end of rrm_hf:commonid
+  rrm_hf:commonid/keyelement=1.1
+  total[fdist]/name="fuel_dist"
+  total[funits]/name="fuel_units"
+  total[pfunits]/name="prepaid_fuel_units"
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Select blank record for all misc charges possible for
+ zero value selections to print
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc" 
+   
+list/domain="rtmift"/hold = "rev_hf"
+  0/name="commonid"/width=11 /keyelement=1.1
+  ""/width=16/name="invclass"
+  ""/width=20/name="ranumber"
+  rtmift:code
+  rtmift:type/width=4
+  rtmift:comm/width=4
+  0/width=14/decimalplaces=2/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  ""/width=20/name="rptloccode"
+  ""/width=20/name="employee"
+  dtsdate/name="rpt_date"
+  ""/width=50/name="customerlastname"
+  dtsdate/name="dateout"
+  0.00/width=7/decimalplaces=2/name="timeout"
+  dtsdate/name="datedue"
+  0.00/width=7/decimalplaces=2/name="timedue" 
+  dtsdate/name="datein"
+  0.00/width=7/decimalplaces=2/name="timein"
+
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Mileage"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Time"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Discount"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges
+------------------------------------------------------------------------*/
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  date rpt_date = if revtm_link:rpt_date = null then rcmift_link:rptdate else revtm_link:rpt_date
+    
+list/domain="rrm_hf"/hold = "rev_hf"/append
+if  rcmift_link:rev = 1  then {
+  rcmift_link:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rcmift_link:code
+  rcmift_link:type/width=4
+  rcmift_link:comm/width=4
+  rcmift_link:total/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  rcmift_link:rptloccode
+  rentaldb:employeenumberout /name="employee"
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+;
+run/parameterfile=misschgs_1 
+
+--#/*------------------------------------------------------------------------
+--# Select delayed misc charges 
+--#------------------------------------------------------------------------*/
+--#include "misschgs_i1.inc"
+--#define
+  
+--#  file alt_locgroup = access locgroup,
+--#    set locgroup:groupname = clocgroup,
+--#    locgroup:locationcode = rcmift:rptloccode,
+--#    null fill on failure
+
+--#  file rrm_link = access rrm_hf,
+--#   set rrm_hf:commonid=rcmift:commonid,
+--#   one to one, zero fill on failure
+
+--#  file rrm2_link = access rrm,
+--#   set rrm:commonid=rcmift:commonid,
+--#   one to one, zero fill on failure
+
+--#  date rpt_date = rrm2_link:rptdate 
+
+--#where 
+
+--#  ((rcmift:rptdate >= dtSdate and rcmift:rptdate <= dtEdate) 
+--#  and (rcmift:rptloccode = cLoc or cLoc = "ALL")
+--#  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+--#  and (rcmift:Product =cProduct or cProduct = "ALL" ))
+    
+--#list/domain="rcmift"/hold = "rev_hf"/append
+--#if  (rcmift:rev = 1 and rrm_link:commonid = 0 and rrm2_link:rastatus<>4) then {
+--#  rcmift:commonid/width=11 /keyelement=1.1
+--#  rrm:invclass
+--#  rrm2_link:ranumber
+--#  rcmift:code
+--#  rcmift:type/width=4
+--#  rcmift:comm/width=4
+--#  rcmift:total/name="amount"
+--#  100/width=7/decimalplaces=1/name="split_rate"
+--#  rcmift:rptloccode
+--#  rentaldb:employeenumberout /name="employee"
+--#  rpt_date
+--#  rrm:customerlastname
+--#  rrm2_link:dateout
+--#  rrm2_link:timeout
+--#  rrm2_link:datedue
+--#  rrm2_link:timedue
+--#  rrm2_link:datein
+--#  rrm2_link:timein
+--#}
+
+--#;
+--#run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Calculate 'other' revenue and totals for yield calculations
+------------------------------------------------------------------------*/
+
+include "misschgs_i1.inc"
+
+where rev_hf:type <> 0
+
+sum/domain="rev_hf"/hold="yielddata_hf"
+  if rev_hf:type one of 10,11,12,51,52,53 then rev_hf:amount/name="taxgas"
+  if rev_hf:code = ccode then rev_hf:amount/name="revselect"
+  rev_hf:amount/name="revother"
+  
+by
+  rev_hf:commonid/keyelement=1.1
+  rev_hf:rptloccode
+
+;
+run/parameterfile=misschgs_1 
+
+/*------------------------------------------------------------------------
+ Summarize revenue by code and prorate/accrue to requested period 
+------------------------------------------------------------------------*/
+
+include "misschgs_i1.inc"
+
+
+sum/domain="rev_hf"/hold="rev_sum_hf"
+  rev_hf:amount/name="tot_amt"
+
+across
+  rev_hf:code
+by
+ rev_hf:rptloccode/keyelement=1.2
+ rev_hf:commonid/keyelement=1.1
+ rev_hf:employee
+
+
+end of rev_hf:commonid
+  rev_hf:ranumber
+  rev_hf:customerlastname
+  rev_hf:rpt_date
+  rev_hf:dateout
+  rev_hf:timeout
+  rev_hf:datedue
+  rev_hf:timedue
+  rev_hf:datein
+  rev_hf:timein
+  running total[rev_hf:amount]/name="tot_chrgs"
+
+;
+run/parameterfile=misschgs_1 
+
+
+/*------------------------------------------------------------------------
+ Create detail lines
+------------------------------------------------------------------------*/
+define
+  
+  string cd1 = replace(str(rev_hf:code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="rev_hf"
+  rev_hf:code
+
+sorted by
+  rev_hf:code
+
+end of rev_hf:code 
+ 
+  'round(rev_sum_hf:'+'tot_amt_'+cd_final+',2)/name="col_'+cd_final+'"'
+  'if rev_sum_hf:'+'tot_amt_'+cd_final+' > 0 then 1 else 0/name="cnt_'+cd_final+'"'
+;
+
+run/parameterfile=misschgs_1
+rreplace detail_lines
+
+/*------------------------------------------------------------------------
+ Create column headers
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = if hclist_hf:type = "Variable" then '"'+hclist_hf:field_name+'"'+'/align=col_'+cd_final else
+    '"'+hclist_hf:field_name+'"'+'/align='+cd_final
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) and hclist_hf:type <> "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2
+
+sorted by
+  hclist_hf:field_name
+;
+
+run/parameterfile=misschgs_1
+rreplace column_headers
+
+/*------------------------------------------------------------------------
+ Create field names dynamically
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = if hclist_hf:type = "Variable" then 'misschgs_hf:'+'col_'+cd_final+'/name='+'"col_'+cd_final+'"' else
+    'misschgs_hf:'+cd_final+'/name="'+cd_final+'"'
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) and hclist_hf:type <> "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2
+;
+
+run/parameterfile=misschgs_1
+rreplace field_names
+
+/*------------------------------------------------------------------------
+ Create average field names
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = cd_final+'/name="'+cd_final+'"'
+
+
+where hclist_hf:type = "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2;
+
+run/parameterfile=misschgs_1
+rreplace averages_names
+
+/*------------------------------------------------------------------------
+ Create average field headers
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 =  '"'+hclist_hf:field_name+'"'+'/align='+cd_final
+
+
+where hclist_hf:type = "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+
+  field_name2
+
+sorted by
+  hclist_hf:field_name
+;
+
+run/parameterfile=misschgs_1
+rreplace averages_headers
+
+/*------------------------------------------------------------------------
+ Retrieve miscellaneous information for report,
+ calculate prorated days and consolidate to data file
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+
+define
+  
+  file days_link = access days_hf,
+   set days_hf:commonid=rev_sum_hf:commonid,
+   days_hf:rptloccode=rev_sum_hf:rptloccode,
+   one to one, zero fill on failure
+
+  file fuel_link = access fuelunits_hf,
+   set fuelunits_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=rev_sum_hf:commonid,
+   one to one, null fill on failure
+ 
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rev_sum_hf:commonid,
+   one to one,null fill on failure
+
+  file renter_link = access renterra,
+   set renterra:commonid=rrm:commonid,
+   one to one, null fill on failure  --1st record only
+
+  file inv_link = access invtrx,
+   set invtrx:invid=rrm_link:invid,
+   one to one,zero fill on failure -- current vehicle
+
+  file upg_link = access upg_hf,
+   set upg_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+  file ins_link = access ins,
+   set ins:commonid=rev_sum_hf:commonid,
+   one to one,zero fill on failure
+
+  file yield_link = access yielddata_hf,
+   set yielddata_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+   
+   number proration_factor =  1
+
+   number chg_days =  days_link:rev_days
+
+   number daily_rate = round(rev_sum_hf:tot_chrgs divide days_link:act_days,2)
+
+   number calc_days = days_link:act_days
+
+   number time_charges = rev_sum_hf:tot_amt_time
+   number mileage_charges = rev_sum_hf:tot_amt_mileage
+   number t_m_discount = rev_sum_hf:tot_amt_discount
+   number gross_t_m = time_charges+mileage_charges
+   number net_t_m = gross_t_m - t_m_discount
+
+   number miles_day = round(rental_link:actmiles divide calc_days,0)
+   number miles_ra = rental_link:actmiles
+   number t_m_day = round(net_t_m divide calc_days,2)
+   number t_m_ra = net_t_m
+   number days_ra = round(calc_days,1)
+
+   number yield_total =  rev_sum_hf:tot_chrgs
+
+   number total_rev = rev_sum_hf:tot_chrgs 
+   
+   number rev_day = round(total_rev divide calc_days,2)
+   number rev_ra = total_rev
+   number total_yield = round(yield_total divide calc_days,2)
+   number non_tm_yld = round((yield_total-net_t_m) divide calc_days,2)
+
+
+list/domain="rev_sum_hf"/hold="misschgs_hf"
+  rev_sum_hf:rptloccode 
+  rev_sum_hf:commonid 
+  rev_sum_hf:employee 
+
+  include "detail_lines.cq"
+
+ 
+  rev_sum_hf:rpt_date 
+  round(rev_sum_hf:tot_chrgs,2)/name="tot_chrgs"
+
+  days_link:act_days/decimalplaces=0/width=6/name="actual_days"
+  chg_days/decimalplaces=0/width=6/name="charged_days"
+
+  round(days_link:tot_addl_driver_days*proration_factor,1)/width=6/name="addl_driver_days"
+  round(days_link:tot_cdw_days*proration_factor,1)/width=6/name="cdw_days"
+  round(days_link:tot_equipment_charge_days*proration_factor,1)/width=6/name="equipment_charge_days" 
+  round(days_link:tot_drop_charge_days*proration_factor,1)/width=6/name="drop_charge_days" 
+  round(days_link:tot_federal_tax_days*proration_factor,1)/width=6/name="federal_tax_days"
+  round(days_link:tot_ff_recovery_days*proration_factor,1)/width=6/name="ff_recovery_fee_days"
+  round(days_link:tot_fuel_days*proration_factor,1)/width=6/name="fuel_days"
+  round(days_link:tot_misc_charge_days*proration_factor,1)/width=6/name="misc_charge_days"
+  round(days_link:tot_misc_fee_days*proration_factor,1)/width=6/name="misc_fee_days"
+  round(days_link:tot_other_tax_days*proration_factor,1)/width=6/name="other_tax_days"
+  round(days_link:tot_pac_days*proration_factor,1)/width=6/name="pac_days"
+  round(days_link:tot_pec_days*proration_factor,1)/width=6/name="pec_days"
+  round(days_link:tot_prepaid_fuel_days*proration_factor,1)/width=6/name="prepaid_fuel_days" 
+  round(days_link:tot_sales_tax_days*proration_factor,1)/width=6/name="sales_tax_days"
+  round(days_link:tot_sli_days*proration_factor,1)/width=6/name="sli_days"
+  round(days_link:tot_underage_driver_days*proration_factor,1)/width=6/name="underage_driver_days" 
+  round(days_link:tot_upgrade_days*proration_factor,1)/width=6/name="upgrade_days"
+
+  rrm_link:agentid/name="agent"
+  rrm_link:arrivalairline/name="arriv_airl"
+  rrm_link:arrivalflight/name="arriv_flt_"
+  rrm_link:arrivaldate/name="arriv_date"
+  rrm_link:arrivaltime/name="arriv_time"
+  rrm_link:ffbonus1/name="bonus"
+  rrm_link:ffbonus2/name="bonus2"
+  rrm:invclass/name="class" --class
+  rrm:reservedclass+","+rrm:rentedasclass/name="classes"
+  rrm_link:coi/name="coi_instype"
+  rrm_link:company
+  rrm_link:corpid/name="corp_id"
+  renter_link:customerlastname/width=20/name="cust_name"-- custname
+  rrm_link:datein/name="date_in"
+  rrm_link:dateout/name="date_out"
+  rrm:reasondisc/name="disc_reason"--disc reason
+  rental_link:employeenumberout/name="emp__out"
+  rental_link:employeenumberin/name="emp__in"
+  rrm_link:ffaccount/name="ff_account"
+  rrm_link:ffcarrier/name="ff_airline"
+  renter_link:insuranceco/name="ins_co"
+  inv_link:licensenumber/name="inv_license"
+  rrm_link:ponumber/name="po_"
+  rrm_link:promocode/name="promo_code"
+  rev_sum_hf:ranumber
+  rental_link:ratecode/name="rate_code"
+  rrm:reasonrent/name="rental_reason"--rental reason
+  rrm_link:referredby/name="referred_by"
+  rrm_link:referencenum/name="reference_"
+  rrm_link:referralcode/name="referral"
+  rrm_link:rentaltype
+  rrm_link:rentedasclass/name="rented_as_class"
+  rrm_link:resnumber/name="res_number"
+  if (ins_link:commonid = 0 or ins_link:claimnum1 = "") then rrm:serviceordernum else ins_link:claimnum1/name="ro_"
+  rrm_link:serviceordernum/name="serv_order_"
+  rrm_link:sourcecode/name="source"
+  rrm_link:taxcode/name="tax_id_"
+  rrm_link:taxable
+  rrm_link:tourcode/name="tour_code"
+  inv_link:unitnumber/name="unit_"
+  inv_link:serialnumber/name="vin"
+  renter_link:systemid/name="vip_"
+  rrm_link:vouchernum/name="voucher_"
+  time(rental_link:createtime)/mask="HH:MM:SS"/name="trx_time"
+  upg_link:tpm_upg/name="t_m_upgrade"
+  rental_link:actmiles/name="number_miles"    
+  fuel_link:fuel_dist
+  fuel_link:fuel_units
+  fuel_link:prepaid_fuel_units
+  daily_rate/name="daily_rate"
+  time_charges/name="time_charges"
+  mileage_charges/name="mileage_charges"
+  t_m_discount/name="t_m_discount"
+  gross_t_m/name="gross_t_m" 
+  net_t_m/name="net_t_m"
+  miles_day
+  miles_ra
+  t_m_day/name="t_m_day"
+  rev_ra/name="rev_ra"
+  rev_day/name="rev_day"
+  total_rev/name="total_rev"
+  yield_total/name="yield_total"
+  total_yield/name="total_yield"
+  non_tm_yld/name="non_tm_yld"
+  t_m_ra/name="t_m_ra"
+  days_ra
+  calc_days
+  yield_link:revselect/name="revselect"
+;
+run/parameterfile=misschgs_1 
+ 
+/*------------------------------------------------------------------------
+ Create sorting routine
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+
+define
+
+     string sort_order = switch(csort)
+     case "Local Company"    : 'misschgs_hf:company'
+     case "Contract"         : ''
+     case "Renter Last Name" : 'misschgs_hf:cust_name'
+     case "Rate Code"        : 'misschgs_hf:rate_code'
+     case "Inv Class"        : 'misschgs_hf:class'
+     case "Unit#"            : 'misschgs_hf:unit_'
+     default                 : 'misschgs_hf:unit_'
+
+list/domain="dummy"/nobanner/nodefaults/noreporttotals/noblanklines
+
+'sorted by'/newline
+if cconsolidate = "N" then 'misschgs_hf:rptloccode' else ""/newline
+sort_order/newline
+if cpage = "Y" then "/page" else ""/newline
+'misschgs_hf:ranumber'/newline=2
+
+if csort <> "Contract" then {
+'end of '+sort_order/newline
+'"Totals for "+str('+sort_order+')+":"/align=col_1'
+'count[misschgs_hf:ranumber]/align=col_2'/newline
+}
+;
+
+run/parameterfile=misschgs_1 
+rreplace sort_select
+
+/*------------------------------------------------------------------------
+ Create location consolidation routine
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+ if cconsolidate = "N" then {
+
+'end of misschgs_hf:rptloccode'/newline
+
+'"Totals for location "+str(misschgs_hf:rptloccode)+":"/align=col_1'
+'count[misschgs_hf:ranumber]/align=col_2'/newline
+
+'include "field_totals.cq"'/newline
+'total[misschgs_hf:revselect]/align=col_10'/newline
+'total[misschgs_hf:tot_chrgs]-total[misschgs_hf:revselect]/align=col_11'/newline
+'total[misschgs_hf:tot_chrgs]/align=col_12/newline'/newline
+}
+;
+
+run/parameterfile=misschgs_1 
+rreplace loc_consolidate
+
+/*------------------------------------------------------------------------
+ Create field totals dynamically
+------------------------------------------------------------------------*/
+  include "misschgs_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+define
+
+     string sort_order = switch(csort)
+     case "Local Company"    : 'misschgs_hf:company'
+     case "Contract"         : 'misschgs_hf:ranumber'
+     case "Renter Last Name" : 'misschgs_hf:cust_name'
+     case "Rate Code"        : 'misschgs_hf:rate_code'
+     case "Inv Class"        : 'misschgs_hf:class'
+     case "Unit#"            : 'misschgs_hf:unit_'
+     default                 : 'misschgs_hf:unit_'
+
+  string field_name2 = if hclist_hf:type = "Variable" then 'running total[misschgs_hf:'+'col_'+cd_final+']/align='+'col_'+cd_final else
+    'running total[misschgs_hf:'+cd_final+']/align='+cd_final
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) 
+and hclist_hf:field_name = ccode and hclist_hf:field_type = "i"
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+if hclist_hf:type <> "Report" then {
+  field_name2
+}
+
+top of report
+
+if ccode = "Miles/Day" then 'round(running total[number_miles] divide running total[calc_days],0)/align=miles_day'/newline
+if ccode = "Miles/RA" then 'round(running total[number_miles] divide running count[ranumber],0)/align=miles_ra'/newline
+if ccode = "T&M/Day" then 'round(running total[net_t_m] divide running total[calc_days],2)/align=t_m_day'/newline
+if ccode = "T&M/RA" then 'round(running total[net_t_m] divide running count[ranumber],2)/align=t_m_ra'/newline
+if ccode = "Days/RA" then 'round(running total[calc_days] divide running count[ranumber],1)/align=days_ra'/newline
+if ccode = "Rev/Day" then 'round(running total[total_rev] divide running total[calc_days],2)/align=rev_day'/newline
+if ccode = "Rev/RA" then 'round(running total[total_rev] divide running count[ranumber],2)/align=rev_ra'/newline
+if ccode = "Total Yield" then 'round(running total[yield_total] divide running total[calc_days],2)/align=total_yield'/newline
+if ccode = "Non-TM Yld" then 'round((running total[yield_total]-running total[net_t_m]) divide running total[calc_days],2)/align=non_tm_yld'/newline
+if ccode = "Total Rev" then 'running total[total_rev]/align=total_rev'/newline;
+
+run/parameterfile=misschgs_1
+rreplace field_totals
+
+
+/*------------------------------------------------------------------------
+ Summary or detail?
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if csummary = "Detail" then "" else "/nodetail"
+;
+
+run/parameterfile=misschgs_1 
+rreplace csummary
+;
+
+
+/*------------------------------------------------------------------------
+ End of section
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+
+if csort <> "Contract" then {
+'include "field_totals.cq"'/newline
+'total[misschgs_hf:revselect]/align=col_10'/newline
+'total[misschgs_hf:tot_chrgs]-total[misschgs_hf:revselect]/align=col_11'/newline
+'total[misschgs_hf:tot_chrgs]/align=col_12/newline'/newline
+} else {''}
+;
+run/parameterfile=misschgs_1 
+rrepl csection
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "misschgs_i1.inc"
+ 
+define
+   string yes_no = if czero = "N" then "No" else "Yes"
+where misschgs_hf:commonid <> 0 -- exclude dummy placeholder record
+ 
+
+list/domain="misschgs_hf"/title="Missing Charges Report"/noheadings/nobanner/pageof/noreporttotals include "csummary.cq"
+
+misschgs_hf:ranumber/name="col_1"
+misschgs_hf:rpt_date/name="col_2"
+misschgs_hf:class/name="col_3"
+
+
+include "field_names.cq"
+
+include "averages_names.cq"
+
+misschgs_hf:revselect/name="col_10"
+misschgs_hf:tot_chrgs - misschgs_hf:revselect/name="col_11"
+misschgs_hf:tot_chrgs/name="col_12"
+
+include "sort_select.cq"
+
+include "csection.cq"
+
+
+include "loc_consolidate.cq"
+
+end of report/newline
+
+"Grand Totals:"/align=col_1
+count[misschgs_hf:ranumber]/align=col_2
+
+include "field_totals.cq"
+total[misschgs_hf:revselect]/align=col_10
+total[misschgs_hf:tot_chrgs]-total[misschgs_hf:revselect]/align=col_11
+total[misschgs_hf:tot_chrgs]/align=col_12/newline
+
+ 
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+     if cLocgroup <> "" then "  Location group: " + str(cLocGroup) else "  Locations: " + str(cLoc)+"  Product: " + str(cProduct)/displaywidth=100/newline
+   "Contracts "+str(cincexc)+" "+str(callany)+": "+str(cchrgs)/displaywidth=100/newline
+   "Consider zero amounts as not on contract: "+str(yes_no)/newline
+  end box/newlines=4
+
+   "RA Number"/align=col_1
+   "Report Date"/align=col_2
+   "Inv Class"/align=col_3
+
+include "column_headers.cq"
+include "averages_headers.cq"
+
+  "Subtotal"/align=col_10
+  "Other"/align=col_11
+  "Total"/align=col_12/newline
+
+;
+replace misschgs.eq
+run/parameterfile=misschgs_1 misschgs.eq
+rrepl misschgs
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view misschgs
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Missing Charges Report" -- Report Title
+   string rptname1    = "misschgs" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "misschgs_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

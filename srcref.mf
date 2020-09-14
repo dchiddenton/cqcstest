@@ -1,0 +1,164 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Source Referrals List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/13/2018
+Modified:
+
+Notes:
+$Workfile: srcref.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/srcref.mf $
+$Revision: 2 $
+$History: srcref.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="sources"
+if itemnumber=1 then '"'+sources:sourcecode+'"' else
+   ',"'+sources:sourcecode+'"'
+
+sorted by
+   sources:sourcecode
+top of report
+'string csrccode[8192] = multivalue parameter prompt "ource Codes: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_srccode"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+   include "param_srccode.cq"
+;
+replace srcref_i1.inc
+/*------------------------------------------------------------------------
+ Output report - setup parameters
+------------------------------------------------------------------------*/
+include "srcref_i1.inc"
+define
+
+   string comm_type = switch(sourcereferrals:commissiontype)
+      case 0 : "None"
+      case 1 : "Percent of T&M"
+      case 2 : "Percent of Total Charges - Taxes"
+      case 3 : "Flat Amount"
+      default : "N/A"
+
+
+where 
+  (sourcereferrals:sourcecode = csrccode or csrccode = "ALL")
+
+list/domain="sourcereferrals"/nobanner/pageof/title="Source Referrals List"/count/noreporttotals
+box/column=1/inline
+  sourcereferrals:referralcode/heading="Referral"/newline
+end box/newlines
+box/column=3/inline/width=35
+  sourcereferrals:agentid/displaywidth=20/heading="Agent"/newline
+  sourcereferrals:agentname/displaywidth=20/heading=" Name"/newline
+  sourcereferrals:phone/displaywidth=20/heading="Phone" include "phone_mask.cq"
+  sourcereferrals:extension/displaywidth=10/heading="Ext"/column=25/newline
+  sourcereferrals:faxnumber/displaywidth=20/heading="  Fax" include "phone_mask.cq"/newline
+  sourcereferrals:email/displaywidth=20/heading="Email"/newline
+end box
+
+box/column=45/inline/width=35
+  sourcereferrals:name/displaywidth=20/noheading/newline=3
+  sourcereferrals:discountreasoncode/displaywidth=20/heading="Disc Reason"/newline
+end box
+
+box/column=70/inline/width=35
+  sourcereferrals:commissionamount/displaywidth=20/heading=" Comm. Amt"/newline
+  comm_type/displaywidth=20/heading="Comm. Type"/newline
+  sourcereferrals:payee/displaywidth=20/heading="     Payee"/newline
+end box
+  
+
+sorted by
+  sourcereferrals:sourcecode
+
+top of sourcereferrals:sourcecode
+  "Source Code: " +str(sourcereferrals:sourcecode)
+
+end of sourcereferrals:sourcecode
+  "Total for source " +str(sourcereferrals:sourcecode)+": "+str(count[sourcereferrals:sourcecode,sourcereferrals:sourcecode])/newline=2
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Source Codes: " + str(csrccode)/displaywidth=100/newline
+  end box /newline=4
+
+;
+replace srcref_1.eq
+replace srcref.eq
+run/setparameter srcref_1.eq
+
+run/parameterfile=srcref_1 srcref.eq
+rrepl srcref
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view srcref
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Source Referrals List" -- Report Title
+   string rptname1    = "srcref" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "srcref_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

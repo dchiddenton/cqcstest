@@ -1,0 +1,732 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Revenue Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/30/2016
+Modified:
+
+Notes:
+$Workfile: rev.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rev.mf $
+$Revision: 3 $
+$History: rev.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 5/18/20    Time: 10:46a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add Excel output formatting
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if recordnumber = 1 then {
+  '"Mileage",'/newline
+  '"Time",'/newline
+  '"Discount"'/newline
+} 
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Revenue items to include or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_code"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_code.cq"
+  string split_flag = parameter/uppercase prompt "Include Revenue Splits?" valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace rev_i1.inc
+/*------------------------------------------------------------------------
+   RA selection - setup parameters
+------------------------------------------------------------------------*/
+  include "rev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+  
+where 
+
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate)
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product  = cProduct or cProduct = "ALL" )
+  and (rrm:invclass = CClass or cClass = "ALL")
+
+  and rrm:rastatus=3
+
+   
+list/domain="rrm"/hold = "rrm_hf1"
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber
+;
+replace rev_1.eq
+run/setparameter rev_1.eq
+
+run/parameterfile=rev_1 rev_1.eq
+
+/*------------------------------------------------------------------------
+ Revenue split selection
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+
+
+  file alt_locgroup_own = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locown,
+    null fill on failure
+
+  file alt_locgroup_in = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locin,
+    null fill on failure
+
+  file alt_locgroup_rent = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locrent,
+    null fill on failure
+
+    file rrm_link = access rrm,
+    set rrm:commonid=revra:commonid,
+    one to one, zero fill on failure
+  
+where 
+
+  (revra:rptdate >= dtSdate and revra:rptdate <= dtEdate)
+  and (revra:locin = cLoc or revra:locown = cLoc or revra:locrent = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup_own:groupname or cLocGroup = alt_locgroup_in:groupname or cLocGroup = alt_locgroup_rent:groupname)
+  and (rrm_link:Product  = cProduct or cProduct = "ALL" )
+  and (rrm_link:invclass = CClass or cClass = "ALL")
+
+  and rrm_link:rastatus=3
+    
+list/domain="revra"/hold = "rrm_hf1"/append
+  rrm_link:commonid/keyelement=1.1
+  rrm_link:ranumber
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Misc Charges selection 
+------------------------------------------------------------------------*/
+
+  include "rev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+where 
+
+  (miscsales:datein >= dtSdate and miscsales:datein <= dtEdate)
+  and (miscsales:locationcode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+  and miscsales:ticketstatus=2
+
+    
+list/domain="miscsales"/hold = "rrm_hf1"/append
+  miscsales:commonid/keyelement=1.1
+  miscsales:ticketnumber/name="ranumber"
+
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Consolidate RA numbers
+------------------------------------------------------------------------*/
+
+list/domain="rrm_hf1"/nodetail/hold="rrm_hf"
+  rrm_hf1:commonid 
+  rrm_hf1:ranumber
+
+sorted by rrm_hf1:commonid
+
+end of rrm_hf1:commonid
+
+  rrm_hf1:commonid /keyelement=1.1
+  rrm_hf1:ranumber
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ T&M and revenue day calculation
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm_link:commonid,
+    one to many,generic,
+    null fill on failure
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+    
+sum/domain="rrm_hf"/hold = "revtm_hf"
+  mileage/heading="mileage"
+  rentaldb:totaltime/heading="time"
+  rentaldb:rentaldiscountamt/heading="discount"
+  tot_revdays/heading="rev_days"
+ 
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ranumber/name="ra_number"/keyelement=2.1
+  rrm_link:rptdate/name="rpt_date"
+
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges 
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file split_link = access revra,
+    set revra:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+  number rev_days = revtm_link:tot_revdays 
+  date rpt_date = if revtm_link:rpt_date = null then rcmift_link:rptdate else revtm_link:rpt_date
+
+    
+list/domain="rrm_hf"/hold = "rev_hf"
+if  ((rcmift_link:code = cCode or cCode = "ALL")
+  and rcmift_link:rev = 1 and rcmift_link:tmpack = 0)
+  and ((split_link:commonid = 0 and split_flag="Y") or split_flag = "N") then {
+  rcmift_link:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rcmift_link:code
+  rcmift_link:comm/width=4
+  rcmift_link:total/name="amount"
+  rcmift_link:rptloccode
+  rentaldb:employeenumberout /name="employee"
+  rev_days/name="tot_revdays"
+  rpt_date
+  rrm_link:customerlastname
+}
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Time, Mileage, Discount breakout
+------------------------------------------------------------------------*/
+
+include "rev_i1.inc"
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file split_link = access revra,
+    set revra:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+  number rev_days = revtm_link:tot_revdays 
+  date rpt_date = revtm_link:rpt_date 
+
+    
+list/domain="rrm_hf"/hold = "rev_hf"/append
+if ((split_link:commonid = 0 and split_flag="Y") or split_flag = "N") then
+{
+ if cCode contains "Mileage" and rrm_link:rptloccode <> null then {
+  rrm_hf:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Mileage"/width=16/name="code"
+  0/width=4/name="comm"
+  revtm_link:mileage/width=14/decimalplaces=2/name="amount"
+  rrm_link:rptloccode
+  rentaldb:employeenumberout/name="employee" 
+  rev_days/name="tot_revdays"
+  rpt_date
+  rrm_link:customerlastname
+}
+}
+followed by
+if ((split_link:commonid = 0 and split_flag="Y") or split_flag = "N") then
+{
+ if cCode contains "Time" and rrm_link:rptloccode <> null then {
+  rrm_link:commonid 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Time"
+  0/width=4
+  revtm_link:totaltime
+  rrm_link:rptloccode
+  rentaldb:employeenumberout 
+  rev_days
+  rpt_date
+  rrm_link:customerlastname
+}
+}
+followed by
+if ((split_link:commonid = 0 and split_flag="Y") or split_flag = "N") then
+{
+ if cCode contains "Discount" and rrm_link:rptloccode <> null then {
+  rrm_link:commonid 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Discount"
+  0/width=4
+  revtm_link:rentaldiscountamt*-1/width=14/decimalplaces=2
+  rrm_link:rptloccode
+  rentaldb:employeenumberout 
+  rev_days
+  rpt_date
+  rrm_link:customerlastname
+}
+}
+
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges, net T&M for split revenue
+------------------------------------------------------------------------*/
+
+include "rev_i1.inc"
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file split_link = access revra,
+    set revra:commonid=rrm_hf:commonid,
+    one to many, zero fill on failure
+
+  file invtrx_link = access invtrx,
+   set invtrx:invtrxid=rrm_link:invtrxid,
+   one to one,generic, null fill on failure
+
+  number rev_days = revtm_link:tot_revdays 
+  date rpt_date = if revtm_link:rpt_date = null then split_link:rptdate else revtm_link:rpt_date
+
+  string ctypedescr = switch(split_link:revtype)
+                case 1  : "Misc Charge"
+                case 2  : "CDW"
+                case 3  : "PAC"
+                case 4  : "PEC"
+                case 5  : "SLI"
+                case 6  : "AD"
+                case 7  : "UD"
+                case 8  : "Upgrade"
+                case 9  : "Drop Chg"
+                case 10 : "Gas By Tank Level"
+                case 11 : "Ppd. Gas"
+                case 12 : "Prev. Gas"  -- legacy - shouldn't be used with V4
+                case 13 : "FF Recovery Fee"
+                case 14 : "Equipment Charge" 
+                case 15 : "Delivery Fee"
+
+                case 50 : "Misc Fees"
+                case 51 : "Taxes"  -- Sales Tax
+                case 52 : "Taxes"  -- Federal Tax
+                case 53 : "Taxes"  -- Other Tax
+                case 62 : "Time"
+                case 64 : "Misc Charge"
+               default  : ""    
+
+  string loc_in = if (split_link:locin = "* Owned *" or split_link:locin = "") then rrm_link:locationcodein else split_link:locin
+  string loc_rent = if (split_link:locrent = "* Owned *" or split_link:locrent = "") then rrm_link:locationcodeout else split_link:locrent
+  string loc_own = if (split_link:locown = "* Owned *" or split_link:locown = "") then invtrx_link:ownedlocationcode else split_link:locown
+
+  string rev_code = if split_link:revcode <> "" then split_link:revcode else ctypedescr
+
+where split_flag = "Y" 
+    
+list/domain="rrm_hf"/hold = "rev_hf"/append
+if  ((rev_code = cCode or cCode = "ALL") and (split_link:commonid <> 0) and split_link:amtrent <> 0) then {
+  rrm_hf:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16/name="code"
+  0/width=4/name="comm"
+  split_link:amtrent/name="amount"
+  loc_rent/width=20/name="rptloccode"
+  rentaldb:employeenumberout /name="employee"
+  --#round((rev_days*split_link:pctrent) divide 100,0)/width=19/name="tot_revdays"  -- to split revenue days
+  rev_days/width=19/name="tot_revdays"
+  rpt_date
+  rrm_link:customerlastname
+}
+followed by
+if  ((rev_code = cCode or cCode = "ALL") and split_link:commonid <> 0 and split_link:amtin <> 0) then {
+  rrm_hf:commonid/width=11 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16
+  0/width=4
+  split_link:amtin
+  loc_in/width=20
+  rentaldb:employeenumberout 
+  --#round((rev_days*split_link:pctin) divide 100,0)/width=19 
+  0/width=19
+  rpt_date
+  rrm_link:customerlastname
+}
+followed by
+if  ((rev_code = cCode or cCode = "ALL") and split_link:commonid <> 0 and split_link:amtown <> 0) then {
+  rrm_hf:commonid/width=11
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16
+  0/width=4
+  split_link:amtown
+  loc_own/width=20
+  rentaldb:employeenumberout 
+  --#round((rev_days*split_link:pctown) divide 100,0)/width=19
+  0/width=19
+  rpt_date
+  rrm_link:customerlastname
+}
+
+;
+run/parameterfile=rev_1 
+
+/*------------------------------------------------------------------------
+ Summarize revenue
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+  
+sum/domain="rev_hf"/hold="rev_sum_hf"
+  rev_hf:amount
+
+across
+  rev_hf:code
+by
+ rev_hf:rptloccode
+ rev_hf:ranumber
+ rev_hf:employee
+
+
+end of rev_hf:ranumber
+  rev_hf:commonid/keyelement=1.1
+  rev_hf:customerlastname
+  rev_hf:rpt_date
+  rev_hf:tot_revdays
+  running total[rev_hf:amount]/name="tot_chrgs"
+
+;
+run/parameterfile=rev_1 
+/*------------------------------------------------------------------------
+ Create detail lines
+------------------------------------------------------------------------*/
+define
+  
+  string cd1 = replace(str(rev_hf:code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  
+  string cd_final = replace(str(cd28),"*","_")
+
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="rev_hf"
+  rev_hf:code
+
+sorted by
+  rev_hf:code
+
+end of rev_hf:code 
+
+  'rev_sum_hf:'+'amount_'+cd_final+'/name='+'"col_'+cd_final+'"'
+;
+
+run/parameterfile
+rreplace detail_lines
+/*------------------------------------------------------------------------
+ Create column headers
+------------------------------------------------------------------------*/
+define
+  
+  string cd1 = replace(str(rev_hf:code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  
+  string cd_final = replace(str(cd28),"*","_")
+
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="rev_hf"
+  rev_hf:code
+
+sorted by
+  rev_hf:code
+
+end of rev_hf:code
+      '"'+rev_hf:code+'"'+'/align=col_'+cd_final
+
+
+top of report
+   "top of page"/newline
+   '"company_logo.jpg"/image/width=20/left/newline'/newline
+
+   'box/center/column=1'/newline
+   '"Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline'/newline --+"   Product: " + str(cProduct)/newline
+   'if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline'/newline
+   '"Product: " + str(cProduct)+"   Car Classes: " + str(cClass)/newline'/newline
+   '"Include Revenue Splits? " + str(split_flag)'/newline
+   "end box/newlines=4"/newline
+
+   '"RA Number"/align=col_1'/newline
+   '"Employee#"/align=col_2'/newline
+   '"Location"/align=col_3'/newline
+   '"Date"/align=col_4'/newline
+   '"Rev Days"/align=col_5'
+   '"Total"/align=col_8'/newline
+;
+
+run/parameterfile
+rreplace headers
+/*------------------------------------------------------------------------
+ Summary or detail?
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+run/parameterfile=rev_1
+rrepl rev_i3
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+  include "rev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rev_sum_hf:rptloccode,
+    null fill on failure
+
+where 
+  (rev_sum_hf:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+   
+list/domain="rev_sum_hf"/title="Revenue Report"/noheadings/nobanner/pageof include "rev_i3.cq"
+
+  rev_sum_hf:ranumber/name="col_1" /width=10 
+  rev_sum_hf:employee/name="col_2"/width=8  
+  rev_sum_hf:rptloccode /name="col_3"/width=8
+  rev_sum_hf:rpt_date/name="col_4" /width=10 
+  rev_sum_hf:tot_revdays/total/name="col_5"/width=5/center
+
+  include "detail_lines.cq"  
+
+  rev_sum_hf:tot_chrgs/total /name="col_8"
+
+sorted by
+  rev_sum_hf:rptloccode/total/heading="@"
+  rev_sum_hf:ranumber
+
+ include "headers.cq"  -- column headers
+ ""/newline=2
+;
+replace rev.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+  include "rev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rev_sum_hf:rptloccode,
+    null fill on failure
+
+where 
+  (rev_sum_hf:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+   
+list/domain="rev_sum_hf"/title="Revenue Report"/noheadings/nobanner/pagelength=0
+
+  rev_sum_hf:ranumber/name="col_1" /width=10 
+  rev_sum_hf:employee/name="col_2"/width=8  
+  rev_sum_hf:rptloccode /name="col_3"/width=8
+  rev_sum_hf:rpt_date/name="col_4" /width=10 
+  rev_sum_hf:tot_revdays/total/name="col_5"/width=5/center
+
+  include "detail_lines.cq"  
+
+  rev_sum_hf:tot_chrgs/total /name="col_8"
+
+sorted by
+  rev_sum_hf:rptloccode
+  rev_sum_hf:ranumber
+
+ include "headers.cq"  -- column headers
+;
+replace rev_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "rev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=rev_1 rev.eq"/newline
+} else {
+"run/xls/parameterfile=rev_1 rev_xl.eq"/newline
+}
+"rrepl rev"/newline
+"view"/newline 
+;
+run/parameterfile=rev_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Revenue Report" -- Report Title
+   string rptname1    = "rev" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rev_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

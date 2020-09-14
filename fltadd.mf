@@ -1,0 +1,263 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Additions Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/1/2018
+Modified:
+
+Notes:
+$Workfile: fltadd.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltadd.mf $
+$Revision: 2 $
+$History: fltadd.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="banks"
+if itemnumber=1 then '"'+banks:bankid+'"' else
+   ',"'+banks:bankid+'"'
+
+sorted by
+   banks:bankid
+top of report
+'string cbank[8192] = multivalue parameter prompt "Bank IDs: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_banks"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_banks.cq"
+  include "param_product.cq"
+  string cselect = parameter prompt "Select by: " valid "Date Financed","In Service Date" default "In Service Date"
+  date dtsdate = parameter prompt "Starting date: " default todaysdate-day(todaysdate)+1 
+  date dtedate = parameter prompt "Ending or Cutoff date: " default todaysdate-1
+  string csort = parameter prompt "Sorted by: " valid "Unit Number","Date Sold" default "Unit Number"
+  string cpost = parameter/uppercase prompt "Post to Financials? " valid "Y","N" default "N"
+;
+replace fltadd_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve current inventory records
+------------------------------------------------------------------------*/
+viewpoint native;
+ 
+include "fltadd_i1.inc"
+define 
+  file bank_link = access banks,
+   set banks:bankid=inv:bankid,
+   one to one, null fill on failure
+
+  string bank_id = if inv:bankid = "" or inv:bankid = "None" then "None" else
+        if (inv:bankid <> "" and bank_link:bankid = null) then "Not on File" else inv:bankid
+
+
+where 
+ (inv:bankid = cBank or cBank = "ALL") and
+ (inv:Product  = cProduct or cProduct = "ALL" ) and
+  ((inv:datefinanced >= dtsdate and inv:datefinanced <= dtedate and cselect = "Date Financed" and cpost = "N") or
+   (inv:datefinanced <= dtedate and cselect = "Date Financed" and cpost = "Y") or
+   (inv:inservicedate >= dtsdate and inv:inservicedate <= dtedate and cselect = "In Service Date" and cpost = "N") or 
+   (inv:inservicedate <= dtedate and cselect = "In Service Date" and cpost = "Y"))
+
+
+list/domain="inv"/hold="inv_hf"
+  inv:invid/keyelement=1.1
+  inv:unitnumber/keyelement=2.1
+  bank_id
+  inv:product
+  inv:year
+  inv:make
+  inv:model
+  inv:invclass
+  inv:serialnumber
+  inv:licensenumber
+  inv:ownedlocationcode
+  inv:datesold
+  inv:inservicedate
+  inv:datefinanced
+  inv:acquisitionprice
+  inv:aqupricepdate
+  inv:amountfinanced
+  inv:financepdate
+  inv:vehiclestatusowned
+
+;
+replace fltadd_1.eq
+run/setparameter fltadd_1.eq
+
+run/parameterfile=fltadd_1 fltadd_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve sold inventory records
+------------------------------------------------------------------------*/
+viewpoint native;
+  
+include "fltadd_i1.inc"
+define
+  file bank_link = access banks,
+   set banks:bankid=invsold:bankid,
+   one to one, null fill on failure
+
+  string bank_id = if invsold:bankid = "" or invsold:bankid = "None" then "None" else
+        if (invsold:bankid <> "" and bank_link:bankid = null) then "Not on File" else invsold:bankid
+
+
+where 
+ (invsold:bankid = cBank or cBank = "ALL") and
+ (invsold:Product  = cProduct or cProduct = "ALL" ) and
+  ((invsold:datefinanced >= dtsdate and invsold:datefinanced <= dtedate and cselect = "Date Financed" and cpost = "N") or
+   (invsold:datefinanced <= dtedate and cselect = "Date Financed" and cpost = "Y") or
+   (invsold:inservicedate >= dtsdate and invsold:inservicedate <= dtedate and cselect = "In Service Date" and cpost = "N") or 
+   (invsold:inservicedate <= dtedate and cselect = "In Service Date" and cpost = "Y"))
+
+
+
+list/domain="invsold"/hold="inv_hf"/append
+  invsold:invid/keyelement=1.1
+  invsold:unitnumber/keyelement=2.1
+  bank_id
+  invsold:product
+  invsold:year
+  invsold:make
+  invsold:model
+  invsold:invclass
+  invsold:serialnumber
+  invsold:licensenumber
+  invsold:ownedlocationcode
+  invsold:datesold
+  invsold:inservicedate
+  invsold:datefinanced
+  invsold:acquisitionprice
+  invsold:aqupricepdate
+  invsold:amountfinanced
+  invsold:financepdate
+  invsold:vehiclestatusowned
+
+;
+run/parameterfile=fltadd_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+ 
+include "fltadd_i1.inc"
+ define 
+
+  string sort_str = if csort = "Unit Number" then "Product/Unit#" else "Date Sold"
+
+list/domain="inv_hf"/nobanner/noheadings/pageof/title="Fleet Additions Report"/count
+  inv_hf:product/displaywidth=10
+  inv_hf:unitnumber/displaywidth=10
+  inv_hf:serialnumber/displaywidth=20
+  inv_hf:ownedlocationcode/displaywidth=10
+  inv_hf:year/nocommas/displaywidth=4
+  inv_hf:make/displaywidth=10
+  inv_hf:model/displaywidth=10
+  inv_hf:acquisitionprice/displaywidth=12
+  inv_hf:inservicedate/displaywidth=12
+
+
+sorted by
+  inv_hf:bank_id/total/count/heading="Bank ID: @"/page
+  if csort = "Unit Number" then inv_hf:product
+  if csort = "Unit Number" then inv_hf:unitnumber
+  if csort = "Date Sold" then inv_hf:datesold
+
+top of inv_hf:bank_id
+  "Bank ID: "+str(inv_hf:bank_id)/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+  box/center/column=1
+
+   "Date Range: "+str(dtsdate)+" to "+str(dtedate)+"   Sorted by:"+str(sort_str)/newline
+   "Product: " + str(cProduct)+"   "
+   "Bank ID: " + str(cbank)/newline
+  end box /newline=4
+
+  "Product"/align=inv_hf:product
+  "Unit #"/align=inv_hf:unitnumber
+  "Serial #"/align=inv_hf:serialnumber
+  "Own Loc"/align=inv_hf:ownedlocationcode
+  "Year"/align=inv_hf:year
+  "Make"/align=inv_hf:make
+  "Model"/align=inv_hf:model 
+  "Purchase Amout"/align=inv_hf:acquisitionprice
+  "Purchase Date"/align=inv_hf:inservicedate
+
+;
+replace fltadd.eq
+run/parameterfile=fltadd_1 fltadd.eq
+rrepl fltadd
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltadd
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Additions Report" -- Report Title
+   string rptname1    = "fltadd" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltadd_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

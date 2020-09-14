@@ -1,0 +1,156 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Translation Setup List
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/5/2019
+Modified:
+
+Notes:
+$Workfile: rztlate.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rztlate.mf $
+$Revision: 1 $
+$History: rztlate.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 11/06/19   Time: 11:20a
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rztlate"
+if itemnumber=1 then '"'+rztlate:linkid+'"' else
+   ',"'+rztlate:linkid+'"'
+
+sorted by
+   rztlate:linkid
+top of report
+'string clinkid[8192] = multivalue parameter prompt "Link IDs:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_linkid"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_linkid.cq"
+;
+
+replace rztlate_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "rztlate_i1.inc"
+define
+   string to_str = if rztlate:tlatemlink = 0 then "No" else "Yes"
+   string from_str = if rztlate:tlaterlink = 0 then "No" else "Yes"
+   
+
+
+where rztlate:linkid = clinkid or clinkid = "ALL"
+
+list/domain="rztlate"/nobanner/pageof/title="Translation Setup List"/noreporttotals/noheadings
+  rztlate:linkid /displaywidth=10
+  rztlate:description /displaywidth=40
+  rztlate:line /displaywidth=5
+  rztlate:startcol /displaywidth=5
+  rztlate:localvalue /displaywidth=30
+  rztlate:corpvalue /displaywidth=30
+  to_str /displaywidth=4
+  from_str/displaywidth=4
+
+sorted by 
+  rztlate:linkid/page
+
+end of rztlate:linkid
+   ""/newline
+  "Total for "+str(rztlate:linkid)+": "+str(count[rztlate:line,rztlate:linkid])/newline
+
+end of report
+   ""/newline
+  "Total Records: "+str(count[rztlate:line,report])/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Link IDs: " + str(clinkid)/displaywidth=100/newline
+ end box /newline= 4
+
+  "Link ID"/align=rztlate:linkid 
+  "Description"/align=rztlate:description 
+  "Line"/align=rztlate:line 
+  "Col"/align=rztlate:startcol 
+  "Local"/align=rztlate:localvalue 
+  "Corp"/align=rztlate:corpvalue 
+  "To"/align=to_str 
+  "From"/align=from_str
+;
+
+replace rztlate_1.eq
+replace rztlate.eq
+run/setparameter rztlate_1.eq
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+run/parameterfile=rztlate_1 rztlate.eq
+rrepl rztlate
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rztlate
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Translation Setup List" -- Report Title
+   string rptname1    = "rztlate" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rztlate_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

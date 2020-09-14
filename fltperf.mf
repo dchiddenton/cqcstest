@@ -1,0 +1,623 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Performance Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/28/2017
+Modified:
+
+Notes:
+$Workfile: fltperf.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltperf.mf $
+$Revision: 2 $
+$History: fltperf.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Retrieve charge codes 
+------------------------------------------------------------------------*/
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then "'"+rtmift:code+"'" else
+   ",'"+rtmift:code+"'"
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[1024] = multivalue parameter prompt "Revenue Items to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_ccode"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1;
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_ccode.cq"
+  string copen = parameter/uppercase prompt "Include Open Contracts?" valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+;
+replace fltperf_i1.inc
+
+/*------------------------------------------------------------------------
+ TPM closed/open contracts
+------------------------------------------------------------------------*/
+
+include "fltperf_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file renterlink = access renter,
+    set renter:renterid = rrm:renterid,
+    using first index,
+    one to one,
+    exact,
+    null fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+  number open_flag = if rrm:rastatus=2 then 1 else 0
+
+where (((rrm:dateout >= dtSdate and rrm:dateout <= dtEdate)and rrm:rastatus=3) or
+       ((rrm:datein >= dtSdate and rrm:datein <= dtEdate)and rrm:rastatus=3) or
+       (rrm:dateout <= dtEdate and rrm:rastatus=2 and copen = "Y"))
+     and rrm:product = cproduct
+     and rrm:locationcodeout = cLoc
+     and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+ 
+
+list/domain="rrm"/hold="fp1_hf"
+  rrm:commonid
+  rrm:rptloccode
+  rrm:locationcodeout
+  rrm:datein
+  rrm:timein
+  rrm:dateout
+  rrm:timeout
+  rrm:datedue
+  rrm:timedue
+  rrm:rptdate
+  rrm:ranumber
+  rrm:resnumber
+  rental_link:employeenumberout
+  rental_link:totaltpm
+  rental_link:taxamtsales
+  rental_link:rentaldiscountamt
+  0/width=10/name="type"
+  0/decimalplaces=2/width=14/name="tot_amt"  -- place holder for ancilliary sales
+  rental_link:actmiles
+  renterlink:customerlastname
+  renterlink:systemid
+  open_flag
+
+;
+replace fltperf_1.eq
+run/setparameter fltperf_1.eq
+
+run/parameterfile=fltperf_1 fltperf_1.eq
+
+/*------------------------------------------------------------------------
+ Detail or Summary report
+------------------------------------------------------------------------*/
+include "fltperf_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if csummary = "Summary" then "/nodetail"  else ""
+;
+run/parameterfile=fltperf_1
+rrepl fltperf_i2.cq
+
+
+/*------------------------------------------------------------------------
+ RCMIFT closed/open contracts
+------------------------------------------------------------------------*/
+
+include "fltperf_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file rcmift_link = access rcmift,
+    set rcmift:commonid=rrm:commonid,
+    one to many, zero fill on failure
+
+  file renterlink = access renter,
+    set renter:renterid = rrm:renterid,
+    using first index,
+    one to one,
+    exact,
+    null fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+  number open_flag = if rrm:rastatus=2 then 1 else 0
+
+where (((rrm:dateout >= dtSdate and rrm:dateout <= dtEdate)and rrm:rastatus=3) or
+       ((rrm:datein >= dtSdate and rrm:datein <= dtEdate)and rrm:rastatus=3) or
+       (rrm:dateout <= dtEdate and rrm:rastatus=2 and copen = "Y"))
+     and rrm:product = cproduct
+     and rrm:locationcodeout = cLoc
+     and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+ 
+
+list/domain="rrm"/hold="fp1_hf"/append
+if ((rcmift_link:rev=1) and (rcmift_link:code = ccode or ccode = "ALL"))then {
+  rcmift_link:commonid
+  rcmift_link:rptloccode
+  rrm:locationcodeout
+  rrm:datein
+  rrm:timein
+  rrm:dateout
+  rrm:timeout
+  rrm:datedue
+  rrm:timedue
+  rrm:rptdate
+  rrm:ranumber
+  rrm:resnumber
+  rental_link:employeenumberout
+  0/decimalplaces=2/width=14/name="totaltpm"  -- place holder for TPM
+  0/decimalplaces=2/width=14/name="taxamtsales"
+  0/decimalplaces=2/width=14/name="rentaldiscountamt"
+  rcmift_link:type/width=10
+  rcmift_link:total/decimalplaces=2/width=14/name="tot_amt"  
+  rental_link:actmiles
+  renterlink:customerlastname
+  renterlink:systemid
+  open_flag
+}
+
+;
+run/parameterfile=fltperf_1 
+
+/*------------------------------------------------------------------------
+ Consolidate revenue and calculate days
+------------------------------------------------------------------------*/
+viewpoint native
+include "fltperf_i1.inc"
+define
+  file system_set = access systemsettings,
+   set systemsettings:dbid=""
+
+  date period_dateout = if fp1_hf:dateout < dtsdate then dtsdate else fp1_hf:dateout
+  date period_datein = if (fp1_hf:datein > dtedate or fp1_hf:datein = null) then dtedate else fp1_hf:datein
+
+  date date_in = if open_flag = 1 then fp1_hf:datedue else fp1_hf:datein
+  number time_in = if open_flag = 1 then fp1_hf:timedue else fp1_hf:timein
+
+  number ot_day = if ((date_in-fp1_hf:dateout>0) and (time_in - fp1_hf:timeout > system_set:extraactday)) then 1 else 0 -- 0 if same day
+  number act_days = if (date_in - fp1_hf:dateout + ot_day = 0) then 1 else (date_in - fp1_hf:dateout + ot_day) -- same day = 1
+  number period_days = if (period_datein - period_dateout = 0) then 1 else (period_datein - period_dateout) -- same day = 1
+
+
+list/domain="fp1_hf"/nodetail/hold="fp2_hf"
+  fp1_hf:commonid 
+  fp1_hf:rptloccode 
+  fp1_hf:locationcodeout 
+  fp1_hf:dateout 
+  fp1_hf:timeout 
+  fp1_hf:datedue 
+  fp1_hf:timedue 
+  fp1_hf:datein 
+  fp1_hf:timein
+  fp1_hf:rptdate 
+  fp1_hf:ranumber 
+  fp1_hf:resnumber 
+  fp1_hf:employeenumberout 
+  act_days
+  fp1_hf:totaltpm 
+  fp1_hf:taxamtsales 
+  fp1_hf:rentaldiscountamt 
+  fp1_hf:type 
+  fp1_hf:tot_amt 
+  fp1_hf:actmiles 
+  fp1_hf:customerlastname 
+  fp1_hf:systemid 
+  fp1_hf:open_flag
+
+sorted by fp1_hf:commonid
+
+end of fp1_hf:commonid
+  fp1_hf:commonid /keyelement=1.1
+  fp1_hf:rptloccode 
+  fp1_hf:locationcodeout 
+  fp1_hf:dateout 
+  fp1_hf:timeout 
+  fp1_hf:datedue 
+  fp1_hf:timedue 
+  fp1_hf:datein 
+  fp1_hf:timein 
+  fp1_hf:rptdate 
+  fp1_hf:ranumber 
+  fp1_hf:resnumber 
+  fp1_hf:employeenumberout 
+  act_days
+  period_days
+  running total[fp1_hf:totaltpm ,fp1_hf:commonid]/name="totaltpm"
+  running total[fp1_hf:taxamtsales,fp1_hf:commonid] /name="taxamtsales"
+  running total[fp1_hf:rentaldiscountamt,fp1_hf:commonid] /name="rentaldiscountamt"
+  fp1_hf:type 
+  running total[fp1_hf:tot_amt,fp1_hf:commonid] /name="tot_amt"
+  fp1_hf:actmiles 
+  fp1_hf:customerlastname 
+  fp1_hf:systemid 
+  fp1_hf:open_flag
+
+;
+run/parameterfile=fltperf_1 
+
+/*------------------------------------------------------------------------
+ Allocate rental info to all inventory records on RA
+ and calculate the revenue prorate factor
+------------------------------------------------------------------------*/
+ 
+viewpoint native
+include "fltperf_i1.inc"
+
+define
+
+  file system_set = access systemsettings,
+   set systemsettings:dbid="" 
+
+  number ot_hours = system_set:extraactday
+
+  file inv_link = access invtrx,
+    set invtrx:commonid = fp2_hf:commonid,
+    one to many
+
+   date date_in = if inv_link:datein = null then dtedate else inv_link:datein
+   number time_in = if inv_link:datein = null then 23.59 else inv_link:timein
+
+   number ot_day = if ((date_in-inv_link:dateout>0) and (time_in - inv_link:timeout > ot_hours)
+    and (date_in <= dtedate and inv_link:dateout >= dtsdate)) then 1 else 0 -- 0 if same day add only if in date range open/close
+
+   
+   number trx_days = 
+      -- start and ends during date range
+      if (inv_link:dateout >= dtsdate and date_in <= dtedate) then date_in - inv_link:dateout else 
+      -- start before ends during +1 OR 1st day of report
+      if (inv_link:dateout < dtsdate and (date_in >= dtsdate and date_in <= dtedate)) then date_in - dtsdate + 1 else
+      -- start during ends after +1 OR last day 
+      if ((inv_link:dateout >= dtsdate and inv_link:dateout <= dtedate) and (date_in > dtedate)) then dtedate - inv_link:dateout + 1 else
+      -- starts before ends after +1 OR last day
+      if (inv_link:dateout <= dtsdate and date_in >= dtedate) then dtedate - dtsdate + 1
+
+   number trx_days2 = if (trx_days = 0) then 1 else trx_days + ot_day
+
+   number proration_factor = trx_days2 divide fp2_hf:act_days
+   
+   number inv_miles = inv_link:odometerin - inv_link:odometerout
+ 
+   number net_tm = round(fp2_hf:totaltpm * proration_factor,2)
+   number rev_other = round(fp2_hf:tot_amt * proration_factor,2)
+
+
+list/domain="fp2_hf"/nodetail/noheadings/hold="fp3_hf"
+  inv_link:unitnumber
+  inv_link:product
+  inv_link:invclass
+  inv_link:invid 
+  inv_link:dateout
+  inv_link:timeout 
+  date_in 
+  time_in
+  inv_link:locationcodeout 
+  fp2_hf:ranumber 
+  fp2_hf:commonid 
+  fp2_hf:tot_amt
+  fp2_hf:open_flag
+  fp2_hf:act_days
+  fp2_hf:totaltpm
+  fp2_hf:rentaldiscountamt
+  fp2_hf:locationcodeout/name="rrm_loc"
+  trx_days2
+  net_tm
+  rev_other
+
+sorted by 
+inv_link:invclass
+inv_link:unitnumber
+
+end of inv_link:unitnumber
+  inv_link:invid/keyelement=1.1
+  inv_link:product
+  inv_link:invclass
+  inv_link:unitnumber
+  running count[fp2_hf:ranumber,inv_link:unitnumber]/name="ra_count"
+  running total[rev_other,inv_link:unitnumber]/name="other"
+  running total[fp2_hf:act_days,inv_link:unitnumber]/name="act_days"
+  running total[trx_days2,inv_link:unitnumber]/name="or_days"
+  running total[net_tm,inv_link:unitnumber]/name="net_tpm"
+
+;
+run/parameterfile=fltperf_1 
+
+/*------------------------------------------------------------------------
+ Build inventory list from time period for current fleet
+------------------------------------------------------------------------*/
+viewpoint native
+
+include "fltperf_i1.inc"
+
+  file owned_link = access location,
+   set location:locationcode=inv:ownedlocationcode
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+   date dtoutsrv = if inv:datesold <> null then inv:datesold else 
+     if inv:outservicedate <> null then inv:outservicedate else 
+     if inv:expectedoutservicedate <> null then inv:expectedoutservicedate else dtedate
+
+   date dtin = if inv:inservicedate < dtsdate then dtsdate else inv:inservicedate
+   date dtout = if dtoutsrv > dtedate then dtedate else dtoutsrv
+
+   number avail_days = if (dtout - dtin + 1) < 0 then 0 else (dtout - dtin + 1)
+
+ 
+where (inv:inservicedate <= dtEdate and
+ ((inv:outservicedate >= dtsdate or inv:outservicedate = null)and(inv:datesold >= dtsdate or inv:datesold = null)))
+  and owned_link:owned=1
+  and inv:product = cproduct
+  and inv:ownedlocationcode = cLoc
+  and inv:invclass = cclass
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="inv"/hold="inv_hf"
+  inv:product
+  inv:unitnumber
+  inv:model  
+  inv:invclass
+  inv:year
+  inv:invid/keyelement = 1.1
+  0/width=2/name="sold_flag"
+  avail_days
+
+;
+run/parameterfile=fltperf_1 
+
+/*------------------------------------------------------------------------
+ Build inventory list from time period for sold fleet
+------------------------------------------------------------------------*/
+viewpoint native
+
+include "fltperf_i1.inc"
+
+  file owned_link = access location,
+   set location:locationcode=invsold:ownedlocationcode
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:ownedlocationcode,
+    null fill on failure
+
+   date dtoutsrv = if invsold:datesold <> null then invsold:datesold else 
+     if invsold:outservicedate <> null then invsold:outservicedate else 
+     if invsold:expectedoutservicedate <> null then invsold:expectedoutservicedate else dtedate
+
+   date dtin = if invsold:inservicedate < dtsdate then dtsdate else invsold:inservicedate
+   date dtout = if dtoutsrv > dtedate then dtedate else dtoutsrv
+
+   number avail_days = if (dtout - dtin + 1) < 0 then 0 else (dtout - dtin + 1)
+
+ 
+where (invsold:inservicedate <= dtEdate and 
+  ((invsold:outservicedate > dtsdate or invsold:outservicedate = null)and(invsold:datesold > dtsdate or invsold:datesold = null)))
+  and owned_link:owned=1
+  and invsold:product = cproduct
+  and invsold:ownedlocationcode = cLoc
+  and invsold:invclass = cclass
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="invsold"/hold="inv_hf"/append
+  invsold:product
+  invsold:unitnumber
+  invsold:model  
+  invsold:invclass
+  invsold:year
+  invsold:invid/keyelement = 1.1
+  1/width=2/name="sold_flag"
+  avail_days
+
+;
+run/parameterfile=fltperf_1 
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native
+include "fltperf_i1.inc"
+
+define 
+
+   file rev_link = access fp3_hf,
+    set fp3_hf:invid=inv_hf:invid,
+    one to one, zero fill on failure
+
+  number tot_rev = rev_link:net_tpm + rev_link:other
+  number rev_rday = if rev_link:or_days = 0 then 0 else round(tot_rev divide rev_link:or_days,2)
+  number tm_ra = if rev_link:ra_count  = 0 then 0 else round(rev_link:net_tpm divide rev_link:ra_count,2)
+  number tm_aday = if inv_hf:avail_days = 0 then 0 else round(rev_link:net_tpm divide inv_hf:avail_days,2)
+  number rev_aday = if inv_hf:avail_days = 0 then 0 else round(tot_rev divide inv_hf:avail_days,2)
+  number util = if inv_hf:avail_days = 0 then 0 else round(rev_link:or_days divide inv_hf:avail_days*100,1)
+
+
+list/domain="inv_hf"/nobanner/noheadings/noreporttotals/pageof/pagelength=70/title="Fleet Performance Report" include "fltperf_i2.cq"
+  inv_hf:product/displaywidth=10/name="a"
+  inv_hf:unitnumber/displaywidth=10/name="b"
+  rev_link:ra_count/displaywidth=5/name="c"
+  inv_hf:avail_days/displaywidth=5/name="d"
+  rev_link:or_days/displaywidth=5/name="e"
+  util/displaywidth=5/name="f"
+  rev_link:net_tpm/displaywidth=12/name="g"
+  rev_link:other/displaywidth=12  /name="h"
+  tot_rev/displaywidth=12/name="i"
+  rev_rday/displaywidth=8/name="j" 
+  tm_ra/displaywidth=8/name="k"
+  tm_aday/displaywidth=8/name="l"
+  rev_aday/displaywidth=8/name="m"
+
+sorted by 
+inv_hf:invclass
+inv_hf:unitnumber
+
+top of inv_hf:invclass
+  inv_hf:invclass/newline
+
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if copen="Y" then "Date Range: "+str(dtSdate)+" to "+str(dtEdate) + "    Includes Open Contracts" else
+   "Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct) + "   Other Revenue: " + str(ccode)/displaywidth=100
+  end box/newline=4
+  
+  "Product"/align=a
+  "Unit #"/align=b
+  "RAs"/align=c
+  "Available"/align=d
+  "On Rent"/align=e
+  "Util%"/align=f
+  "Net"/align=g
+  "Other"/align=h
+  "Total"/align=i
+  "Rev/"/align=j
+  "T&M/"/align=k
+  "T&M/"/align=l
+  "Tot Rev/"/align=m/newline
+
+  "Days"/align=d
+  "Days"/align=e
+  "T&M"/align=g
+  "Revenue"/align=h
+  "Revenue"/align=i
+  "Rent Day"/align=j
+  "RA"/align=k
+  "Avail Day"/align=l
+  "Avail Day"/align=m/newline
+
+end of inv_hf:invclass
+  "Totals for: " + str(inv_hf:invclass)/align=a
+  running total[rev_link:ra_count]/align=c
+  running total[inv_hf:avail_days]/align=d
+  running total[rev_link:or_days]/align=e
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[rev_link:or_days] divide running total[inv_hf:avail_days]*100,1)/align=f
+  running total[rev_link:net_tpm]/align=g
+  running total[rev_link:other]/align=h
+  running total[tot_rev]/align=i
+  if running total[rev_link:or_days] = 0 then 0 else round(running total[tot_rev] divide running total[rev_link:or_days],2)/align=j
+  if running total[rev_link:ra_count]  = 0 then 0 else round(running total[rev_link:net_tpm] divide running total[rev_link:ra_count],2)/align=k
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[rev_link:net_tpm] divide running total[inv_hf:avail_days],2)/align=l
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[tot_rev] divide running total[inv_hf:avail_days],2)/align=m/newline
+
+
+end of report
+  "Grand Totals: "/align=a
+  running total[rev_link:ra_count]/align=c
+  running total[inv_hf:avail_days]/align=d
+  running total[rev_link:or_days]/align=e
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[rev_link:or_days] divide running total[inv_hf:avail_days]*100,1)/align=f
+  running total[rev_link:net_tpm]/align=g
+  running total[rev_link:other]/align=h
+  running total[tot_rev]/align=i
+  if running total[rev_link:or_days] = 0 then 0 else round(running total[tot_rev] divide running total[rev_link:or_days],2)/align=j
+  if running total[rev_link:ra_count]  = 0 then 0 else round(running total[rev_link:net_tpm] divide running total[rev_link:ra_count],2)/align=k
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[rev_link:net_tpm] divide running total[inv_hf:avail_days],2)/align=l
+  if running total[inv_hf:avail_days] = 0 then 0 else round(running total[tot_rev] divide running total[inv_hf:avail_days],2)/align=m/newline
+
+;
+replace fltperf.eq
+run/parameterfile=fltperf_1 fltperf.eq
+rrepl fltperf
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltperf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Performance Report" -- Report Title
+   string rptname1    = "fltperf" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltperf_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,203 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2020.
+  All rights reserved.
+
+  Report: Class Substitution Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/10/2020
+Modified:
+
+Notes:
+$Workfile: kcisub.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/kcisub.mf $
+$Revision: 1 $
+$History: kcisub.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 1/10/20    Time: 4:49p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace kcisub_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RRM records - setup parameters
+------------------------------------------------------------------------*/
+include "kcisub_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, zero fill on failure
+
+where (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate) and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and 
+      (rrm:resnumber <> "")
+
+list/domain="rrm"/hold="rrm_hf"
+ if rrm:reservedclass <> rrm:rentedasclass then {
+  rrm:commonid/keyelement=1.1
+  rental_link:addedbyemployeenumber
+  rrm:resnumber
+  rrm:ranumber
+  rrm:reservedclass
+  rrm:rentedasclass
+}
+;
+replace kcisub_1.eq
+run/setparameter kcisub_1.eq
+
+run/parameterfile=kcisub_1 kcisub_1.eq
+
+/*------------------------------------------------------------------------
+ Create Excel output include
+------------------------------------------------------------------------*/
+include "kcisub_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "Y" then "/pagelength=0" else ""
+
+;
+run/parameterfile=kcisub_1
+rrepl "kcisub_i2"
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "kcisub_i1.inc" 
+define
+
+  file rarate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   with ratelinera:res=0 and 
+  (ratelinera:type = "Reg" and ratelinera:minsperx = 1440),
+   one to one, generic, zero fill on failure
+
+  file resrate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   with ratelinera:res=1 and 
+  (ratelinera:type = "Reg" and ratelinera:minsperx = 1440),
+   one to one, generic, zero fill on failure
+
+  number upgday = rarate_link:rateper - resrate_link:rateper
+
+list/domain="rrm_hf"/nobanner/pageof/title="Class Substitution Report"/duplicates/noreporttotals/noheadings include "kcisub_i2.cq"
+
+  rrm_hf:addedbyemployeenumber/displaywidth=10
+  rrm_hf:resnumber/displaywidth=10
+  rrm_hf:reservedclass/displaywidth=10
+  resrate_link:rateper/displaywidth=14/decimalplaces=2
+  "    "
+  rrm_hf:ranumber/displaywidth=10
+  rrm_hf:rentedasclass/displaywidth=10
+  rarate_link:rateper/displaywidth=14/decimalplaces=2
+  upgday/displaywidth=14/decimalplaces=2
+
+sorted by 
+  rrm_hf:addedbyemployeenumber
+
+
+top of report
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  end box /newline=4
+
+  "Emp#"/align=rrm_hf:addedbyemployeenumber
+  "Res#"/align=rrm_hf:resnumber
+  "Reserved As"/align=rrm_hf:reservedclass
+  "Res Rate/Day"/align=resrate_link:rateper
+  "RA#"/align=rrm_hf:ranumber
+  "Rented As"/align=rrm_hf:rentedasclass
+  "Rent Rate/Day"/align=rarate_link:rateper
+  "Upgrade/Day"/align=upgday/newline
+
+end of report
+  ""/newline
+  "Total Records:   "+str(count[rrm_hf:addedbyemployeenumber,report])
+;
+replace kcisub.eq
+run/parameterfile=kcisub_1 kcisub.eq
+rrepl kcisub
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "kcisub_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=kcisub_1 kcisub.eq"/newline
+"rrepl kcisub"/newline
+} else {
+"run/xls/parameterfile=kcisub_1 kcisub.eq"/newline
+"rrepl kcisub_xl"/newline
+}
+"view"/newline 
+;
+run/parameterfile=kcisub_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "kcisub" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "kcisub_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,358 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Missing Contract Numbers Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/5/2019
+Modified:
+
+Notes:
+$Workfile: ranumchk.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ranumchk.mf $
+$Revision: 2 $
+$History: ranumchk.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cstartnum[ 1024 ] = parameter prompt "Starting Contract:"  
+  string cendnum[ 1024 ] = parameter prompt "Ending Contract:" valid if cendnum > cstartnum
+  string cselect=parameter prompt "Selection Options: " valid "Full Report","Sequence Only","Out of Sequence Only" default "Full Report"
+;
+replace ranumchk_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve rrm records in range - setup parameters
+------------------------------------------------------------------------*/
+
+include "ranumchk_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+   
+  string stat_str = switch(rrm:rastatus)
+   case 1 : "Pending" 
+   case 2 : "Open"   
+   case 3 : "Closed"  
+   case 4 : "Void"    
+   default : "Other"
+
+where (rrm:ranumber >= cstartnum and rrm:ranumber <= cendnum) and rrm:rastatus > 0
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/hold="rrm_hf"
+rrm:commonid/keyelement=1.1
+rrm:ranumber/keyelement=2.1
+rrm:dateout
+rrm:locationcodeout
+stat_str
+;
+
+replace ranumchk_1.eq
+run/setparameter ranumchk_1.eq
+
+run/parameterfile=ranumchk_1 ranumchk_1.eq
+
+/*------------------------------------------------------------------------
+ Strip alpha characters from RA number for sequencing 
+  and extract RA prefix
+------------------------------------------------------------------------*/
+include "ranumchk_i1.inc"
+
+define
+   file iLoop = access counter,
+    set min=1, max=len(cstartnum)
+
+list/nodefaults/noheadings/nobanner/nodetail/domain="dummy"
+iloop:position
+ cstartnum[iloop:position]
+if cstartnum[iloop:position] >= "0" and cstartnum[iloop:position] <= "9" then 0 else iloop:position/name="alpha_pos"
+end of report
+ cstartnum[maximum[alpha_pos]+1,len(cstartnum)]
+;
+run/parameterfile=ranumchk_1
+rrepl seqstartnum
+
+include "ranumchk_i1.inc"
+
+define
+   file iLoop = access counter,
+    set min=1, max=len(cendnum)
+
+list/nodefaults/noheadings/nobanner/nodetail/domain="dummy"
+iloop:position
+ cendnum[iloop:position]
+if cendnum[iloop:position] >= "0" and cendnum[iloop:position] <= "9" then 0 else iloop:position/name="alpha_pos"
+end of report
+ cendnum[maximum[alpha_pos]+1,len(cendnum)]
+;
+run/parameterfile=ranumchk_1
+rrepl seqendnum
+
+include "ranumchk_i1.inc"
+
+define
+   file iLoop = access counter,
+    set min=1, max=len(cstartnum)
+
+list/nodefaults/noheadings/nobanner/nodetail/domain="dummy"
+iloop:position
+ cstartnum[iloop:position]
+if cstartnum[iloop:position] >= "0" and cstartnum[iloop:position] <= "9" then 0 else iloop:position/name="alpha_pos"
+end of report
+ '"'+uppercase(cstartnum[1,maximum[alpha_pos]])+'"'
+;
+run/parameterfile=ranumchk_1
+rrepl seqprefix
+
+/*------------------------------------------------------------------------
+ Find missing ra nums from sequence range
+------------------------------------------------------------------------*/
+define
+   number seqstart = include "seqstartnum.cq"
+   number seqend = include "seqendnum.cq"
+   number max_ra = seqend - seqstart
+
+   string ra_prefix = include "seqprefix.cq"
+
+   file iLoop = access counter,
+    set min=0, max=max_ra
+
+   string ra_number = trim(ra_prefix + str(seqstart+iloop:position))
+
+   file rrm_link = access rrm_hf,
+    set rrm_hf:ranumber=ra_number,
+    one to one, zero fill on failure
+
+   number type_flag = 1 -- main list
+   string loc_sort = ""
+
+list/domain="dummy"/hold="ranum_hf"
+   ra_number/width=20/keyelement=1.1
+   rrm_link:dateout
+   rrm_link:locationcodeout/width=30
+   if rrm_link:commonid = 0 then "Missing" else rrm_link:stat_str/width=20/name="status"
+   type_flag/width=2
+   loc_sort/width=20
+;
+run/parameterfile=ranumchk_1 
+
+/*------------------------------------------------------------------------
+ Find 1st and last transaction date for range.
+------------------------------------------------------------------------*/
+
+where ranum_hf:dateout <> null
+list/domain="ranum_hf"/nobanner/nodefaults/noreporttotals/nodetail
+  ranum_hf:ra_number 
+  ranum_hf:dateout 
+  ranum_hf:locationcodeout 
+
+
+sorted by ranum_hf:dateout
+top of report
+'"'+str(ranum_hf:dateout)+'"'
+;
+run/parameterfile=ranumchk_1 
+rrepl first_date
+
+where ranum_hf:dateout <> null
+list/domain="ranum_hf"/nobanner/nodefaults/noreporttotals/nodetail
+  ranum_hf:ra_number 
+  ranum_hf:dateout 
+  ranum_hf:locationcodeout 
+
+
+sorted by ranum_hf:dateout
+end of report
+'"'+str(ranum_hf:dateout)+'"'
+;
+run/parameterfile=ranumchk_1 
+rrepl last_date
+
+/*------------------------------------------------------------------------
+ Create ra num list from dates
+------------------------------------------------------------------------*/
+include "ranumchk_i1.inc"
+define
+   date start_date = date(include "first_date.cq")
+   date end_date = date(include "last_date.cq")
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+   
+  string stat_str = switch(rrm:rastatus)
+   case 1 : "Pending" 
+   case 2 : "Open"   
+   case 3 : "Closed"  
+   case 4 : "Void"    
+   default : "Other"
+
+   number type_flag = 2 -- out of sequence list
+   string loc_sort = rrm:locationcodeout
+
+where (rrm:dateout >= start_date and rrm:dateout <= end_date) and rrm:rastatus>0
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/hold="ranum_hf"/append
+  trim(rrm:ranumber)/width=20/name="ra_number"/keyelement=1.1
+  rrm:dateout
+  rrm:locationcodeout/width=30
+  stat_str/width=20/name="status"
+  type_flag/width=2
+  loc_sort/width=20
+;
+run/parameterfile=ranumchk_1 
+/*------------------------------------------------------------------------
+ Consolidate and sort listing
+------------------------------------------------------------------------*/
+list/domain="ranum_hf"/nodetail/hold="ranumchk_hf"
+  ranum_hf:ra_number 
+  ranum_hf:dateout 
+  ranum_hf:locationcodeout 
+  ranum_hf:status 
+  ranum_hf:type_flag
+  ranum_hf:loc_sort
+
+sorted by
+  ranum_hf:ra_number
+  ranum_hf:type_flag/descending
+
+end of ranum_hf:ra_number
+  ranum_hf:ra_number 
+  ranum_hf:dateout 
+  ranum_hf:locationcodeout 
+  ranum_hf:status 
+  ranum_hf:type_flag
+  ranum_hf:loc_sort
+;
+run/parameterfile=ranumchk_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "ranumchk_i1.inc"
+
+where (ranumchk_hf:type_flag=2 and cselect="Out of Sequence Only") or
+      (ranumchk_hf:type_flag=1 and cselect="Sequence Only") or
+      cselect = "Full Report"
+
+list/domain="ranumchk_hf"/noheadings/nobanner/pageof/title="Missing Contract Numbers Report"
+  ranumchk_hf:dateout/displaywidth=15
+  ranumchk_hf:ra_number/displaywidth=20
+  ranumchk_hf:locationcodeout/displaywidth=30 
+  ranumchk_hf:status /displaywidth=20
+  if ranumchk_hf:type_flag=2 then "** Out of Sequence **" else ""/displaywidth=20
+
+
+sorted by
+  ranumchk_hf:type_flag
+  ranumchk_hf:loc_sort
+
+top of ranumchk_hf:loc_sort
+  if ranumchk_hf:type_flag=2 then {
+    ""/newline
+    "Out of sequence Contract Numbers for location: "+str(loc_sort)
+  } else {
+    ""
+  }
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Missing Contracts Numbers from: " + str(uppercase(cstartnum))+" to "+str(uppercase(cendnum))/newline  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  if cselect = "Full Report" then "" else str(cselect)/newline
+  end box /newline=4
+
+  "Date Out"/align=ranumchk_hf:dateout
+  "Contract #"/align=ranumchk_hf:ra_number 
+  "Location Out"/align=ranumchk_hf:locationcodeout 
+  "Status"/align=ranumchk_hf:status /newline
+
+end of report
+  ""/newline
+  "Total records: "+str(count[ranumchk_hf:ra_number])
+
+;
+replace ranumchk.eq
+run/parameterfile=ranumchk_1 ranumchk.eq
+rrepl ranumchk
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view ranumchk
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Missing Contract Numbers Report" -- Report Title
+   string rptname1    = "ranumchk" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "ranumchk_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

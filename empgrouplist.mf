@@ -1,0 +1,210 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Employee Group List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/20/2018
+Modified:
+
+Notes:
+$Workfile: empgrouplist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/empgrouplist.mf $
+$Revision: 2 $
+$History: empgrouplist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameter
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="empgroup"
+if itemnumber=1 then '"'+empgroup:groupname+'"' else
+   ',"'+empgroup:groupname+'"'
+
+sorted by
+   empgroup:groupname
+top of report
+'string cgroup[8192] = multivalue parameter prompt "Groups: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_empgroup"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+  include "param_empgroup.cq"
+  string cnogroup = parameter/uppercase prompt "Show employees with no group? " valid "Y","N" default "N"
+  string cinactive = parameter/uppercase prompt "Show inactive employees? " valid "Y","N" default "N"
+;
+replace empgrouplist_i1.inc
+
+/*------------------------------------------------------------------------
+ Gather all groups employees belong to
+------------------------------------------------------------------------*/
+
+ include "empgrouplist_i1.inc"
+ define  
+
+   number num_fields = countfields(employee:groups,",")
+   file i_counter = access counter,
+    set min=1,max=num_fields
+
+   string group[30] = if num_fields = null then "*** No Group ***" else subfield(employee:groups,",",i_counter:position)
+
+
+list/domain="employee"/hold="emp_hf"
+
+  employee:employeenumber 
+  employee:employeefirstname 
+  employee:employeelastname 
+  employee:dateinactive
+if (i_counter:position <= num_fields or num_fields = null)then {
+  group/keyelement=1.1
+}
+
+;
+replace empgrouplist_1.eq
+run/setparameter empgrouplist_1.eq
+
+run/parameterfile=empgrouplist_1 empgrouplist_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve employee groups
+------------------------------------------------------------------------*/
+define 
+   file emp_link = access emp_hf,
+    set emp_hf:group=empgroup:groupname,
+    one to many
+
+list/domain="empgroup"/hold="empgroup_hf"
+  empgroup:groupname/width=30
+  empgroup:description /width=50
+  emp_link:employeenumber /width=20
+  emp_link:employeelastname+", "+emp_link:employeefirstname/name="emp_name"/width=100
+  emp_link:dateinactive
+  1/name="groupflag"/width=2
+;
+run/parameterfile=empgrouplist_1 
+
+/*------------------------------------------------------------------------
+ Employees with no groups
+------------------------------------------------------------------------*/
+where emp_hf:group="*** No Group ***"
+
+list/domain="emp_hf"/hold="empgroup_hf"/append
+  emp_hf:group/name="groupname" /width=30
+  ""/name="description"/width=50
+  emp_hf:employeenumber/width=20
+  emp_hf:employeelastname+", "+emp_hf:employeefirstname/name="emp_name"/width=100
+  emp_hf:dateinactive
+  0/name="groupflag"/width=2
+;
+run/parameterfile=empgrouplist_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+ include "empgrouplist_i1.inc"
+
+  
+where (empgroup_hf:groupname = cgroup or cgroup = "ALL") and
+      (empgroup_hf:groupflag=1 or cnogroup="Y") and
+      (empgroup_hf:dateinactive = null or cinactive="Y")
+
+list/domain="empgroup_hf"/nobanner/pageof/title="Employee Group List"/duplicates/noreporttotals/noheadings/pagelength=80
+  empgroup_hf:employeenumber
+  empgroup_hf:emp_name
+  if empgroup_hf:dateinactive <> null then "Inactive" else ""
+
+sorted by
+  empgroup_hf:groupname
+  empgroup_hf:emp_name
+
+top of empgroup_hf:groupname
+  "Group Name: "
+  empgroup_hf:groupname
+  empgroup_hf:description/newline
+
+end of empgroup_hf:groupname
+  ""/newline=2
+
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+ "Group Range: " + str(cgroup)/newline
+ end box /newline=4
+
+ "Employee ID"/align=empgroup_hf:employeenumber
+ "Name"/align=empgroup_hf:emp_name/newline
+
+;
+replace empgrouplist.eq
+run/parameterfile=empgrouplist_1 empgrouplist.eq
+rrepl empgrouplist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view empgrouplist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Employee Group List" -- Report Title
+   string rptname1    = "empgrouplist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "empgrouplist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

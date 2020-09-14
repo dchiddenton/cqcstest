@@ -1,0 +1,567 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Customer Local Company Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: custcomp.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/custcomp.mf $
+$Revision: 2 $
+$History: custcomp.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 10/10/19   Time: 1:28p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Correct rcmift rev flag to allow dummy place holding records
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 10/10/19   Time: 1:10p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+
+define
+  sales_rep = str(employee:employeefirstname) + " " + str(employee:employeelastname)
+  sales_repLast =  str(employee:employeelastname)+ " " + str(employee:employeefirstname)
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"ALL","NONE"'
+   ',"'+sales_rep+'"'
+
+sorted by
+   sales_repLast
+top of report
+'string csalesrep[8192] = multivalue parameter prompt "Sales Rep: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl param_salesrep
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cselect = parameter valid "Customers","Companies","Customers by Company Type" prompt "Select By:" default "Customers"
+  string crange = range parameter prompt "Range Selection (Start..End or ALL): " default ALL
+  include "param_salesrep.cq"
+  string cctype[1024] = multivalue parameter prompt "Company Type:" valid "Body Shop","Corp-Cust","Corporate","Insurance",
+      "Renter","Repair Shop","Tour","Vendor","Other" default "ALL"
+  date dtsdaterent = parameter prompt "Last Rental Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedaterent = parameter Prompt "Last Rental Ending Date"  error "Error: End date < Start date"  if dtEdaterent < dtSdaterent default todaysdate
+  date dtsdateclose = parameter prompt "Contracts Closed Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedateclose = parameter Prompt "Contracts Closed Ending Date"  error "Error: End date < Start date" if dtEdateclose < dtSdateclose default todaysdate
+  number crentals = range parameter prompt "Minimum # Rentals: " default 1
+  --#string csort = parameter valid "Customer","Company","Sales Rep" prompt "Sorted By:" default "Customer"
+;
+replace custcomp_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RRM records - setup parameters
+------------------------------------------------------------------------*/
+include "custcomp_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  string renter_name = rrm:customerlastname+" "+rrm:customerfirstname
+
+where (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and 
+      (rrm:product = cproduct or cproduct = "ALL") and
+      rrm:rastatus = 3 and
+      (rrm:datein >= dtsdateclose and rrm:datein <= dtedateclose)
+ 
+
+list/domain="rrm"/hold="rrm_hf"
+  rrm:commonid/width=11/keyelement=1.1
+  rrm:ranumber/width=20
+  rrm:company/width=60
+  rrm:dateout/width=10
+  rrm:locationcodeout/width=25
+  renter_name/width=60
+  rrm:customerlastname/width=40
+  rrm:renterid
+
+;
+replace custcomp_1.eq
+run/setparameter custcomp_1.eq
+
+run/parameterfile=custcomp_1 custcomp_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve rcmift records for all rrm records
+------------------------------------------------------------------------*/
+
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+where rcmift_link:rev = 1
+
+list/domain="rrm_hf"/hold="rcmift_hf"
+  rrm_hf:commonid/width=11/keyelement=1.1
+  rcmift_link:type/width=11
+  rcmift_link:code/width=16
+  rcmift_link:total/width=14/decimalplaces=2/name="tot_amt"
+  rcmift_link:rev/width=4
+  rcmift_link:tmpack/width=4
+;
+run/parameterfile=custcomp_1
+
+/*------------------------------------------------------------------------
+ Create dummy record for missing rcmift records
+------------------------------------------------------------------------*/
+list/domain="dummy"/maxrecords=1/hold="rcmift_hf"/append
+  0/width=11/name="commonid"/keyelement=1.1
+  2/width=11/name="type"
+  ""/width=16/name="code"
+  0/width=14/decimalplaces=2/name="tot_amt"
+  0/width=4/name="rev"
+  0/width=4/name="tmpack"
+followed by
+  0/width=11
+  3/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  4/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  5/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  10/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  51/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  9999/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+;
+run/parameterfile=custcomp_1 
+
+/*------------------------------------------------------------------------
+ Consolidate misc charges/taxes by commonid
+------------------------------------------------------------------------*/
+define
+
+string Charge_Type = switch(rcmift_hf:type)
+  case 2          : "CDW"
+  case 3          : "PAC"
+  case 4          : "PEC"
+  case 5          : "SLI"
+  case 8          : "UPG"
+  case 10,11,12   : "FUEL"
+  default         : "Other"
+
+where rcmift_hf:tmpack = 0 
+
+sum/domain="rcmift_hf"/hold="rcmift2_hf"
+  rcmift_hf:tot_amt
+across
+  charge_type/showall/total
+by
+  rcmift_hf:commonid/keyelement=1.1
+;
+run/parameterfile=custcomp_1 
+
+/*------------------------------------------------------------------------
+ Convert company type to DB values
+------------------------------------------------------------------------*/
+
+include "custcomp_i1.inc"
+define
+
+  number num_params = countfields(str(cctype),",")  
+
+  file i_counter = access counter,
+    set min=1,max=num_params
+
+  string cctypestr = subfield(str(cctype),",",i_counter:position)
+  
+  string cctypedesc = switch(cctypestr)
+     case "Body Shop"    : "B"
+     case "Corp-Cust"    : "P"  
+     case "Corporate"    : "C"
+     case "Insurance"    : "I"
+     case "Renter"       : "N"
+     case "Repair Shop"  : "R"
+     case "Tour"         : "T"
+     case "Vendor"       : "V"
+     case "Other"        : "Other"
+     case "ALL"          : "ALL"
+  
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if i_counter:position <= num_params then
+   subfield(str(cctype),",",i_counter:position)/hidden
+   if i_counter:position = 1 then '"'+cctypedesc+'"' else ',"'+cctypedesc+'"'/concatenate
+;
+run/parameterfile=custcomp_1 
+rrepl comp_type
+
+
+/*------------------------------------------------------------------------
+ Create sort/total routine based on selection
+------------------------------------------------------------------------*/
+include "custcomp_i1.inc"
+
+list/domain="dummy"/nobanner/nodefaults
+if cselect = "Companies" then {
+'sorted by'/newline
+'   rrm_hf:company'/newline
+''/newline
+''/newline
+'end of rrm_hf:company'/newline
+'   rrm_hf:renter_name'/newline
+'   rrm_hf:customerlastname'/newline
+'   rental_link:addedbyemployeenumber'/newline
+'   renter_link:lastrental'/newline
+'   rrm_hf:locationcodeout'/newline
+'   rrm_hf:company'/newline
+'   company_link:type'/newline
+'   company_link:salesrep'/newline
+'   renter_link:company/name="company_cust"'/newline
+'   renter_company:type'/newline
+'   renter_company:salesrep'/newline
+'   count[rrm_hf:commonid,rrm_hf:company]/name="rentals"'/newline
+'   total[net_tm,rrm_hf:company]/name="tot_tm"'/newline
+'   total[charge_link:tot_amt_cdw,rrm_hf:company]/name="tot_cdw"'/newline
+'   total[charge_link:tot_amt_pac,rrm_hf:company]/name="tot_pac"'/newline
+'   total[charge_link:tot_amt_pec,rrm_hf:company]/name="tot_pec"'/newline
+'   total[charge_link:tot_amt_sli,rrm_hf:company]/name="tot_sli"'/newline
+'   total[charge_link:tot_amt_upg,rrm_hf:company]/name="tot_upg"'/newline
+'   total[charge_link:tot_amt_fuel,rrm_hf:company]/name="tot_fuel"'/newline
+'   total[charge_link:tot_amt_other,rrm_hf:company]/name="tot_other"'/newline
+'   total[tot_rev,rrm_hf:company]/name="total_rev"'/newline
+
+} else if cselect = "Customers" then {
+
+'   sorted by'/newline
+'   rrm_hf:renter_name'/newline
+'   rrm_hf:locationcodeout'/newline
+'   '/newline
+'   '/newline
+'end of rrm_hf:locationcodeout'/newline
+'   rrm_hf:renter_name'/newline
+'   rrm_hf:customerlastname'/newline
+'   rental_link:addedbyemployeenumber'/newline
+'   renter_link:lastrental'/newline
+'   rrm_hf:locationcodeout'/newline
+'   rrm_hf:company'/newline
+'   company_link:type'/newline
+'   company_link:salesrep'/newline
+'   renter_link:company/name="company_cust"'/newline
+'   renter_company:type'/newline
+'   renter_company:salesrep'/newline
+'   count[rrm_hf:commonid,rrm_hf:locationcodeout]/name="rentals"'/newline
+'   total[net_tm,rrm_hf:locationcodeout]/name="tot_tm"'/newline
+'   total[charge_link:tot_amt_cdw,rrm_hf:locationcodeout]/name="tot_cdw"'/newline
+'   total[charge_link:tot_amt_pac,rrm_hf:locationcodeout]/name="tot_pac"'/newline
+'   total[charge_link:tot_amt_pec,rrm_hf:locationcodeout]/name="tot_pec"'/newline
+'   total[charge_link:tot_amt_sli,rrm_hf:locationcodeout]/name="tot_sli"'/newline
+'   total[charge_link:tot_amt_upg,rrm_hf:locationcodeout]/name="tot_upg"'/newline
+'   total[charge_link:tot_amt_fuel,rrm_hf:locationcodeout]/name="tot_fuel"'/newline
+'   total[charge_link:tot_amt_other,rrm_hf:locationcodeout]/name="tot_other"'/newline
+'   total[tot_rev,rrm_hf:locationcodeout]/name="total_rev"'/newline
+
+} else {
+
+'sorted by'/newline
+'   renter_company:type '/newline
+'   renter_company:company'/newline
+'   rrm_hf:renter_name'/newline
+''/newline
+'end of rrm_hf:renter_name'/newline
+'   rrm_hf:renter_name'/newline
+'   rrm_hf:customerlastname'/newline
+'   rental_link:addedbyemployeenumber'/newline
+'   renter_link:lastrental'/newline
+'   rrm_hf:locationcodeout'/newline
+'   rrm_hf:company'/newline
+'   company_link:type'/newline
+'   company_link:salesrep'/newline
+'   renter_link:company/name="company_cust"'/newline
+'   renter_company:type'/newline
+'   renter_company:salesrep'/newline
+'   count[rrm_hf:commonid,rrm_hf:renter_name]/name="rentals"'/newline
+'   total[net_tm,rrm_hf:renter_name]/name="tot_tm"'/newline
+'   total[charge_link:tot_amt_cdw,rrm_hf:renter_name]/name="tot_cdw"'/newline
+'   total[charge_link:tot_amt_pac,rrm_hf:renter_name]/name="tot_pac"'/newline
+'   total[charge_link:tot_amt_pec,rrm_hf:renter_name]/name="tot_pec"'/newline
+'   total[charge_link:tot_amt_sli,rrm_hf:renter_name]/name="tot_sli"'/newline
+'   total[charge_link:tot_amt_upg,rrm_hf:renter_name]/name="tot_upg"'/newline
+'   total[charge_link:tot_amt_fuel,rrm_hf:renter_name]/name="tot_fuel"'/newline
+'   total[charge_link:tot_amt_other,rrm_hf:renter_name]/name="tot_other"'/newline
+'   total[tot_rev,rrm_hf:renter_name]/name="total_rev"'/newline
+}
+;
+run/parameterfile=custcomp_1 
+rrepl custcomp_i2
+
+/*------------------------------------------------------------------------
+ Consolidate data
+------------------------------------------------------------------------*/
+ include "custcomp_i1.inc"
+
+define
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+   file renter_link = access renter,
+    set renter:renterid=rrm_hf:renterid,
+    one to one, null fill on failure
+
+   file company_link = access company,
+    set company:company=rrm_hf:company,
+    one to one,null fill on failure
+
+   file renter_company = access company,
+    set company:company=renter:company,
+    one to one,null fill on failure
+ 
+   file charge_link = access rcmift2_hf,
+    set rcmift2_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+
+   number net_tm = (rental_link:totaltpm - rental_link:rentaldiscountamt)
+   number tot_rev = (net_tm + charge_link:tot_amt_total)
+
+
+list/domain="rrm_hf"/nodetail/hold="compcust_hf"
+   rrm_hf:commonid
+   rrm_hf:locationcodeout
+   rrm_hf:renter_name
+   rrm_hf:customerlastname
+   rrm_hf:company
+   company_link:type
+   company_link:salesrep
+   rental_link:addedbyemployeenumber
+   renter_link:lastrental
+   rrm_hf:dateout
+   net_tm
+   charge_link:tot_amt_cdw
+   charge_link:tot_amt_pac
+   charge_link:tot_amt_pec
+   charge_link:tot_amt_sli
+   charge_link:tot_amt_upg
+   charge_link:tot_amt_fuel
+   charge_link:tot_amt_other
+   tot_rev
+
+include "custcomp_i2.cq"
+;
+run/parameterfile=custcomp_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+ include "custcomp_i1.inc"
+
+define
+   file empcomp_link = access employee,
+    set employee:employeenumber=compcust_hf:salesrep,
+    one to one, null fill on failure
+
+   string salesrep_name = if empcomp_link:employeenumber = null then "None" else 
+                             empcomp_link:employeefirstname+" "+empcomp_link:employeelastname
+  
+
+
+where (compcust_hf:lastrental >= dtsdaterent and compcust_hf:lastrental <= dtedaterent) and
+      ((compcust_hf:type one of include "comp_type.cq" and cselect = "Companies") or
+       (compcust_hf:type2 one of include "comp_type.cq" and cselect = "Customers by Company Type" or cctype = "ALL")) and
+      (salesrep_name = csalesrep or csalesrep = "ALL") and
+      ((compcust_hf:customerlastname = crange and cselect = "Customers") or
+       (compcust_hf:customerlastname = crange and cselect = "Customers by Company Type") or
+       (compcust_hf:company = crange and cselect = "Companies") or cselect = "ALL") and
+      (compcust_hf:rentals >= crentals) and
+      (compcust_hf:company <> "" or cselect <> "Companies")
+
+
+list/domain="compcust_hf"/noheadings/nobanner/pageof/noreporttotals/title="Customer Local Company Report"
+
+  compcust_hf:type2/hidden
+  if cselect = "Companies" then compcust_hf:locationcodeout 
+    else compcust_hf:renter_name/displaywidth=30/name="a"
+  if cselect = "Companies" then compcust_hf:company
+   else compcust_hf:addedbyemployeenumber/displaywidth=30/name="b"
+  if cselect = "Companies" then salesrep_name
+   else str(compcust_hf:lastrental)/displaywidth=20/name="c"
+  compcust_hf:rentals/name="d"
+  compcust_hf:tot_tm/name="e"
+  compcust_hf:tot_cdw/name="f"
+  compcust_hf:tot_pac/name="g"
+  compcust_hf:tot_pec/name="h"
+  compcust_hf:tot_sli/name="i"
+  compcust_hf:tot_upg/name="j"
+  compcust_hf:tot_fuel/name="k"
+  compcust_hf:tot_other/name="l"
+  compcust_hf:total_rev/name="m"
+
+
+
+sorted by 
+  if cselect = "Customers by Company Type" then compcust_hf:type2
+  if cselect = "Customers by Company Type" then compcust_hf:company_cust
+  if cselect <> "Companies" then compcust_hf:renter_name
+  if cselect <> "Companies" then compcust_hf:locationcodeout
+  if cselect = "Companies" then compcust_hf:company
+
+
+end of compcust_hf:company_cust
+if cselect = "Customers by Company Type" then {
+  compcust_hf:company_cust/align=a
+  "Type: "+str(compcust_hf:type2)/align=b
+  total[compcust_hf:rentals,compcust_hf:company_cust]/align=d
+  total[compcust_hf:tot_tm,compcust_hf:company_cust]/align=e
+  total[compcust_hf:tot_cdw,compcust_hf:company_cust]/align=f
+  total[compcust_hf:tot_pac,compcust_hf:company_cust]/align=g
+  total[compcust_hf:tot_pec,compcust_hf:company_cust]/align=h
+  total[compcust_hf:tot_sli,compcust_hf:company_cust]/align=i
+  total[compcust_hf:tot_upg,compcust_hf:company_cust]/align=j
+  total[compcust_hf:tot_fuel,compcust_hf:company_cust]/align=k
+  total[compcust_hf:tot_other,compcust_hf:company_cust]/align=l
+  total[compcust_hf:total_rev,compcust_hf:company_cust]/align=m/newline
+}
+
+end of report
+
+  ""/newline
+  "Report Totals:"/align=a
+  total[compcust_hf:rentals,report]/align=d
+  total[compcust_hf:tot_tm,report]/align=e
+  total[compcust_hf:tot_cdw,report]/align=f
+  total[compcust_hf:tot_pac,report]/align=g
+  total[compcust_hf:tot_pec,report]/align=h
+  total[compcust_hf:tot_sli,report]/align=i
+  total[compcust_hf:tot_upg,report]/align=j
+  total[compcust_hf:tot_fuel,report]/align=k
+  total[compcust_hf:tot_other,report]/align=l
+  total[compcust_hf:total_rev,report]/align=m
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Last Rental from: "+str(dtsdaterent)+" to "+str(dtedaterent)/newline
+  "Contracts Closed from: "+str(dtsdateclose)+" to "+str(dtedateclose)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Company Types: "+str(cctype)/newline
+  if str(crentals) = "ALL" then "Customers with 1 or more rentals" else "Customers with " + str(crentals)+" or more rentals"/newline
+ end box /newline=4
+
+  if cselect = "Companies" then "Location"
+   else "Renters Name"/align=a
+  if cselect = "Companies" then "Company"
+   else "Added by"/align=b
+  if cselect = "Companies" then "Sales Rep"
+   else "Last Rental"/align=c
+  "Rentals"/align=d
+  "T&M"/align=e
+  "CDW"/align=f
+  "PAC"/align=g
+  "PEC"/align=h
+  "SLI"/align=i
+  "UPG"/align=j
+  "Fuel"/align=k
+  "Other"/align=l 
+  "Total"/align=m/newline
+;
+replace custcomp.eq
+run/parameterfile=custcomp_1 custcomp.eq
+rrepl custcomp
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view custcomp
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Customer Local Company Report" -- Report Title
+   string rptname1    = "custcomp" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "custcomp_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

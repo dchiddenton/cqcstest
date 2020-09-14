@@ -1,0 +1,408 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Depreciation Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/5/2017
+Modified:
+
+Notes:
+$Workfile: fltdepr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltdepr.mf $
+$Revision: 2 $
+$History: fltdepr.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="banks"
+if itemnumber=1 then '"'+banks:bankid+'"' else
+   ',"'+banks:bankid+'"'
+
+sorted by
+   banks:bankid
+top of report
+'string cbank[8192] = multivalue parameter prompt "Bank IDs: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_banks"
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  include "param_banks.cq"
+  include "param_product.cq"
+  date dtedate = parameter prompt "Cutoff date: " default todaysdate-1
+  string veh_include = parameter valid "All Assets","Depreciating Assets" prompt "All Assets or Depreciating only: " default "Depreciating Assets"
+  string dep_method = parameter valid "Acquistion Price","Residual Value" prompt "Depreciation Basis: " default "Acquistion Price"
+  string csort = parameter  prompt "Sorted by: " valid "Bank","Class within Bank", "Class","Unit Number","Location" default "Bank"
+  string caddinfo = parameter prompt "Additional Data: " valid "Odometer Fields","Location Fields" default "Odometer Fields"
+;
+replace fltdepr_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve current inv records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltdepr_i1.inc"
+ 
+
+where 
+ (inv:bankid = cBank or cBank = "ALL") and
+ (inv:Product  = cProduct or cProduct = "ALL" ) and
+ ((veh_include = "All Assets" OR (((inv:OPDepStartDate <= dtEDate and 
+        (inv:OPDepDate < dtEDate OR inv:OPDepDate = null)) and
+        /* Don't select records that have a monthly dep rate and have already been depreciated 2.1.13 */
+        /* Ignore null last-depr dates */
+        ((inv:OPDepDate = null OR inv:OPDailyDepPct <> 0) OR ((inv:OPMonthlyDepPct <> 0 OR inv:OPMonthlyDepAmt <> 0) and
+         (YEAR(inv:OPDepDate) * 100) + MONTH(inv:OPDepDate) <
+         (YEAR(dtEDate) * 100 + MONTH(dtEDate))))))
+        
+        or
+        /* License depr */
+        (veh_include = "All Assets" or (inv:OPDepStartDateLic <= dtEDate and 
+        (inv:OPDepDateLic < dtEDate or inv:OPDepDateLic = null)))
+        /* Ignore sold units past depr date */
+        and (inv:DateSold = null or 
+             (inv:DateSold > inv:opdepdate or (inv:OPDepDate = null and
+                inv:datesold > inv:OPDepStartDate)))))
+
+
+
+list/domain="inv"/hold="inv_hf"
+ inv:unitnumber /keyelement=1.1
+ inv:serialnumber
+ inv:product
+ inv:invclass
+ inv:invid/keyelement=2.1
+ inv:locationcode
+ inv:ownedlocationcode
+ inv:year
+ inv:model
+ inv:bankid
+ inv:inservicedate
+ inv:odometer
+ inv:acquisitionprice
+ inv:opfirstdepamt
+ inv:oplastdepamt
+ inv:opmonthlydepamt
+ inv:opmonthlydeppct
+ inv:opdailydeppct
+ inv:opaccumdep
+ inv:opdepodometer
+ inv:opaccumdeplic
+ inv:opdepstartdate
+ inv:opdepstartdatelic
+ inv:opdepdate
+ inv:opdepdatelic
+ inv:opresidualamt
+ inv:licenseamount
+ inv:licenseexpdate
+ inv:licensenumber
+ inv:licensest
+ inv:datesold
+ inv:salesprice
+ inv:soldto
+ "N"/name="Soldcar"
+ if (dtEdate - inv:opdepdate) >365 then "*" else "" /name="err_flag"
+
+;
+replace fltdepr_1.eq
+run/setparameter fltdepr_1.eq
+
+run/parameterfile=fltdepr_1 fltdepr_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve sold inv records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltdepr_i1.inc"
+
+ 
+where
+ (invsold:bankid = cBank or cBank = "ALL") and
+ (invsold:Product  = cProduct or cProduct = "ALL" ) and
+   (((invsold:OPDepStartDate <= dtEDate AND 
+        (invsold:OPDepDate < dtEDate OR invsold:OPDepDate = null))
+        OR
+        /* License depr */
+        (invsold:OPDepStartDateLic <= dtEDate AND 
+        (invsold:OPDepDateLic < dtEDate OR invsold:OPDepDateLic = null)))
+        /* Ignore sold units past depr date */
+        AND (invsold:DateSold = null 
+        OR (invsold:DateSold = null OR 
+             (invsold:DateSold > invsold:opdepdate or (invsold:OPDepDate = null and
+                invsold:datesold > invsold:OPDepStartDate)))))
+
+
+list/domain="invsold"/hold="inv_hf"/append
+ invsold:unitnumber /keyelement=1.1
+ invsold:serialnumber
+ invsold:product
+ invsold:invclass
+ invsold:invid/keyelement=2.1
+ invsold:locationcode
+ invsold:ownedlocationcode
+ invsold:year
+ invsold:model
+ invsold:bankid
+ invsold:inservicedate
+ invsold:odometer
+ invsold:acquisitionprice
+ invsold:opfirstdepamt
+ invsold:oplastdepamt
+ invsold:opmonthlydepamt
+ invsold:opmonthlydeppct
+ invsold:opdailydeppct
+ invsold:opaccumdep
+ invsold:opdepodometer
+ invsold:opaccumdeplic
+ invsold:opdepstartdate
+ invsold:opdepstartdatelic
+ invsold:opdepdate
+ invsold:opdepdatelic
+ invsold:opresidualamt
+ invsold:licenseamount
+ invsold:licenseexpdate
+ invsold:licensenumber
+ invsold:licensest
+ invsold:datesold
+ invsold:salesprice
+ invsold:soldto
+ "Y"/name="Soldcar"
+ if (dtEdate - invsold:opdepdate) >365 then "*" else "" /name="err_flag"
+
+;
+run/parameterfile=fltdepr_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "fltdepr_i1.inc"
+  
+  date dtDate = if inv_hf:datesold = null then dtEdate else if dtEdate > inv_hf:datesold then inv_hf:datesold else dtEdate
+  
+  number partial_month = if month(inv_hf:opdepstartdate+1) <> month(inv_hf:opdepstartdate) then 0 else 1
+  
+  number dep_months = if inv_hf:opdepdate <> null then
+   ((year(dtDate)-year(inv_hf:opdepdate))*12 + month(dtDate)-month(inv_hf:opdepdate)) else
+   ((year(dtDate)-year(inv_hf:opdepstartdate))*12 + month(dtDate)-month(inv_hf:opdepstartdate)+partial_month)
+  
+  number calc_mnth = if (inv_hf:opdepdate = null and inv_hf:opfirstdepamt <> 0) then dep_months - 1 else
+   if (inv_hf:oplastdepamt <> 0) then dep_months - 1 else dep_months
+  
+  number dep_days = if inv_hf:opdepdate = null then (dtDate - inv_hf:opdepstartdate) else (dtDate - inv_hf:opdepdate)
+  
+  number dep_amtA = if inv_hf:opmonthlydepamt <> 0 then round(inv_hf:opmonthlydepamt * calc_mnth,2) else
+   if inv_hf:opdailydeppct <> 0 then round(inv_hf:opdailydeppct * inv_hf:acquisitionprice  * dep_days,2) else
+   if inv_hf:opmonthlydeppct <> 0 then round((inv_hf:opmonthlydeppct divide 100) * inv_hf:acquisitionprice  * calc_mnth,2) else 0
+  
+  number dep_amtR = if inv_hf:opmonthlydepamt <> 0 then round(inv_hf:opmonthlydepamt * calc_mnth,2) else
+   if inv_hf:opdailydeppct <> 0 then inv_hf:opresidualamt - round(inv_hf:opresidualamt *(1-(inv_hf:opdailydeppct))**dep_days,2) else
+   if inv_hf:opmonthlydeppct <> 0 then inv_hf:opresidualamt - round(inv_hf:opresidualamt *(1-(inv_hf:opmonthlydeppct divide 100))**dep_months,2) else 0
+  
+  number dep_amt1 = if dep_method = "Acquistion Price" then dep_amtA else dep_amtR
+  
+  number dep_adj = if (inv_hf:oplastdepamt <> 0) then inv_hf:oplastdepamt else  --check for first or last month dep amount
+   if (inv_hf:opdepdate = null and inv_hf:opfirstdepamt <> 0) then inv_hf:opfirstdepamt else 0
+  
+  number dep_amt2 = if (inv_hf:acquisitionprice - inv_hf:opaccumdep - dep_amt1 - dep_adj) < 0 then  -- check that book value is not less than zero
+    inv_hf:acquisitionprice - inv_hf:opaccumdep - dep_adj else dep_amt1
+
+  number dep_flag = if(inv_hf:opdepstartdate <> null) then 1 else 0
+
+  number dep_amt =  (dep_amt2 + dep_adj)*dep_flag
+
+  number lic_resid = inv_hf:licenseamount - opaccumdeplic
+  date lic_en = if (dtDate < inv_hf:licenseexpdate) then dtDate else inv_hf:licenseexpdate
+  date lic_st = if (inv_hf:opdepdatelic <> null) then inv_hf:opdepdatelic else inv_hf:opdepstartdatelic
+  number lic_dep1 = round((lic_en - lic_st)*(inv_hf:licenseamount divide 365),2)
+  number lic_depflag = if (inv_hf:licenseexpdate <> null and (inv_hf:opdepdatelic< dtDate or inv_hf:opdepstartdatelic < dtDate)
+  and inv_hf:opdepstartdatelic <> null) then 1 else 0
+  number lic_dep = if lic_resid < lic_dep1*lic_depflag then lic_resid else lic_dep1*lic_depflag
+
+  number dep_tot = dep_amt + inv_hf:opaccumdep
+  number depl_tot = lic_dep + inv_hf:opaccumdeplic
+  number book_val = inv_hf:acquisitionprice - dep_amt - inv_hf:opaccumdep
+  number bookl_val = inv_hf:licenseamount - lic_dep - inv_hf:opaccumdeplic 
+
+  string sub_heading = if inv_hf:soldcar = "N" then "Active" else "Sold"
+
+  string sort_item = switch(csort)
+    case "Bank" : inv_hf:bankid
+    case "Class within Bank" : inv_hf:invclass
+    case "Class" : inv_hf:invclass
+    case "Location" : inv_hf:locationcode
+    default : ""
+  
+list/domain="inv_hf"/nobanner/pageof/title="Fleet Depreciation Report"/duplicates/noheadings/pagewidth=195/pagelength=80/count
+
+  inv_hf:product/displaywidth=10/name="a"
+  inv_hf:unitnumber /displaywidth=10/name="b"
+  if cAddinfo = "Odometer Fields" then str(inv_hf:odometer) else inv_hf:ownedlocationcode/displaywidth=10/name="bb"
+  if (inv_hf:opmonthlydepamt <> 0) then str(inv_hf:opmonthlydepamt) + "/Unit" else
+   if (inv_hf:opmonthlydeppct <> 0) then str(inv_hf:opmonthlydeppct) + "%" else
+   if (inv_hf:opdailydeppct <> 0) then str(inv_hf:opdailydeppct) + "%"/displaywidth=10/name="c"
+  inv_hf:acquisitionprice /displaywidth=12/name="d"
+  inv_hf:licenseamount/displaywidth=10/name="e"
+  inv_hf:inservicedate /displaywidth=10/name="f"
+  inv_hf:opdepdate /displaywidth=10/name="g"
+  inv_hf:opaccumdep /displaywidth=12/name="h"
+  inv_hf:opaccumdeplic/displaywidth=10/name="i"
+  dep_amt /displaywidth=12/name="j"
+  lic_dep/displaywidth=10/name="k"
+  dtDate/displaywidth=10/name="l"
+  dep_tot/displaywidth=12/name="m"
+  depl_tot/displaywidth=10/name="n"
+  book_val/displaywidth=12/name="o"
+  bookl_val/displaywidth=10/name="p"/newline
+  str(inv_hf:year)+" "+str(inv_hf:model)/displaywidth=10/align=a
+  str(inv_hf:invclass)/displaywidth=10/align=b
+  if cAddinfo = "Odometer Fields" then str(inv_hf:opdepodometer) else inv_hf:locationcode/displaywidth=10/align=bb
+  inv_hf:err_flag
+  ""/newline
+  --if inv_hf:soldcar = "Y" then "Sold: " + str(inv_hf:datesold) + "    Amount: "+str(inv_hf:salesprice,"$zzz,zzz,zzz,zz9.99") + "   To: "+inv_hf:soldto/newline
+  if inv_hf:soldcar = "Y" then {
+    ""/newline
+    inv_hf:datesold/heading="Sold"
+    inv_hf:salesprice/nototal/heading="Amount"
+    inv_hf:soldto/newline/heading="To"
+}
+
+sorted by
+  inv_hf:soldcar/total/count/heading=sub_heading
+
+  switch(csort)
+    case "Bank" : inv_hf:bankid/total/count/heading="@"
+    case "Class within Bank" : bankid
+    case "Class" : inv_hf:invclass
+    case "Location" : inv_hf:locationcode
+    default : ""
+
+  switch(csort)
+    case "Bank" : unitnumber
+    case "Class within Bank" : inv_hf:invclass
+    case "Class" : inv_hf:unitnumber
+    case "Unit Number" : inv_hf:unitnumber
+    case "Location" : unitnumber
+    default : ""
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Cutoff Date: " + str(dteDate)/newline
+  "Bank Id(s): " + str(cbank)/newline
+  "Assets Included: " + str(veh_include)/newline
+  "Depreciate by: " + str(dep_method)/newline
+  end box/newlines=4
+
+
+  "Product"/align=a
+  "Unit Number"/align=b
+  if cAddinfo = "Odometer Fields" then "Odometer" else "Owning"/align=bb
+  "Depr Rate"/align=c
+  "---Acquistion Cost----"/align=e/displaywidth=22/center
+  "Acquistion"/align=f/center
+  "------Depreciation Before-------"/center/displaywidth=32/align=i
+  "--Addtl Depreciation--"/center/displaywidth=22/align=k
+  "-------Depreciation After-------"/center/displaywidth=32/align=n
+  "------Book Value------"/center/displaywidth=22/align=p
+
+  ""/newline
+  "Yr-Model"/align=a
+  "Class"/align=b
+  if cAddinfo = "Odometer Fields" then "Last Depr@" else "Current"/align=bb
+  "Unit"/right/align=d
+  "License"/right/align=e
+  "Date"/center/align=f
+  "As of"/center/align=g
+  "Unit Amount"/center/align=h
+  "Lic Amount"/center/align=i
+  "Unit"/right/align=j
+  "License"/right/align=k
+  "As of"/center/align=l
+  "Unit Amount"/center/align=m
+  "Lic Amount"/center/align=n
+  "Unit"/right/align=o
+  "License"/right/align=p/newline
+
+end of report
+  ""/newline
+  "* - indicates last depreciation was more than a year ago"
+
+;
+replace fltdepr.eq
+run/parameterfile=fltdepr_1 fltdepr.eq
+rrepl fltdepr
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltdepr
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Depreciation Report" -- Report Title
+   string rptname1    = "fltdepr" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltdepr_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

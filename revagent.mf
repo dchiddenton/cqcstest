@@ -1,0 +1,369 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Revenue by Rental Agent Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: revagent.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/revagent.mf $
+$Revision: 2 $
+$History: revagent.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+define 
+   string empname = employee:employeefirstname+" "+employee:employeelastname
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+empname+'"' else
+   ',"'+empname+'"'
+
+sorted by
+   empname
+top of report
+'string cemp[8192] = multivalue parameter prompt "Employee(s): "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emp"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate-1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string caverage = parameter prompt "Calc. averages with: " valid "Charged Days", "Actual Days" default "Charged Days"
+  string cemptype[1024] = parameter prompt "Select by: "  valid "Employee Out","Reserving Employee","Added by Employee" default "Employee Out"
+  include "param_emp.cq"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace revagent_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RRM records - setup parameters
+------------------------------------------------------------------------*/
+include "revagent_i1.inc"
+define
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+ 
+   number ot_hours = system_set:extraactday
+
+   date date_in = if rrm:rastatus=3 then rrm:datein else rrm:datedue
+   number time_in = if rrm:rastatus=3 then rrm:timein else rrm:timedue
+
+   number ot_day = if ((date_in-rrm:dateout>0) and (time_in - rrm:timeout > ot_hours))then 1 else 0 -- 0 if same day 
+
+   number act_days = if date_in - rrm:dateout = 0 then 1 else date_in - rrm:dateout + ot_day
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   file res_link = access resdb,
+    set resdb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   string cEmployee = switch(cemptype)
+    case  "Employee Out"       : rental_link:employeenumberout
+    case  "Reserving Employee" : if rrm:resstatus=0 then rental_link:addedbyemployeenumber else res_link:addedbyemployeenumber
+    case  "Added by Employee"  : if rrm:resstatus=0 then rental_link:addedbyemployeenumber else res_link:addedbyemployeenumber
+
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+
+where 
+  (rrm:rptloccode = cloc or cloc = "ALL") and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and
+  (rrm:rptdate >= dtsdate and rrm:rptdate <= dtedate) and
+  (rrm:product = cproduct or cproduct = "ALL")
+   
+
+list/domain="rrm"/hold="rrm_hf"
+if rrm:rastatus=3 then {
+if (cemptype = "Reserving Employee" and rrm:resstatus <> 0) or (cemptype <> "Reserving Employee") then { -- skip walkups when sect by reserving employee
+  rrm:commonid/keyelement=1.1
+  cEmployee
+  rrm:ranumber 
+  rrm:resnumber 
+  rrm:invclass
+  rrm:rastatus 
+  rrm:resstatus 
+  rrm:dateout 
+  rrm:datedue 
+  rrm:datein 
+  rrm:rptdate 
+  rrm:locationcodeout 
+  rrm:locationcodedue 
+  rrm:locationcodein 
+  rrm:rptloccode
+  act_days
+}
+}
+
+;
+replace revagent_1.eq
+run/setparameter revagent_1.eq
+
+run/parameterfile=revagent_1 revagent_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve rcmift records
+------------------------------------------------------------------------*/
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+list/domain="rrm_hf"/hold="rcmift_hf"
+  rrm_hf:commonid/width=11/keyelement=1.1
+  rcmift_link:type/width=11
+  rcmift_link:code/width=16
+  rcmift_link:total/width=14/decimalplaces=2/name="tot_amt"
+  rcmift_link:rev/width=4
+  rcmift_link:tmpack/width=4
+  rcmift_link:tour/width=4
+;
+run/parameterfile=revagent_1
+
+/*------------------------------------------------------------------------
+ Summarize rcmift charges
+------------------------------------------------------------------------*/
+
+where rcmift_hf:type < 50
+
+sum/domain="rcmift_hf"/hold="rcmift2_hf"
+  if rcmift_hf:type = 10 or rcmift_hf:type = 11 then rcmift_hf:tot_amt/name="fuel"
+  if rcmift_hf:rev = 0 then rcmift_hf:tot_amt/name="incl" 
+  if rcmift_hf:type <> 10 and rcmift_hf:type <> 11 and rcmift_hf:rev=1 then rcmift_hf:tot_amt/name="other"
+
+by
+  rcmift_hf:commonid/keyelement=1.1
+;
+run/parameterfile=revagent_1 
+
+/*------------------------------------------------------------------------
+ Summary or detail?
+------------------------------------------------------------------------*/
+include "revagent_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then "/nodetail"  else ""
+;
+run/parameterfile=revagent_1 
+rrepl "revagent_i2"
+
+/*------------------------------------------------------------------------
+ Calculate revenue days or actual days
+------------------------------------------------------------------------*/
+include "revagent_i1.inc"
+
+define
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm:commonid,
+    one to many,generic,
+    null fill on failure
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+list/domain="rrm_hf"/noheadings/nodetail/hold="calcdays_hf"
+  rrm_hf:commonid 
+  rrm_hf:ranumber
+  tot_revdays
+
+sorted by rrm_hf:commonid
+end of rrm_hf:commonid
+  rrm_hf:commonid /keyelement=1.1
+  rrm_hf:ranumber
+  if caverage = "Charged Days" then total[tot_revdays,rrm_hf:commonid] else rrm_hf:act_days/name="calcdays"
+
+;
+run/parameterfile=revagent_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "revagent_i1.inc"
+define
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+ 
+   file charge_link = access rcmift2_hf,
+    set rcmift2_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+   file emp_link = access employee,
+    set employee:employeenumber=rrm_hf:cemployee,
+    one to one, null fill on failure
+
+   file calc_days = access calcdays_hf,
+    set calcdays_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+   number net_tpm = rental_link:totaltpm - rental_link:rentaldiscountamt
+
+   string emp_name = emp_link:employeefirstname+" "+emp_link:employeelastname
+
+   number dly_avg = round(net_tpm divide calc_days:calcdays,2)
+   number tot_chg = net_tpm+charge_link:other
+   
+where ((emp_name = cemp or cemp = "ALL") and (rrm_hf:invclass = cclass or cclass = "ALL"))
+
+list/domain="rrm_hf"/nobanner/pageof/title="Revenue by Rental Agent Report"/noheadings/duplicates/noreporttotals include "revagent_i2.cq"
+   rrm_hf:cemployee/displaywidth=10
+   rental_link:addedbyemployeenumber/displaywidth=10
+   rrm_hf:ranumber/displaywidth=10
+   rrm_hf:resnumber/displaywidth=10
+   rrm_hf:dateout/displaywidth=12
+   rrm_hf:datein/displaywidth=12
+   calcdays_hf:calcdays/displaywidth=5
+   rrm_hf:invclass/displaywidth=10
+   net_tpm/displaywidth=12
+   charge_link:other/displaywidth=12
+   charge_link:incl/displaywidth=12
+   charge_link:fuel/displaywidth=12
+   dly_avg/displaywidth=8
+   tot_chg/displaywidth=12
+ 
+sorted by
+   rrm_hf:cemployee
+   rrm_hf:ranumber
+
+end of rrm_hf:cemployee
+   cemployee/align=rrm_hf:cemployee
+   emp_name/displaywidth=30/align=rrm_hf:ranumber
+   str(count[rrm_hf:ranumber,rrm_hf:cemployee])+" contracts"/align=rrm_hf:dateout
+   total[calcdays_hf:calcdays,rrm_hf:cemployee]/align=calcdays_hf:calcdays
+   total[net_tpm,rrm_hf:cemployee]/align=net_tpm
+   total[charge_link:other,rrm_hf:cemployee]/align=charge_link:other
+   total[charge_link:incl,rrm_hf:cemployee]/align=charge_link:incl
+   total[charge_link:fuel,rrm_hf:cemployee]/align=charge_link:fuel
+   round(total[net_tpm,rrm_hf:cemployee] divide total[calcdays_hf:calcdays,rrm_hf:cemployee],2)/align=dly_avg
+   total[tot_chg,rrm_hf:cemployee]/align=tot_chg/newline
+
+end of report
+   
+   "Report Totals:"/align=rrm_hf:ranumber
+   str(count[rrm_hf:ranumber,report])+" contracts"/align=rrm_hf:dateout
+   total[calcdays_hf:calcdays,report]/align=calcdays_hf:calcdays
+   total[net_tpm,report]/align=net_tpm
+   total[charge_link:other,report]/align=charge_link:other
+   total[charge_link:incl,report]/align=charge_link:incl
+   total[charge_link:fuel,report]/align=charge_link:fuel
+   round(total[net_tpm,report] divide total[calcdays_hf:calcdays,report],2)/align=dly_avg
+   total[tot_chg,report]/align=tot_chg/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Selected by "+str(cemptype)/newline
+  end box /newline=4
+
+   "Employee#"/align=rrm_hf:cemployee
+   "Rented by"/align=rental_link:addedbyemployeenumber
+   "RA#"/align=rrm_hf:ranumber
+   "Res#"/align=rrm_hf:resnumber
+   "Class"/align=rrm_hf:invclass
+   "Date Out"/align=rrm_hf:dateout
+   "Date In"/align=rrm_hf:datein
+   caverage/align=calcdays_hf:calcdays
+   "Car Class"/align=rrm_hf:invclass
+   "Net T&M"/align=net_tpm
+   "Other Chrgs"/align=charge_link:other
+   "TM Incl Chrgs"/align=charge_link:incl
+   "Fuel"/align=charge_link:fuel
+   "Daily Avg"/align=dly_avg
+   "Total"/align=tot_chg/newline
+
+;
+replace revagent.eq
+run/parameterfile=revagent_1 revagent.eq
+rrepl revagent
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view revagent
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Revenue by Rental Agent Report" -- Report Title
+   string rptname1    = "revagent" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "revagent_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

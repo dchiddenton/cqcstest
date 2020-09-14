@@ -1,0 +1,2199 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Revenue Management Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/16/2016
+Modified:
+
+Notes:
+$Workfile: revmgmt.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/revmgmt.mf $
+$Revision: 3 $
+$History: revmgmt.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 2/27/20    Time: 3:05p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel output formatting
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+viewpoint native;
+define
+
+    string cCodeList1 = "Misc Charge Days,CDW Days,PAC Days,PEC Days,SLI Days,Addl Driver Days,"+
+    "Underage Driver Days,Upgrade Days,Drop Charge Days,Fuel Days,Prepaid Fuel Days,FF Recovery Fee Days,"+
+    "Equipment Charge Days,Misc Fee Days,Sales Tax Days,Federal Tax Days,Other Tax Days"
+
+    string ccodelist2 =  
+        "*Blank*,"+
+        "Agent,"+
+        "Arriv Airl,"+
+        "Arriv Flt#,"+
+        "Arriv Date,"+       
+        "Arriv Time,"+       
+        "Bonus,"+            
+        "Bonus2,"+           
+        "Class,"+           
+        "Classes,"+          
+        "COI/InsType,"+      
+        "Company,"+         
+        "Corp ID,"+         
+        "Cust Name,"+       
+        "Date In,"+         
+        "Date Out,"+        
+        "Disc Reason,"+     
+        "Emp# Out,"+         
+        "Emp# In,"+   
+        "Fuel Dist,"+
+        "Fuel Units,"+
+        "Prepaid Fuel Units,"+       
+        "FF Account,"+      
+        "FF Airline,"+      
+        "Ins Co,"+          
+        "Inv License,"+      
+        "PO#,"+              
+        "Promo Code,"+      
+        "Rate Code,"+      
+        "Rental Reason,"+     
+        "Referred By," +     
+        "Reference#,"+       
+        "Referral,"+       
+        "RentalType,"+      
+        "Rented As Class,"+ 
+        "Res Number,"+      
+        "RO#,"+          
+        "Serv Order#,"+      
+        "Source,"+         
+        "Tax ID#,"+        
+        "Taxable,"+        
+        "Tour Code,"+        
+        "Unit#,"+           
+        "VIN,"+             
+        "VIP#,"+            
+        "Voucher#"  
+
+   string ccodelist3 =
+       "Time Charges,"+
+       "Daily Rate,"+
+       "Mileage Charges,"+
+       "Number Miles,"+
+       "T&M Discount,"+
+       "Charged Days,"+
+       "Actual Days,"+
+       "T&M Upgrade,"+
+       "Trx Time,"+
+       "Gross T&M,"+
+       "Net T&M,"
+
+    string ccodelist = ccodelist1 +"," + ccodelist2 + "," + ccodelist3
+    string ccodetype = "i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,i,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,i,i,i,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,i,i,i,i,i,i,i,i,c,i,i"
+
+    number field_count = countfields(ccodelist,",")
+    
+    file counter_i = access counter,
+     set min=1,max=field_count
+
+    number type_counter = counter_i:position*2
+
+list/domain="dummy"/hold="hclist_hf"
+
+  subfield(ccodelist,",",counter_i:position)/name="field_name"/width=30
+  subfield(ccodetype,",",counter_i:position)/name="field_type"/width=30
+  "Fixed"/name="type"/width=10
+;
+run/parameterfile
+
+list/domain="rtmift"/nodetail/hold="hclist_hf"/append
+  rtmift:code
+  "Variable"
+sorted by rtmift:code
+end of rtmift:code
+  rtmift:code/name="field_name"/width=30
+  "i"/name="field_type"/width=30
+  "Variable"/name="type"/width=10
+;
+run/parameterfile
+
+viewpoint native;
+define
+   string ccodelist =
+       "Miles/Day,"+
+       "T&M/Day,"+
+       "Rev/RA,"+
+       "Rev/Day,"+
+       "Total Rev,"+
+       "Total Yield,"+
+       "Non-TM Yld,"+
+       "T&M/RA,"+
+       "Days/RA,"+
+       "Miles/RA"
+
+    number field_count = countfields(ccodelist,",")
+    
+    file counter_i = access counter,
+     set min=1,max=field_count
+
+list/domain="dummy"/hold="hclist_hf"/append
+
+  subfield(ccodelist,",",counter_i:position)/name="field_name"/width=30
+  "i"/name="field_type"/width=30
+  "Report"/name="type"/width=10
+;
+run/parameterfile
+cli copy hclist_hf.* ..\hclist_hf.*
+
+
+where hclist_hf:field_name<>""
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="hclist_hf"
+if itemnumber=1 then '"'+hclist_hf:field_name+'"' else
+   ',"'+hclist_hf:field_name+'"'
+
+sorted by
+   hclist_hf:field_name
+top of report
+'string ccode[8192] = multivalue parameter/noall prompt "Choose Columns to Print: "'
+"Valid "
+end of report
+'Default "*Blank*"'
+;
+run/parameterfile
+rrepl "param_code"
+
+define
+ file sys_set = access systemsettings,
+    set systemsettings:dbid = ""
+ string base_curr = if sys_set:basecurrency = "" then "N/A" else sys_set:basecurrency
+
+list/domain="dummy"/nodefaults/nobanner/noendofreport
+'"'+base_curr+'"'
+;
+run/parameterfile
+rrepl base_curr
+
+define
+   
+  string base_curr = str(include "base_curr.cq")
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="currencies"
+if itemnumber=1 then '"'+currencies:currency+'"' else
+   ',"'+currencies:currency+'"'
+
+sorted by
+   currencies:currency
+top of report
+'string ccurrency[10240] = parameter prompt "Currency: "'
+"Valid"
+end of report
+if itemnumber = 0 then '"'+base_curr+'"'
+'Default "'+base_curr+'"'
+;
+run/parameterfile
+rrepl "param_currency"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cconsolidate =  parameter/uppercase prompt "Consolidate Locations: " valid "Y","N" default "Y"
+  include "param_product.cq"
+  string caverage = parameter prompt "Calc. averages with: " valid "Charged Days", "Actual Days" default "Charged Days"
+  include "param_currency.cq"
+  include "param_invclass.cq"
+  include "param_code.cq"
+  string caccrue = parameter prompt "Report Accrued Income: " valid "Exclude", "As of Date", "Due Date" default "Exclude"
+  string cprorate = parameter/uppercase prompt "Pro-rate Revenue to Report Range? " valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by: " valid "Local Company","Renter Last Name","Rate Code","Inv Class","Unit#" default "Unit#"
+  string crange = range parameter prompt "Enter Sort Range (Start..End or ALL)  - Company,Renter,or Rate sorts only" default ALL    -- error "Range only valid for Company, Name, or Rate" if (crange <> "ALL" and (csort="Inv Class" or csort="Unit#"))
+  string cpage = parameter/uppercase prompt "New Page per Sort Break: " valid "Y","N" default "N"
+  string cpentrate = parameter/uppercase prompt "Print Pentration %: " valid "Y","N" default "N"
+  string cgasyield = parameter/uppercase prompt "Include Gas & Taxes in Yields/Totals: " valid "Y","N" default "N"
+  string ctmyield = parameter/uppercase prompt "Include Net T&M in Totals: " valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace revmgmt_i1.inc
+/*------------------------------------------------------------------------
+ RA selection  - setup parameters
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  number split_flag = 0
+  
+where 
+
+  ((rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate and rrm:rastatus = 3) 
+     or (rrm:rastatus = 2 and rrm:dateout <= dtedate and caccrue <> "Exclude"))
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product =cProduct or cProduct = "ALL" )
+  and (rrm:invclass=CClass or cClass = "ALL")
+
+    
+list/domain="rrm"/hold = "rrm_hf1"
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber
+  rrm:dateout
+  rrm:timeout
+  rrm:datedue
+  rrm:timedue
+  rrm:datein
+  rrm:timein
+  split_flag
+
+;
+replace revmgmt_1.eq
+run/setparameter revmgmt_1.eq
+
+run/parameterfile=revmgmt_1 revmgmt_1.eq
+
+/*------------------------------------------------------------------------
+ RA selection - Revenue Splits
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+
+  file alt_locgroup_own = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locown,
+    null fill on failure
+
+  file alt_locgroup_in = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locin,
+    null fill on failure
+
+  file alt_locgroup_rent = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = revra:locrent,
+    null fill on failure
+
+    file rrm_link = access rrm,
+    set rrm:commonid=revra:commonid,
+    one to one, zero fill on failure
+
+  number split_flag = 1
+  
+where 
+
+  (revra:rptdate >= dtSdate and revra:rptdate <= dtEdate and rrm_link:rastatus = 3) 
+  and (revra:locin =cLoc or revra:locown =cLoc or revra:locrent =cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup_own:groupname or cLocGroup = alt_locgroup_in:groupname or cLocGroup = alt_locgroup_rent:groupname)
+  and (rrm_link:Product = cProduct or cProduct = "ALL" )
+  and (rrm_link:invclass = CClass or cClass = "ALL")
+
+    
+list/domain="revra"/hold = "rrm_hf1"/append
+  rrm_link:commonid/keyelement=1.1
+  rrm_link:ranumber
+  rrm_link:dateout
+  rrm_link:timeout
+  rrm_link:datedue
+  rrm_link:timedue
+  rrm_link:datein
+  rrm_link:timein
+  split_flag
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Misc Sales selection
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+  
+  number split_flag = 0
+  
+where 
+
+  (miscsales:datein >= dtSdate and miscsales:datein <= dtEdate)
+  and (miscsales:locationcode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+  and miscsales:ticketstatus=2
+  and cclass = "ALL"  -- only choose misc tickets when ALL inv classes selected
+
+    
+list/domain="miscsales"/hold = "rrm_hf1"/append
+  miscsales:commonid/keyelement=1.1
+  miscsales:ticketnumber+"-misc"/width=20/name="ranumber"
+  miscsales:dateout
+  miscsales:timeout
+  miscsales:datedue
+  miscsales:timeout/name="timedue"
+  miscsales:datein
+  miscsales:timein
+  split_flag
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Consolidate RA numbers
+------------------------------------------------------------------------*/
+
+list/domain="rrm_hf1"/nodetail/hold="rrm_hf"
+  rrm_hf1:commonid 
+  rrm_hf1:ranumber
+
+sorted by rrm_hf1:commonid
+   rrm_hf1:split_flag
+
+end of rrm_hf1:commonid
+
+  rrm_hf1:commonid /keyelement=1.1
+  rrm_hf1:ranumber
+  rrm_hf1:dateout
+  rrm_hf1:timeout
+  rrm_hf1:datedue
+  rrm_hf1:timedue
+  rrm_hf1:datein
+  rrm_hf1:timein
+  rrm_hf1:split_flag
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Get location split percentage for split revenue contracts
+------------------------------------------------------------------------*/
+
+define
+    file split_link = access revra,
+    set revra:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+where rrm_hf:split_flag=1
+
+list/domain="rrm_hf"/hold="loc_sort1"
+  rrm_hf:commonid 
+  split_link:locin/name="loc_name"
+  split_link:pctin/name="loc_pct"
+
+followed by
+  rrm_hf:commonid 
+  split_link:locrent
+  split_link:pctrent
+
+followed by
+  rrm_hf:commonid 
+  split_link:locown
+  split_link:pctown
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Consoldate split revenue locations
+------------------------------------------------------------------------*/
+
+list/domain="loc_sort1"/nodetail/hold="loc_sort"
+  loc_sort1:commonid 
+  loc_sort1:loc_name 
+  loc_sort1:loc_pct
+sorted by
+ loc_sort1:commonid
+ loc_sort1:loc_name
+end of loc_sort1:loc_name
+   loc_sort1:commonid /keyelement=1.1
+  loc_sort1:loc_name /keyelement=1.2
+  total[loc_sort1:loc_pct]/name="loc_pct"
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Contract rate information for T&M upgrade calculation
+------------------------------------------------------------------------*/
+
+define
+  file rate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   one to many,zero fill on failure
+
+list/domain="rrm_hf"/hold="rarate_hf"
+if rate_link:totcharge > 0 and rate_link:res = 0 and rate_link:type <> "OT" then {
+  rate_link:rateid/keyelement=1.2
+  rate_link:description 
+  rate_link:freemi 
+  rate_link:lineno 
+  rate_link:minsperx /keyelement=1.4
+  rate_link:ovlimit 
+  rate_link:ovp 
+  rate_link:rateid 
+  rate_link:rateper 
+  rate_link:timeunit 
+  rate_link:type /keyelement=1.3
+  rate_link:units 
+  rate_link:commonid/keyelement=1.1 
+  rate_link:totcharge 
+  rate_link:totmiles 
+  rate_link:totunits 
+  rate_link:res 
+ }
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ T&M upgrade calculations contract rates to reservation rates
+ and calculate difference
+------------------------------------------------------------------------*/
+
+define
+  file rate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   one to many,zero fill on failure
+
+  file rarate_link = access rarate_hf,
+   set rarate_hf:commonid=rate_link:commonid, 
+   rarate_hf:rateid=rate_link:rateid,
+   rarate_hf:type=rate_link:type,
+   rarate_hf:minsperx=rate_link:minsperx,
+   one to many, zero fill on failure
+
+
+list/domain="rrm_hf"/nodetail/hold="upg_hf"
+if rate_link:res = 1 and rate_link:type <> "OT" then {
+  rrm:ranumber
+  rate_link:commonid
+  rate_link:totcharge
+  rate_link:res
+  rate_link:type
+
+  rate_link:description
+  rate_link:rateid
+  rate_link:rateper
+  rate_link:totunits
+
+  rarate_link:description
+  rarate_link:rateid
+  rarate_link:rateper
+  rarate_link:totunits
+
+  (rarate_link:rateper * rarate_link:totunits) -  (rate_link:rateper * rarate_link:totunits)/name="tm_upg"
+
+}
+sorted by rrm_hf:commonid
+
+end of rrm_hf:commonid
+  rrm_hf:commonid/keyelement=1.1
+  total[tm_upg]/name="tpm_upg"
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ T&M and revenue day calculation
+------------------------------------------------------------------------*/
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm_link:commonid,
+    one to many,generic,
+    null fill on failure
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+
+   number ot_hours = system_set:extraactday
+
+   date date_in = if rrm_link:datein = null then rrm_link:datedue else rrm_link:datein
+   number time_in = if rrm_link:datein = null then rrm_link:timedue else rrm_link:timein
+
+   number ot_day = if ((date_in-rrm_link:dateout>0) and (time_in - rrm_link:timeout > system_set:extraactday)) then 1 else 0 -- 0 if same day
+   number tot_actdays = if (date_in - rrm_link:dateout + ot_day = 0) then 1 else (date_in - rrm_link:dateout + ot_day) -- same day = 1
+
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+    
+sum/domain="rrm_hf"/hold = "revtm_hf"
+  mileage/heading="mileage"
+  rentaldb:totaltime/heading="time"
+  rentaldb:rentaldiscountamt/heading="discount"
+  tot_revdays/heading="rev_days"
+  tot_actdays/heading="act_days"
+  
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ranumber/name="ra_number"/keyelement=2.1
+  rrm_link:rptdate/name="rpt_date"
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Calculate various day counts
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+   file revtm_link = access revtm_hf,
+    set revtm_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+
+   number ot_hours = system_set:extraactday
+
+   date pdate_in = if rrm_link:datein = null then if caccrue = "Due Date" then rrm_link:datedue else dtedate else rrm_link:datein
+   number ptime_in = if rrm_link:datein = null then if caccrue = "Due Date" then rrm_link:timedue else 23.59 else rrm_link:timein
+
+   number ot_pday = if ((pdate_in-rrm_link:dateout>0) and (ptime_in - rrm_link:timeout > ot_hours)
+    and (pdate_in <= dtedate and rrm_link:dateout >= dtsdate)) then 1 else 0 -- 0 if same day add only if in date range open/close
+
+   number prorate_days1 = 
+      -- start and ends during date range
+      if (rrm_link:dateout >= dtsdate and pdate_in <= dtedate) then (pdate_in - rrm_link:dateout) else 
+      -- start before ends during +1 OR 1st day of report
+      if (rrm_link:dateout < dtsdate and (pdate_in >= dtsdate and pdate_in <= dtedate)) then (pdate_in - dtsdate + 1) else
+      -- start during ends after +1 OR last day 
+      if ((rrm_link:dateout >= dtsdate and rrm_link:dateout <= dtedate) and (pdate_in > dtedate)) then (dtedate - rrm_link:dateout + 1) else
+      -- starts before ends after +1 OR last day
+      if (rrm_link:dateout <= dtsdate and pdate_in >= dtedate) then (dtedate - dtsdate + 1)
+
+   number prorate_days = if (prorate_days1 = 0) then 1 else prorate_days1 + ot_pday
+
+  number rev_days = revtm_link:tot_revdays 
+  number act_days = revtm_link:tot_actdays
+  date rpt_date = if revtm_link:rpt_date = null then rcmift_link:rptdate else revtm_link:rpt_date
+
+  number ChgTypeDays = if rcmift_link:calcmeth not one of 2,3,4,11 then 0 else
+     if (rcmift_link:ChgDays + (rcmift_link:ChgHours divide 24) +  (rcmift_link:ChgMonths * 30) + (rcmift_link:ChgWeeks * 7)) < 1 then 1 else
+      round((rcmift_link:ChgDays + (rcmift_link:ChgHours divide 24) +  (rcmift_link:ChgMonths * 30) + (rcmift_link:ChgWeeks * 7)),0)
+
+  number Misc_Charge_Days = if rcmift_link:type = 1 then chgtypedays else 0
+  number CDW_Days = if rcmift_link:type = 2 then chgtypedays else 0
+  number PAC_Days = if rcmift_link:type = 3 then chgtypedays else 0
+  number PEC_Days = if rcmift_link:type = 4 then chgtypedays else 0
+  number SLI_Days = if rcmift_link:type = 5 then chgtypedays else 0
+  number Addl_Driver_Days = if rcmift_link:type = 6 then chgtypedays else 0
+  number Underage_Driver_Days = if rcmift_link:type = 7 then chgtypedays else 0
+  number Upgrade_Days = if rcmift_link:type = 8 then chgtypedays else 0
+  number Drop_Charge_Days = if rcmift_link:type = 9 then chgtypedays else 0
+  number Fuel_Days = if rcmift_link:type = 10 then chgtypedays else 0
+  number Prepaid_Fuel_Days = if rcmift_link:type = 11 then chgtypedays else 0
+  number FF_Recovery_Days = if rcmift_link:type = 13 then chgtypedays else 0
+  number Equipment_Charge_Days = if rcmift_link:type = 14 then chgtypedays else 0
+  number Misc_Fee_Days = if rcmift_link:type = 50 then chgtypedays else 0
+  number Sales_Tax_Days = if rcmift_link:type = 51 then chgtypedays else 0
+  number Federal_Tax_Days = if rcmift_link:type = 52 then chgtypedays else 0
+  number Other_Tax_Days = if rcmift_link:type = 53 then chgtypedays else 0
+
+    
+list/domain="rrm_hf"/nodetail/hold="days_hf"
+
+  rrm_hf:commonid/width=11 
+  rrm_link:rptloccode
+  misc_charge_days
+  cdw_days
+  pac_days
+  pec_days
+  sli_days
+  addl_driver_days
+  underage_driver_days
+  upgrade_days
+  drop_charge_days
+  fuel_days
+  prepaid_fuel_days
+  ff_recovery_days
+  equipment_charge_days
+  misc_fee_days
+  sales_tax_days
+  federal_tax_days
+  other_tax_days
+
+sorted by rrm_hf:commonid
+
+end of rrm_hf:commonid
+
+  rrm_hf:commonid/keyelement=1.1
+  rrm_link:rptloccode/keyelement=1.2
+  rrm_hf:split_flag
+  total[Misc_Charge_Days]/name="Tot_Misc_Charge_Days"/width=12/decimalplaces=4 
+  total[CDW_Days]/name="Tot_CDW_Days"/width=12/decimalplaces=4
+  total[PAC_Days]/name="Tot_PAC_Days"/width=12/decimalplaces=4 
+  total[PEC_Days]/name="Tot_PEC_Days"/width=12/decimalplaces=4
+  total[SLI_Days]/name="Tot_SLI_Days"/width=12/decimalplaces=4
+  total[Addl_Driver_Days]/name="Tot_Addl_Driver_Days"/width=12/decimalplaces=4
+  total[Underage_Driver_Days]/name="Tot_Underage_Driver_Days"/width=12/decimalplaces=4
+  total[Upgrade_Days]/name="Tot_Upgrade_Days"/width=12/decimalplaces=4
+  total[Drop_Charge_Days]/name="Tot_Drop_Charge_Days"/width=12/decimalplaces=4
+  total[Fuel_Days]/name="Tot_Fuel_Days"/width=12/decimalplaces=4
+  total[Prepaid_Fuel_Days]/name="Tot_Prepaid_Fuel_Days"/width=12/decimalplaces=4
+  total[FF_Recovery_Days]/name="Tot_FF_Recovery_Days"/width=12/decimalplaces=4
+  total[equipment_charge_days]/name="Tot_Equipment_Charge_Days"/width=12/decimalplaces=4
+  total[Misc_Fee_Days]/name="Tot_Misc_Fee_Days"/width=12/decimalplaces=4
+  total[Sales_Tax_Days]/name="Tot_Sales_Tax_Days"/width=12/decimalplaces=4
+  total[Federal_Tax_Days]/name="Tot_Federal_Tax_Days"/width=12/decimalplaces=4
+  total[Other_Tax_Days]/name="Tot_Other_Tax_Days"/width=12/decimalplaces=4
+  rev_days/width=12/decimalplaces=4
+  act_days/width=12/decimalplaces=4
+  prorate_days/width=12/decimalplaces=4
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Allocate days across locations on split revenue contracts
+------------------------------------------------------------------------*/
+
+define
+  file pct_link = access loc_sort,
+   set loc_sort:commonid=days_hf:commonid,
+   one to many, null fill on failure
+
+  number pct_rate = if days_hf:split_flag = 0 then 100 else pct_link:loc_pct
+  string rptloccode = if days_hf:split_flag = 0 then days_hf:rptloccode else pct_link:loc_name
+
+  number Misc_Charge_Days = days_hf:tot_misc_charge_days * pct_rate divide 100
+  number CDW_Days = days_hf:tot_cdw_days * pct_rate divide 100
+  number PAC_Days = days_hf:tot_pac_days * pct_rate divide 100 
+  number PEC_Days = days_hf:tot_pec_days * pct_rate divide 100
+  number SLI_Days = days_hf:tot_sli_days * pct_rate divide 100
+  number Addl_Driver_Days = days_hf:tot_addl_driver_days * pct_rate divide 100
+  number Underage_Driver_Days = days_hf:tot_underage_driver_days * pct_rate divide 100
+  number Upgrade_Days = days_hf:tot_upgrade_days * pct_rate divide 100
+  number Drop_Charge_Days = days_hf:tot_drop_charge_days * pct_rate divide 100
+  number Fuel_Days = days_hf:tot_fuel_days * pct_rate divide 100
+  number Prepaid_Fuel_Days = days_hf:tot_prepaid_fuel_days * pct_rate divide 100
+  number FF_Recovery_Days = days_hf:tot_ff_recovery_days * pct_rate divide 100
+  number Equipment_Charge_Days = days_hf:tot_Equipment_Charge_days * pct_rate divide 100
+  number Misc_Fee_Days = days_hf:tot_misc_fee_days * pct_rate divide 100
+  number Sales_Tax_Days = days_hf:tot_sales_tax_days * pct_rate divide 100
+  number Federal_Tax_Days = days_hf:tot_federal_tax_days * pct_rate divide 100
+  number Other_Tax_Days = days_hf:tot_other_tax_days * pct_rate divide 100
+
+  number rev_days = days_hf:rev_days * pct_rate divide 100
+  number act_days = days_hf:act_days * pct_rate divide 100
+  number rpt_days = days_hf:prorate_days * pct_rate divide 100
+
+list/domain="days_hf"/hold="days2_hf"
+  days_hf:commonid /keyelement=1.1
+  rptloccode /keyelement=1.2
+  days_hf:split_flag 
+  pct_rate
+  misc_charge_days 
+  cdw_days 
+  pac_days 
+  pec_days 
+  sli_days 
+  addl_driver_days 
+  underage_driver_days 
+  upgrade_days 
+  drop_charge_days 
+  fuel_days 
+  prepaid_fuel_days 
+  ff_recovery_days 
+  Equipment_Charge_days 
+  misc_fee_days 
+  sales_tax_days 
+  federal_tax_days 
+  other_tax_days 
+  rev_days 
+  act_days
+  rpt_days
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Select fuel unit numbers
+------------------------------------------------------------------------*/
+
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+
+  number fdist = if rcmift_link:type = 10 and rcmift_link:description begins "Fuel by Mileage" then rcmift_link:chgunits else 0
+  number funits = if rcmift_link:type = 10 and rcmift_link:description not begins with "Fuel by Mileage" then rcmift_link:chgunits else 0
+  number pfunits = if rcmift_link:type = 11 then rcmift_link:chgunits else 0
+    
+list/domain="rrm_hf"/nodetail/hold="fuelunits_hf"
+
+  rrm_hf:commonid
+  fdist
+  funits
+  pfunits
+
+sorted by rrm_hf:commonid
+end of rrm_hf:commonid
+  rrm_hf:commonid/keyelement=1.1
+  total[fdist]/name="fuel_dist"
+  total[funits]/name="fuel_units"
+  total[pfunits]/name="prepaid_fuel_units"
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Select blank record for all misc charges possible for
+ zero value selections to print
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc" 
+   
+list/domain="rtmift"/hold = "rev_hf"
+  0/name="commonid"/width=11 /keyelement=1.1
+  ""/width=16/name="invclass"
+  ""/width=20/name="ranumber"
+  rtmift:code
+  rtmift:type/width=4
+  rtmift:comm/width=4
+  0/width=14/decimalplaces=2/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  ""/width=20/name="rptloccode"
+  ""/width=20/name="employee"
+  dtsdate/name="rpt_date"
+  ""/width=50/name="customerlastname"
+  dtsdate/name="dateout"
+  0.00/width=7/decimalplaces=2/name="timeout"
+  dtsdate/name="datedue"
+  0.00/width=7/decimalplaces=2/name="timedue" 
+  dtsdate/name="datein"
+  0.00/width=7/decimalplaces=2/name="timein"
+
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Mileage"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Time"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+followed by
+  0/width=11 
+  ""/width=16
+  ""/width=20
+  "Discount"/width=16
+  0/width=4
+  0/width=4
+  0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  ""/width=20
+  ""/width=20
+  dtsdate
+  ""/width=50
+  dtsdate
+  0.00/width=7/decimalplaces=2
+  dtsdate
+  0.00/width=7
+  dtsdate
+  0.00/width=7/decimalplaces=2
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges non-split contracts
+------------------------------------------------------------------------*/
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  date rpt_date = if revtm_link:rpt_date = null then rcmift_link:rptdate else revtm_link:rpt_date
+    
+list/domain="rrm_hf"/hold = "rev_hf"/append
+if  (rcmift_link:rev = 1 and rrm_hf:split_flag=0) then {
+  rcmift_link:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rcmift_link:code
+  rcmift_link:type/width=4
+  rcmift_link:comm/width=4
+  rcmift_link:total/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  rcmift_link:rptloccode
+  rentaldb:employeenumberout /name="employee"
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Select delayed misc charges non-split contracts
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+define
+  
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rcmift:rptloccode,
+    null fill on failure
+
+  file rrm_link = access rrm_hf,
+   set rrm_hf:commonid=rcmift:commonid,
+   one to one, zero fill on failure
+
+  file rrm2_link = access rrm,
+   set rrm:commonid=rcmift:commonid,
+   one to one, zero fill on failure
+
+  date rpt_date = rrm2_link:rptdate 
+
+where 
+
+  ((rcmift:rptdate >= dtSdate and rcmift:rptdate <= dtEdate) 
+  and (rcmift:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rcmift:Product =cProduct or cProduct = "ALL" )
+  and (rcmift:invclass=CClass or cClass = "ALL"))
+    
+list/domain="rcmift"/hold = "rev_hf"/append
+if  (rcmift:rev = 1 and rrm_link:commonid = 0 and rrm2_link:rastatus<>4) then {
+  rcmift:commonid/width=11 /keyelement=1.1
+  rrm:invclass
+  rrm2_link:ranumber
+  rcmift:code
+  rcmift:type/width=4
+  rcmift:comm/width=4
+  rcmift:total/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  rcmift:rptloccode
+  rentaldb:employeenumberout /name="employee"
+  rpt_date
+  rrm:customerlastname
+  rrm2_link:dateout
+  rrm2_link:timeout
+  rrm2_link:datedue
+  rrm2_link:timedue
+  rrm2_link:datein
+  rrm2_link:timein
+}
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Time, Mileage, Discount breakout for non-rev split contracts
+  & 0.00 placeholders for split contracts
+------------------------------------------------------------------------*/
+define 
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  date rpt_date = revtm_link:rpt_date 
+
+list/domain="rrm_hf"/hold = "rev_hf"/append
+
+ if rrm_link:rptloccode <> null then {
+  rrm_hf:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Mileage"/width=16/name="code"
+  0/width=4/name="type"
+  0/width=4/name="comm"
+  if rrm_hf:split_flag = 0 then revtm_link:mileage else 0/width=14/decimalplaces=2/name="amount"
+  100/width=7/decimalplaces=1/name="split_rate"
+  rrm_link:rptloccode
+  rentaldb:employeenumberout/name="employee" 
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+followed by
+
+ if rrm_link:rptloccode <> null then {
+  rrm_link:commonid 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Time"
+  0/width=4
+  0/width=4
+  if rrm_hf:split_flag = 0 then revtm_link:totaltime else 0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  rrm_link:rptloccode
+  rentaldb:employeenumberout 
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+followed by
+
+ if rrm_link:rptloccode <> null then {
+  rrm_link:commonid 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  "Discount"
+  0/width=4
+  0/width=4
+  if rrm_hf:split_flag = 0 then revtm_link:rentaldiscountamt*-1 else 0/width=14/decimalplaces=2
+  100/width=7/decimalplaces=1
+  rrm_link:rptloccode
+  rentaldb:employeenumberout 
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges, net T&M for split revenue
+------------------------------------------------------------------------*/
+define
+
+  file rrm_link = access rrm,
+    set rrm:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  file revtm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file split_link = access revra,
+    set revra:commonid=rrm_hf:commonid,
+    one to many, zero fill on failure
+
+  file invtrx_link = access invtrx,
+   set invtrx:invtrxid=rrm_link:invtrxid,
+   one to one,generic, null fill on failure
+
+  date rpt_date = if revtm_link:rpt_date = null then split_link:rptdate else revtm_link:rpt_date
+
+
+  string ctypedescr = switch(split_link:revtype)
+                case 1  : "Misc Charge"
+                case 2  : "CDW"
+                case 3  : "PAC"
+                case 4  : "PEC"
+                case 5  : "SLI"
+                case 6  : "AD"
+                case 7  : "UD"
+                case 8  : "Upgrade"
+                case 9  : "Drop Chg"
+                case 10 : "Gas By Tank Level"
+                case 11 : "Ppd. Gas"
+                case 12 : "Prev. Gas"  -- legacy - shouldn't be used with V4
+                case 13 : "FF Recovery Fee"
+                case 14 : "Equipment Charge" 
+                case 15 : "Delivery Fee"
+
+                case 50 : "Misc Fees"
+                case 51 : "Taxes"  -- Sales Tax
+                case 52 : "Taxes"  -- Federal Tax
+                case 53 : "Taxes"  -- Other Tax
+                case 62 : "Time"
+                case 64 : "Misc Charge"
+               default  : ""    
+
+  string loc_in = if (split_link:locin = "* Owned *" or split_link:locin = "") then rrm_link:locationcodein else split_link:locin
+  string loc_rent = if (split_link:locrent = "* Owned *" or split_link:locrent = "") then rrm_link:locationcodeout else split_link:locrent
+  string loc_own = if (split_link:locown = "* Owned *" or split_link:locown = "") then invtrx_link:ownedlocationcode else split_link:locown
+
+  string rev_code = if split_link:revcode <> "" then split_link:revcode else ctypedescr
+
+    
+list/domain="rrm_hf"/hold = "rev_hf"/append
+if  (rrm_hf:split_flag = 1 and split_link:amtrent <> 0) then {
+  rrm_hf:commonid/width=11 /keyelement=1.1
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16/name="code"
+  split_link:revtype/width=4/name="type"
+  0/width=4/name="comm"
+  split_link:amtrent/name="amount"
+  split_link:pctrent/width=7/decimalplaces=1/name="split_rate"
+  loc_rent/width=20/name="rptloccode"
+  rentaldb:employeenumberout /name="employee"
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+followed by
+if  (rrm_hf:split_flag = 1 and split_link:amtin <> 0) then {
+  rrm_hf:commonid/width=11 
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16
+  split_link:revtype/width=4
+  0/width=4
+  split_link:amtin
+  split_link:pctin/width=7/decimalplaces=1
+  loc_in/width=20
+  rentaldb:employeenumberout 
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+followed by
+if  (rrm_hf:split_flag = 1 and split_link:amtown <> 0) then {
+  rrm_hf:commonid/width=11
+  rrm_link:invclass
+  rrm_hf:ranumber
+  rev_code/width=16
+  split_link:revtype/width=4
+  0/width=4
+  split_link:amtown
+  split_link:pctown/width=7/decimalplaces=1
+  loc_own/width=20
+  rentaldb:employeenumberout 
+  rpt_date
+  rrm_link:customerlastname
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:datedue
+  rrm_hf:timedue
+  rrm_hf:datein
+  rrm_hf:timein
+}
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Calculate 'other' revenue and totals for yield calculations
+------------------------------------------------------------------------*/
+
+include "revmgmt_i1.inc"
+
+where rev_hf:type <> 0
+
+sum/domain="rev_hf"/hold="yielddata_hf"
+  if rev_hf:type one of 10,11,12,51,52,53 then rev_hf:amount/name="taxgas"
+  if rev_hf:code = ccode then rev_hf:amount/name="revselect"
+  rev_hf:amount/name="revother"
+  
+by
+  rev_hf:commonid/keyelement=1.1
+  rev_hf:rptloccode
+
+;
+run/parameterfile=revmgmt_1 
+
+/*------------------------------------------------------------------------
+ Summarize revenue by code and prorate/accrue to requested period 
+------------------------------------------------------------------------*/
+
+include "revmgmt_i1.inc"
+   file days_link = access days2_hf,
+    set days2_hf:commonid=rev_hf:commonid,
+    one to one, zero fill on failure
+
+   number proration_factor = if cprorate = "Y" then if (days_link:rpt_days divide act_days > 1) then 1 else (days_link:rpt_days divide act_days) else 
+    if (caccrue = "As of Date" and rev_hf:datein = null) then (days_link:rpt_days divide act_days) else 1
+
+sum/domain="rev_hf"/hold="rev_sum_hf"
+  round(rev_hf:amount*proration_factor,2)/name="tot_amt"
+
+across
+  rev_hf:code
+by
+ rev_hf:rptloccode/keyelement=1.2
+ rev_hf:commonid/keyelement=1.1
+ rev_hf:employee
+
+
+end of rev_hf:commonid
+  rev_hf:ranumber
+  rev_hf:customerlastname
+  rev_hf:rpt_date
+  rev_hf:dateout
+  rev_hf:timeout
+  rev_hf:datedue
+  rev_hf:timedue
+  rev_hf:datein
+  rev_hf:timein
+  round(running total[rev_hf:amount]*proration_factor,2)/name="tot_chrgs"
+
+;
+run/parameterfile=revmgmt_1 
+
+
+/*------------------------------------------------------------------------
+ Create detail lines
+------------------------------------------------------------------------*/
+define
+  
+  string cd1 = replace(str(rev_hf:code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="rev_hf"
+  rev_hf:code
+
+sorted by
+  rev_hf:code
+
+end of rev_hf:code 
+ 
+  'round(rev_sum_hf:'+'tot_amt_'+cd_final+' * currency_rate,2)/name="col_'+cd_final+'"'
+  'if rev_sum_hf:'+'tot_amt_'+cd_final+' > 0 then 1 else 0/name="cnt_'+cd_final+'"'
+;
+
+run/parameterfile=revmgmt_1
+rreplace detail_lines
+
+/*------------------------------------------------------------------------
+ Create column headers
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = if hclist_hf:type = "Variable" then '"'+hclist_hf:field_name+'"'+'/align=col_'+cd_final else
+    '"'+hclist_hf:field_name+'"'+'/align='+cd_final
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) and hclist_hf:type <> "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2
+
+sorted by
+  hclist_hf:field_name
+;
+
+run/parameterfile=revmgmt_1
+rreplace column_headers
+
+/*------------------------------------------------------------------------
+ Create field names dynamically
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = if hclist_hf:type = "Variable" then 'revmgtrpt_hf:'+'col_'+cd_final+'/name='+'"col_'+cd_final+'"' else
+    'revmgtrpt_hf:'+cd_final+'/name="'+cd_final+'"'
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) and hclist_hf:type <> "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2
+;
+
+run/parameterfile=revmgmt_1
+rreplace field_names
+
+/*------------------------------------------------------------------------
+ Create average field names
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 = cd_final+'/name="'+cd_final+'"'
+
+
+where hclist_hf:type = "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+  field_name2;
+
+run/parameterfile=revmgmt_1
+rreplace averages_names
+
+/*------------------------------------------------------------------------
+ Create average field headers
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+  string field_name2 =  '"'+hclist_hf:field_name+'"'+'/align='+cd_final
+
+
+where hclist_hf:type = "Report"
+and hclist_hf:field_name = ccode
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+
+  field_name2
+
+sorted by
+  hclist_hf:field_name
+;
+
+run/parameterfile=revmgmt_1
+rreplace averages_headers
+
+/*------------------------------------------------------------------------
+ Retrieve miscellaneous information for report,
+ calculate prorated days and consolidate to data file
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+define
+  
+  file days_link = access days2_hf,
+   set days2_hf:commonid=rev_sum_hf:commonid,
+   days2_hf:rptloccode=rev_sum_hf:rptloccode,
+   one to one, zero fill on failure
+
+  file fuel_link = access fuelunits_hf,
+   set fuelunits_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=rev_sum_hf:commonid,
+   one to one, null fill on failure
+ 
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rev_sum_hf:commonid,
+   one to one,null fill on failure
+
+  file renter_link = access renterra,
+   set renterra:commonid=rrm:commonid,
+   one to one, null fill on failure  --1st record only
+
+  file inv_link = access invtrx,
+   set invtrx:invid=rrm_link:invid,
+   one to one,zero fill on failure -- current vehicle
+
+  file upg_link = access upg_hf,
+   set upg_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+  file ins_link = access ins,
+   set ins:commonid=rev_sum_hf:commonid,
+   one to one,zero fill on failure
+
+  file yield_link = access yielddata_hf,
+   set yielddata_hf:commonid=rev_sum_hf:commonid,
+   one to one, zero fill on failure
+
+  file currency_link = access currencyrates,
+   set currencyrates:currency=ccurrency,
+   currencyrates:date=rental_link:dateadded,
+   one to one, reverse,approximate,zero fill on failure  -- exchange rate based on time of rental added
+
+   
+   number proration_factor = if cprorate = "Y" then if (days_link:rpt_days divide act_days > 1) then 1 else (days_link:rpt_days divide act_days) else 
+    if (caccrue = "As of Date" and rev_sum_hf:datein = null) then (days_link:rpt_days divide act_days) else 1
+
+   number chg_days = if cprorate = "Y" then days_link:rpt_days else days_link:rev_days
+
+   number daily_rate = round(rev_sum_hf:tot_chrgs divide days_link:act_days,2)
+
+   number calc_days = if caverage = "Charged Days" then chg_days else days_link:act_days
+
+   number time_charges = rev_sum_hf:tot_amt_time
+   number mileage_charges = rev_sum_hf:tot_amt_mileage
+   number t_m_discount = rev_sum_hf:tot_amt_discount
+   number gross_t_m = time_charges+mileage_charges
+   number net_t_m = gross_t_m - t_m_discount
+
+   number miles_day = round(rental_link:actmiles divide calc_days,0)
+   number miles_ra = rental_link:actmiles
+   number t_m_day = round(net_t_m divide calc_days,2)
+   number t_m_ra = net_t_m
+   number days_ra = round(calc_days,1)
+
+   number yield_total = if cgasyield = "N" then rev_sum_hf:tot_chrgs - yield_link:taxgas else rev_sum_hf:tot_chrgs
+
+   number total_rev = if (cgasyield = "N" and ctmyield = "N") then 
+    rev_sum_hf:tot_chrgs - yield_link:taxgas - net_t_m else
+    if (cgasyield = "N" and ctmyield = "Y") then 
+      rev_sum_hf:tot_chrgs - yield_link:taxgas else
+    if (cgasyield = "Y" and ctmyield = "N") then
+       rev_sum_hf:tot_chrgs - net_t_m else 
+     rev_sum_hf:tot_chrgs
+   
+   number rev_day = round(total_rev divide calc_days,2)
+   number rev_ra = total_rev
+   number total_yield = round(yield_total divide calc_days,2)
+   number non_tm_yld = round((yield_total-net_t_m) divide calc_days,2)
+
+   number currency_rate = if currency_link:exchangerate = 0 then 1 else currency_link:exchangerate  -- if no exchange found do not convert
+
+
+list/domain="rev_sum_hf"/hold="revmgtrpt_hf"
+  rev_sum_hf:rptloccode 
+  rev_sum_hf:commonid 
+  rev_sum_hf:employee 
+
+  include "detail_lines.cq"
+
+ 
+  rev_sum_hf:rpt_date 
+  round(rev_sum_hf:tot_chrgs * currency_rate,2)/name="tot_chrgs"
+
+  days_link:act_days/decimalplaces=0/width=6/name="actual_days"
+  chg_days/decimalplaces=0/width=6/name="charged_days"
+
+  round(days_link:addl_driver_days*proration_factor,1)/width=6/name="addl_driver_days"
+  round(days_link:cdw_days*proration_factor,1)/width=6/name="cdw_days"
+  round(days_link:equipment_charge_days*proration_factor,1)/width=6/name="equipment_charge_days" 
+  round(days_link:drop_charge_days*proration_factor,1)/width=6/name="drop_charge_days" 
+  round(days_link:federal_tax_days*proration_factor,1)/width=6/name="federal_tax_days"
+  round(days_link:ff_recovery_days*proration_factor,1)/width=6/name="ff_recovery_fee_days"
+  round(days_link:fuel_days*proration_factor,1)/width=6/name="fuel_days"
+  round(days_link:misc_charge_days*proration_factor,1)/width=6/name="misc_charge_days"
+  round(days_link:misc_fee_days*proration_factor,1)/width=6/name="misc_fee_days"
+  round(days_link:other_tax_days*proration_factor,1)/width=6/name="other_tax_days"
+  round(days_link:pac_days*proration_factor,1)/width=6/name="pac_days"
+  round(days_link:pec_days*proration_factor,1)/width=6/name="pec_days"
+  round(days_link:prepaid_fuel_days*proration_factor,1)/width=6/name="prepaid_fuel_days" 
+  round(days_link:sales_tax_days*proration_factor,1)/width=6/name="sales_tax_days"
+  round(days_link:sli_days*proration_factor,1)/width=6/name="sli_days"
+  round(days_link:underage_driver_days*proration_factor,1)/width=6/name="underage_driver_days" 
+  round(days_link:upgrade_days*proration_factor,1)/width=6/name="upgrade_days"
+
+  rrm_link:agentid/name="agent"
+  rrm_link:arrivalairline/name="arriv_airl"
+  rrm_link:arrivalflight/name="arriv_flt_"
+  rrm_link:arrivaldate/name="arriv_date"
+  rrm_link:arrivaltime/name="arriv_time"
+  rrm_link:ffbonus1/name="bonus"
+  rrm_link:ffbonus2/name="bonus2"
+  rrm:invclass/name="class" --class
+  rrm:reservedclass+","+rrm:rentedasclass/name="classes"
+  rrm_link:coi/name="coi_instype"
+  rrm_link:company
+  rrm_link:corpid/name="corp_id"
+  renter_link:customerlastname/width=20/name="cust_name"-- custname
+  rrm_link:datein/name="date_in"
+  rrm_link:dateout/name="date_out"
+  rrm:reasondisc/name="disc_reason"--disc reason
+  rental_link:employeenumberout/name="emp__out"
+  rental_link:employeenumberin/name="emp__in"
+  rrm_link:ffaccount/name="ff_account"
+  rrm_link:ffcarrier/name="ff_airline"
+  renter_link:insuranceco/name="ins_co"
+  inv_link:licensenumber/name="inv_license"
+  rrm_link:ponumber/name="po_"
+  rrm_link:promocode/name="promo_code"
+  rev_sum_hf:ranumber
+  rental_link:ratecode/name="rate_code"
+  rrm:reasonrent/name="rental_reason"--rental reason
+  rrm_link:referredby/name="referred_by"
+  rrm_link:referencenum/name="reference_"
+  rrm_link:referralcode/name="referral"
+  rrm_link:rentaltype
+  rrm_link:rentedasclass/name="rented_as_class"
+  rrm_link:resnumber/name="res_number"
+  if (ins_link:commonid = 0 or ins_link:claimnum1 = "") then rrm:serviceordernum else ins_link:claimnum1/name="ro_"
+  rrm_link:serviceordernum/name="serv_order_"
+  rrm_link:sourcecode/name="source"
+  rrm_link:taxcode/name="tax_id_"
+  rrm_link:taxable
+  rrm_link:tourcode/name="tour_code"
+  inv_link:unitnumber/name="unit_"
+  inv_link:serialnumber/name="vin"
+  renter_link:systemid/name="vip_"
+  rrm_link:vouchernum/name="voucher_"
+  time(rental_link:createtime)/mask="HH:MM:SS"/name="trx_time"
+  round(upg_link:tpm_upg * currency_rate,2)/name="t_m_upgrade"
+  rental_link:actmiles/name="number_miles"    
+  fuel_link:fuel_dist
+  fuel_link:fuel_units
+  fuel_link:prepaid_fuel_units
+  round(daily_rate * currency_rate,2)/name="daily_rate"
+  round(time_charges * currency_rate,2)/name="time_charges"
+  round(mileage_charges  * currency_rate,2)/name="mileage_charges"
+  round(t_m_discount * currency_rate,2) /name="t_m_discount"
+  round(gross_t_m * currency_rate,2)/name="gross_t_m" 
+  round(net_t_m * currency_rate,2)/name="net_t_m"
+  miles_day
+  miles_ra
+  round(t_m_day * currency_rate,2)/name="t_m_day"
+  round(rev_ra * currency_rate,2)/name="rev_ra"
+  round(rev_day * currency_rate,2)/name="rev_day"
+  round(total_rev * currency_rate,2)/name="total_rev"
+  round(yield_total * currency_rate,2)/name="yield_total"
+  round(total_yield * currency_rate,2)/name="total_yield"
+  round(non_tm_yld * currency_rate,2)/name="non_tm_yld"
+  round(t_m_ra * currency_rate,2)/name="t_m_ra"
+  days_ra
+  calc_days
+  round(yield_link:revselect * currency_rate,2)/name="revselect"
+
+;
+run/parameterfile=revmgmt_1 
+ 
+/*------------------------------------------------------------------------
+ Create sorting routine
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+
+define
+
+     string sort_order = switch(csort)
+     case "Local Company"    : 'revmgtrpt_hf:company'
+     case "Renter Last Name" : 'revmgtrpt_hf:cust_name'
+     case "Rate Code"        : 'revmgtrpt_hf:rate_code'
+     case "Inv Class"        : 'revmgtrpt_hf:class'
+     case "Unit#"            : 'revmgtrpt_hf:unit_'
+     default                 : 'revmgtrpt_hf:unit_'
+
+list/domain="dummy"/nobanner/nodefaults/noreporttotals/noblanklines
+
+'sorted by'/newline
+if cconsolidate = "N" then 'revmgtrpt_hf:rptloccode' else ""/newline
+sort_order/newline
+if (cpage = "Y" and cexcel = "N") then "/page" else ""/newline
+'revmgtrpt_hf:class'/newline
+'revmgtrpt_hf:ranumber'/newline=2
+
+if cexcel = "N" then {
+'end of '+sort_order/newline
+'"Totals for "+str('+sort_order+')+":"/align=col_1'
+'count[revmgtrpt_hf:ranumber]/align=col_2'/newline
+} else {""}
+;
+
+run/parameterfile=revmgmt_1 
+rreplace sort_select
+
+/*------------------------------------------------------------------------
+ Create location consolidation routine
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+ if cconsolidate = "N" then {
+
+'end of revmgtrpt_hf:rptloccode'/newline
+
+'"Totals for location "+str(revmgtrpt_hf:rptloccode)+":"/align=col_1'
+'count[revmgtrpt_hf:ranumber]/align=col_2'/newline
+
+'include "field_totals.cq"'/newline
+'total[revmgtrpt_hf:revselect]/align=col_10'/newline
+'total[revmgtrpt_hf:tot_chrgs]-total[revmgtrpt_hf:revselect]/align=col_11'/newline
+'total[revmgtrpt_hf:tot_chrgs]/align=col_12/newline'/newline
+
+'if cpentrate = "Y" then {'/newline
+'"Penetration Number:"/align=col_1'/newline
+'include "penetration_num.cq"/newline'/newline
+'"Penetration %:"/align=col_1'/newline
+'include "penetration_per.cq"/newline'/newline
+'}'/newline
+}
+;
+
+run/parameterfile=revmgmt_1 
+rreplace loc_consolidate
+
+/*------------------------------------------------------------------------
+ Create field totals dynamically
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+define
+
+     string sort_order = switch(csort)
+     case "Local Company"    : 'revmgtrpt_hf:company'
+     case "Renter Last Name" : 'revmgtrpt_hf:cust_name'
+     case "Rate Code"        : 'revmgtrpt_hf:rate_code'
+     case "Inv Class"        : 'revmgtrpt_hf:class'
+     case "Unit#"            : 'revmgtrpt_hf:unit_'
+     default                 : 'revmgtrpt_hf:unit_'
+
+  string field_name2 = if hclist_hf:type = "Variable" then 'running total[revmgtrpt_hf:'+'col_'+cd_final+']/align='+'col_'+cd_final else
+    'running total[revmgtrpt_hf:'+cd_final+']/align='+cd_final
+
+
+where hclist_hf:field_name <> "*Blank*" and (hclist_hf:field_name = ccode) 
+and hclist_hf:field_name = ccode and hclist_hf:field_type = "i"
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+if hclist_hf:type <> "Report" then {
+  field_name2
+}
+
+top of report
+
+if ccode = "Miles/Day" then 'round(running total[number_miles] divide running total[calc_days],0)/align=miles_day'/newline
+if ccode = "Miles/RA" then 'round(running total[number_miles] divide running count[ranumber],0)/align=miles_ra'/newline
+if ccode = "T&M/Day" then 'round(running total[net_t_m] divide running total[calc_days],2)/align=t_m_day'/newline
+if ccode = "T&M/RA" then 'round(running total[net_t_m] divide running count[ranumber],2)/align=t_m_ra'/newline
+if ccode = "Days/RA" then 'round(running total[calc_days] divide running count[ranumber],1)/align=days_ra'/newline
+if ccode = "Rev/Day" then 'round(running total[total_rev] divide running total[calc_days],2)/align=rev_day'/newline
+if ccode = "Rev/RA" then 'round(running total[total_rev] divide running count[ranumber],2)/align=rev_ra'/newline
+if ccode = "Total Yield" then 'round(running total[yield_total] divide running total[calc_days],2)/align=total_yield'/newline
+if ccode = "Non-TM Yld" then 'round((running total[yield_total]-running total[net_t_m]) divide running total[calc_days],2)/align=non_tm_yld'/newline
+if ccode = "Total Rev" then 'running total[total_rev]/align=total_rev'/newline;
+
+run/parameterfile=revmgmt_1
+rreplace field_totals
+
+/*------------------------------------------------------------------------
+ Create field pentration numbers
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+define
+
+  string pentration_num = 'running total[revmgtrpt_hf:'+'cnt_'+cd_final+']/align='+'col_'+cd_final 
+ 
+where hclist_hf:type = "Variable" and (hclist_hf:field_name = ccode) 
+
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+
+   pentration_num
+
+top of report
+""/newline;
+
+run/parameterfile=revmgmt_1 
+rreplace penetration_num
+
+/*------------------------------------------------------------------------
+ Create field percentage dynamically
+------------------------------------------------------------------------*/
+  include "revmgmt_i1.inc"
+define
+  
+  string cd1 = replace(str(hclist_hf:field_name)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+
+  string cd_final = replace(str(cd28),"*","_")
+
+define
+
+  string pentration_per = 'running total[revmgtrpt_hf:'+'cnt_'+cd_final+'] divide running count[revmgtrpt_hf:ranumber]* 100/mask="ZZ9.9%"/align='+'col_'+cd_final 
+
+
+where hclist_hf:type = "Variable" and (hclist_hf:field_name = ccode) 
+
+list/nobanner/nodefaults/noreporttotals/domain="hclist_hf"
+
+   pentration_per
+
+top of report
+""/newline;
+
+run/parameterfile=revmgmt_1 
+rreplace penetration_per
+
+/*------------------------------------------------------------------------
+ Summary or detail?
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if (csummary = "Summary" and cexcel = "N") then "/nodetail" else "" ;
+
+run/parameterfile=revmgmt_1 
+rreplace csummary
+;
+run/parameterfile=revmgmt_1
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+ 
+
+where revmgtrpt_hf:commonid <> 0 -- exclude dummy placeholder record
+  and ((csort not one of "Local Company","Renter Last Name","Rate Code") or
+      (csort = "Rate Code" and rate_code = crange) or 
+      (csort = "Renter Last Name" and cust_name = crange) or
+      (csort = "Local Company" and company = crange) or
+      (crange = "ALL"))
+
+list/domain="revmgtrpt_hf"/title="Revenue Management Report"/noheadings/nobanner/pageof/noreporttotals include "csummary.cq"
+
+revmgtrpt_hf:ranumber/name="col_1"
+revmgtrpt_hf:rpt_date/name="col_2"
+revmgtrpt_hf:class/name="col_3"
+
+
+include "field_names.cq"
+
+include "averages_names.cq"
+
+revmgtrpt_hf:revselect/name="col_10"
+revmgtrpt_hf:tot_chrgs - revmgtrpt_hf:revselect/name="col_11"
+revmgtrpt_hf:tot_chrgs/name="col_12"
+
+include "sort_select.cq"
+
+include "field_totals.cq"
+total[revmgtrpt_hf:revselect]/align=col_10
+total[revmgtrpt_hf:tot_chrgs]-total[revmgtrpt_hf:revselect]/align=col_11
+total[revmgtrpt_hf:tot_chrgs]/align=col_12/newline
+
+if cpentrate = "Y" then {
+"Penetration Number:"/align=col_1
+include "penetration_num.cq"/newline
+"Penetration %:"/align=col_1
+include "penetration_per.cq"/newline
+}
+
+include "loc_consolidate.cq"
+
+end of report/newline
+
+"Grand Totals:"/align=col_1
+count[revmgtrpt_hf:ranumber]/align=col_2
+
+include "field_totals.cq"
+total[revmgtrpt_hf:revselect]/align=col_10
+total[revmgtrpt_hf:tot_chrgs]-total[revmgtrpt_hf:revselect]/align=col_11
+total[revmgtrpt_hf:tot_chrgs]/align=col_12/newline
+
+if cpentrate = "Y" then {
+"Penetration Number:"/align=col_1
+include "penetration_num.cq"/newline
+"Penetration %:"/align=col_1
+include "penetration_per.cq"/newline
+}
+  
+if ccurrency <> "" then {
+""/newline
+"Currency used: "+str(ccurrency)/width=20/newline
+}
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Date Range: "+str(dtSdate)+" to "+str(dtEdate)
+     if cLocgroup <> "" then "  Location group: " + str(cLocGroup) else "  Locations: " + str(cLoc)/displaywidth=100
+   "  Product: " + str(cProduct)
+   "  Car Classes: " + str(cClass)/newline
+     if cgasyield = "Y" then "Gas & Taxes Incl in Yields/Totals  " else "Gas & Taxes Not Incl in Yields/Totals  "
+     if ctmyield = "Y" then "  Net T&M Incl in Totals" else "  Net T&M Not Incl in Totals"
+     if cprorate = "Y" then "  Revenue Pro-rated to Date Range"
+  end box/newlines=4
+
+   "RA Number"/align=col_1
+   "Report Date"/align=col_2
+   "Inv Class"/align=col_3
+
+include "column_headers.cq"
+include "averages_headers.cq"
+
+  "Subtotal"/align=col_10
+  "Other"/align=col_11
+  "Total"/align=col_12/newline
+
+;
+replace revmgmt.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+define
+
+     string sortID1 = switch(csort)
+     case "Local Company"    : revmgtrpt_hf:company
+     case "Renter Last Name" : revmgtrpt_hf:cust_name
+     case "Rate Code"        : revmgtrpt_hf:rate_code
+     case "Inv Class"        : revmgtrpt_hf:class
+     case "Unit#"            : revmgtrpt_hf:unit_
+     default                 : revmgtrpt_hf:unit_
+
+     string sortID = if cconsolidate = "N" then revmgtrpt_hf:rptloccode+" "+sortID1 else SortID1
+ 
+
+where revmgtrpt_hf:commonid <> 0 -- exclude dummy placeholder record
+  and ((csort not one of "Local Company","Renter Last Name","Rate Code") or
+      (csort = "Rate Code" and rate_code = crange) or 
+      (csort = "Renter Last Name" and cust_name = crange) or
+      (csort = "Local Company" and company = crange) or
+      (crange = "ALL"))
+
+list/domain="revmgtrpt_hf"/title="Revenue Management Report"/noheadings/nobanner/pagelength=0/noreporttotals include "csummary.cq"
+ 
+sortID/name="col_0"
+revmgtrpt_hf:ranumber/name="col_1"
+revmgtrpt_hf:rpt_date/name="col_2"
+revmgtrpt_hf:class/name="col_3"
+
+
+include "field_names.cq"
+
+include "averages_names.cq"
+
+revmgtrpt_hf:revselect/name="col_10"
+revmgtrpt_hf:tot_chrgs - revmgtrpt_hf:revselect/name="col_11"
+revmgtrpt_hf:tot_chrgs/name="col_12"
+
+include "sort_select.cq"
+
+
+end of report/newline
+
+"Grand Totals:"/align=col_1
+count[revmgtrpt_hf:ranumber]/align=col_2
+
+include "field_totals.cq"
+total[revmgtrpt_hf:revselect]/align=col_10
+total[revmgtrpt_hf:tot_chrgs]-total[revmgtrpt_hf:revselect]/align=col_11
+total[revmgtrpt_hf:tot_chrgs]/align=col_12/newline
+
+if cpentrate = "Y" then {
+"Penetration Number:"/align=col_1
+include "penetration_num.cq"/newline
+"Penetration %:"/align=col_1
+include "penetration_per.cq"/newline
+}
+  
+if ccurrency <> "" then {
+""/newline
+"Currency used: "+str(ccurrency)/width=20/newline
+}
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Date Range: "+str(dtSdate)+" to "+str(dtEdate)
+     if cLocgroup <> "" then "  Location group: " + str(cLocGroup) else "  Locations: " + str(cLoc)/displaywidth=100
+   "  Product: " + str(cProduct)
+   "  Car Classes: " + str(cClass)/newline
+     if cgasyield = "Y" then "Gas & Taxes Incl in Yields/Totals  " else "Gas & Taxes Not Incl in Yields/Totals  "
+     if ctmyield = "Y" then "  Net T&M Incl in Totals" else "  Net T&M Not Incl in Totals"
+     if cprorate = "Y" then "  Revenue Pro-rated to Date Range"
+  end box/newlines=4
+
+   "Sort ID"/align=col_0
+   "RA Number"/align=col_1
+   "Report Date"/align=col_2
+   "Inv Class"/align=col_3
+
+include "column_headers.cq"
+include "averages_headers.cq"
+
+  "Subtotal"/align=col_10
+  "Other"/align=col_11
+  "Total"/align=col_12
+
+;
+replace revmgmt_xl.eq
+
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "revmgmt_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=revmgmt_1 revmgmt.eq"/newline
+} else {
+"run/xls/parameterfile=revmgmt_1 revmgmt_xl.eq"/newline
+}
+"rrepl revmgmt"/newline
+"view"/newline 
+;
+run/parameterfile=revmgmt_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Revenue Management Report" -- Report Title
+   string rptname1    = "revmgmt" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "revmgmt_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

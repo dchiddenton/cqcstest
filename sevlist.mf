@@ -1,0 +1,171 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Special Events List
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: sevlist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/sevlist.mf $
+$Revision: 1 $
+$History: sevlist.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 11/06/19   Time: 4:47p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default dateadd(todaysdate-day(todaysdate),1);
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+;
+replace sevlist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "sevlist_i1.inc"
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = specialevents:locationcode,
+    null fill on failure
+
+   string day1=if specialevents:dow1=1 then ", Sun" else ""
+   string day2=if specialevents:dow2=1 then ", Mon" else ""
+   string day3=if specialevents:dow3=1 then ", Tue" else ""
+   string day4=if specialevents:dow4=1 then ", Wed" else ""
+   string day5=if specialevents:dow5=1 then ", Thu" else ""
+   string day6=if specialevents:dow6=1 then ", Fri" else ""
+   string day7=if specialevents:dow7=1 then ", Sat" else ""
+
+   string daystrall=day1+day2+day3+day4+day5+day6+day7
+   string daystr=daystrall[3,len(daystrall)]
+
+   string csevtype = if specialevents:type = 1 then "Date Range" else "Days of Week"
+   string crange = if specialevents:type = 1 then 
+                      if specialevents:blackout=1 then (str(specialevents:startdate,include "date_mask.cq")+" - "+str(specialevents:enddate,include "date_mask.cq")+"  Blackout") else
+                           (str(specialevents:startdate,include "date_mask.cq")+" - "+str(specialevents:enddate,include "date_mask.cq")) else daystr
+
+   string cweb = if specialevents:web = 1 then "Yes" else "" 
+
+where 
+ (specialevents:Product  = cProduct or cProduct = "ALL" )
+  and (specialevents:invclass = cClass or cClass = "ALL")
+  and (specialevents:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (((SpecialEvents:StartDate >= dtSDate AND SpecialEvents:StartDate =< dtEDate) or
+            (SpecialEvents:EndDate >= dtSDate AND SpecialEvents:EndDate =< dtEDate) and specialevents:type=1) or specialevents:type=2)
+
+
+list/domain="specialevents"/nobanner/noreporttotals/pageof/noheadings/title="Special Events List"
+  specialevents:code/displaywidth=10
+  specialevents:description/displaywidth=30
+  specialevents:locationcode/displaywidth=20 
+  specialevents:product /displaywidth=15
+  specialevents:invclass /displaywidth=15
+  csevtype/displaywidth=15
+  crange/displaywidth=30
+  specialevents:util /displaywidth=7
+  cweb/displaywidth=4
+
+
+sorted by 
+  specialevents:locationcode
+  specialevents:invclass
+
+end of report
+  ""/newline
+  "Total Records: "+str(count[specialevents:code])/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline 
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/displaywidth=100/newline
+  end box /newline=4
+
+
+  "Code"/align=specialevents:code
+  "Description"/align=specialevents:description
+  "Location"/align=specialevents:locationcode 
+  "Product"/align=specialevents:product 
+  "Class"/align=specialevents:invclass 
+  "Type"/align=csevtype
+  "Range"/align=crange
+  "Util %"/align=specialevents:util 
+  "Web?"/align=cweb/newline
+;
+replace sevlist_1.eq
+replace sevlist.eq
+run/setparameter sevlist_1.eq
+
+run/parameterfile=sevlist_1 sevlist.eq
+
+rrepl sevlist
+;
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view sevlist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Special Events List" -- Report Title
+   string rptname1    = "sevlist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "sevlist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

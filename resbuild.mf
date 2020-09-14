@@ -1,0 +1,558 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Reservation Build Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/19/2014
+Modified:
+
+Notes:
+$Workfile: resbuild.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/resbuild.mf $
+$Revision: 2 $
+$History: resbuild.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="sources"
+if itemnumber=1 then '"'+sources:sourcecode+'"' else
+   ',"'+sources:sourcecode+'"'
+
+sorted by
+   sources:sourcecode
+top of report
+'string csource[8192] = multivalue parameter prompt "Source Codes: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_sources"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtSdate = parameter prompt "Start Date: " default todaysdate
+  date dtedate = parameter prompt "End Date: " default todaysdate+30 error "Error: End date < Start date" if dtedate < dtsdate
+  date dtDate1 = parameter prompt "Enter as of date: "  default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_sources.cq"
+
+;
+replace resbuild_i1.inc
+/*------------------------------------------------------------------------
+ Build date list - setup parameters
+------------------------------------------------------------------------*/
+
+include "resbuild_i1.inc"
+define
+    date select_date = dtSdate
+
+   number days_between = dtedate - dtsdate
+   file counter_i = access counter,
+    set min=0, max = days_between 
+
+
+list/domain="dummy"/hold="res_build_date_hf"
+
+if counter_i:position <= days_between then 
+  select_date + counter_i:position/name="select_date"
+
+;
+replace resbuild_1.eq
+run/setparameter resbuild_1.eq
+
+run/parameterfile=resbuild_1 resbuild_1.eq
+
+/*------------------------------------------------------------------------
+ Dynamically create code for current dates
+------------------------------------------------------------------------*/
+include "resbuild_i1.inc"
+
+define
+   number days_between = dtedate - dtsdate
+   file counter_i = access counter,
+    set min=1, max = days_between 
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if counter_i:position <= days_between then {
+"followed by"/newline
+"if ((dtsdate +"+ str(counter_i:position) + " >= resdb:dateout and dtsdate + "+ str(counter_i:position) + 
+" < resdb:datedue) or (dtsdate + "+ str(counter_i:position) + " >= resdb:dateout and resdb:dateout = resdb:datedue)) then {"/newline
+"  dtsdate + "+ str(counter_i:position)/newline
+"  rrm_to_resdb:resstatus"/newline
+"  resdb:ranumber"/newline
+"  resdb:resnumber"/newline 
+"  rrm_to_resdb:reservedclass"/newline 
+"  resdb:dateout"/newline
+"  resdb:datedue"/newline 
+"  resdb:datein"/newline 
+"  revdays"/newline
+"  resdb:totaltpm"/newline 
+"  resdb:dateadded"/newline
+"  resdb:datechanged"/newline
+"}"/newline
+}
+;
+run/parameterfile=resbuild_1
+rrepl "resbuild_i2"
+
+/*------------------------------------------------------------------------
+ Dynamically create code for current dates last year
+------------------------------------------------------------------------*/
+include "resbuild_i1.inc"
+
+define
+   number days_between = dtedate - dtsdate
+   file counter_i = access counter,
+    set min=1, max = days_between 
+
+
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if counter_i:position <= days_between then {
+"followed by"/newline
+"if ((dateadd(dtsdate,0,-1) +"+ str(counter_i:position) + " >= resdb:dateout and dateadd(dtsdate,0,-1) + "+ str(counter_i:position) + 
+" < resdb:datedue) or (dateadd(dtsdate,0,-1) + "+ str(counter_i:position) + " >= resdb:dateout and resdb:dateout = resdb:datedue)) then {"/newline
+"  dtsdate + "+ str(counter_i:position)/newline
+"  rrm_to_resdb:resstatus"/newline
+"  resdb:ranumber"/newline
+"  resdb:resnumber"/newline 
+"  rrm_to_resdb:reservedclass"/newline 
+"  resdb:dateout"/newline
+"  resdb:datedue"/newline 
+"  resdb:datein"/newline 
+"  revdays"/newline
+"  resdb:totaltpm"/newline 
+"  resdb:dateadded"/newline
+"  resdb:datechanged"/newline
+"}"/newline
+}
+;
+run/parameterfile=resbuild_1
+rrepl "resbuild_i3"
+
+/*------------------------------------------------------------------------
+ FRoutine to calculate running days for the selected dates input
+------------------------------------------------------------------------*/
+
+include "resbuild_i1.inc"
+
+define 
+  file rrm_to_resdb = access rrm,
+    set rrm:commonid=resdb:commonid,
+    one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_to_resdb:locationcodeout,
+    null fill on failure
+
+    number rev_hours = resdb:timedue - resdb:timeout
+    number rev_days = resdb:datedue - resdb:dateout
+    number revdays = if rev_hours >= 3 then rev_days + 1 else rev_days  -- if 3 or greater OT then add 1 day
+
+-- Get selection criteria
+
+where (rrm_to_resdb:resstatus one of 
+   20, --open res
+   30, --open ra
+   40, --closed ra
+--   50, --cancelled   ******new logic required for this status ******
+   60) --noshow
+and
+    rrm_to_resdb:dateout <= dtEdate and rrm_to_resdb:datedue >=dtSdate
+and 
+   resdb:dateadded <= dtDate1 --todaysdate
+and 
+   (rrm_to_resdb:locationcodeout = cLoc)
+  and (cLocGroup = "" or cLocGroup = alt_LocGroup:groupname )
+and
+  (rrm_to_resdb:product = cproduct or cproduct = "ALL")
+and
+  (rrm_to_resdb:reservedclass = cClass or cclass = "ALL")
+and 
+  (rrm_to_resdb:sourcecode = csource or csource = "ALL")
+
+
+
+list/domain="resdb"/noheadings/nototals/hold="res_build_hf"
+if ((dtsdate >= resdb:dateout and dtsdate < resdb:datedue) or (dtsdate >= resdb:dateout and resdb:dateout = resdb:datedue)) then {
+  dtsdate
+  rrm_to_resdb:resstatus 
+  resdb:ranumber 
+  resdb:resnumber  
+  rrm_to_resdb:reservedclass
+  resdb:dateout/keyelement=1.1
+  resdb:datedue 
+  resdb:datein 
+  revdays
+  resdb:totaltpm 
+  resdb:dateadded/keyelement=2.1
+  resdb:datechanged
+}
+
+include "resbuild_i2.cq"
+
+;
+run/parameterfile=resbuild_1
+
+/*------------------------------------------------------------------------
+ Summarize running days
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="res_build_hf"/hold="Res_Build_rundays_hf"
+  res_build_hf:units
+  res_build_hf:revdays
+  res_build_hf:totaltpm
+
+by
+  res_build_hf:dtsdate/keyelement=1.1
+
+;
+run/parameterfile=resbuild_1 
+
+/*------------------------------------------------------------------------
+ Calculates the selected resevations based on input dates
+------------------------------------------------------------------------*/
+
+include "resbuild_i1.inc"
+define
+   file rrm_to_resdb = access rrm,
+    set rrm:commonid=resdb:commonid,
+    one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_to_resdb:locationcodeout,
+    null fill on failure
+
+   number resdays = if (resdb:datedue - resdb:dateout = 0) then 1 else(resdb:datedue - resdb:dateout)
+
+-- Get selection criteria
+
+where (rrm_to_resdb:resstatus one of 
+   20, --open res
+   30, --open ra
+   40, --closed ra
+--   50, --cancelled   ******new logic required for this status ******
+   60) --noshow
+and
+   (rrm_to_resdb:dateout >= dtsdate and rrm_to_resdb:dateout <= dtedate)
+and 
+   resdb:dateadded <= dtDate1 --todaysdate
+and 
+   (rrm_to_resdb:locationcodeout = cLoc)
+  and (cLocGroup = "" or cLocGroup = alt_LocGroup:groupname )
+and
+  (rrm_to_resdb:product = cproduct or cproduct = "ALL")
+and
+  (rrm_to_resdb:reservedclass = cClass or cclass = "ALL")
+and 
+  (rrm_to_resdb:sourcecode = csource or csource = "ALL")
+
+
+sum/domain="resdb"/noheadings/nototals/hold="res_build_restotal_hf"
+
+  units
+  resdb:totaltpm
+  resdays
+
+by
+  resdb:dateout/keyelement=1.1
+
+;
+run/parameterfile=resbuild_1 
+
+/*------------------------------------------------------------------------
+ Routine to calculate running days for the selected dates input 
+  - LAST YEAR
+------------------------------------------------------------------------*/
+
+include "resbuild_i1.inc"
+define 
+  file rrm_to_resdb = access rrm,
+    set rrm:commonid=resdb:commonid,
+    one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_to_resdb:locationcodeout,
+    null fill on failure
+
+  number rev_hours = resdb:timedue - resdb:timeout
+  number rev_days = resdb:datedue - resdb:dateout
+  number revdays = if rev_hours >= 3 then rev_days + 1 else rev_days  -- if 3 or greater OT then add 1 day
+
+-- Get selection criteria
+
+where (rrm_to_resdb:resstatus one of 
+   20, --open res
+   30, --open ra
+   40, --closed ra
+--   50, --cancelled   ******new logic required for this status ******
+   60) --noshow
+and
+    rrm_to_resdb:dateout <= dateadd(dtEdate,0,-1) and rrm_to_resdb:datedue >=dateadd(dtsdate,0,-1)
+and 
+   resdb:dateadded <= dateadd(dtDate1,0,-1) --todaysdate - 1 year
+and 
+   (rrm_to_resdb:locationcodeout = cLoc)
+  and (cLocGroup = "" or cLocGroup = alt_LocGroup:groupname )
+and
+  (rrm_to_resdb:product = cproduct or cproduct = "ALL")
+and
+  (rrm_to_resdb:reservedclass = cClass or cclass = "ALL")
+and 
+  (rrm_to_resdb:sourcecode = csource or csource = "ALL")
+
+
+list/domain="resdb"/noheadings/nototals/hold="res_build_ly_hf"
+if ((dateadd(dtsdate,0,-1) >= resdb:dateout and dateadd(dtsdate,0,-1) < resdb:datedue) or (dateadd(dtsdate,0,-1) >= resdb:dateout and resdb:dateout = resdb:datedue)) then {
+  dtsdate
+  rrm_to_resdb:resstatus 
+  resdb:ranumber 
+  resdb:resnumber  
+  rrm_to_resdb:reservedclass
+  resdb:dateout/keyelement=1.1
+  resdb:datedue 
+  resdb:datein 
+  revdays
+  resdb:totaltpm 
+  resdb:dateadded/keyelement=2.1
+  resdb:datechanged
+}
+
+include "resbuild_i3.cq"
+
+;
+run/parameterfile=resbuild_1 
+
+/*------------------------------------------------------------------------
+ Summarize running days - last year
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="res_build_ly_hf"/hold="Res_Build_rundays_ly_hf"
+  res_build_ly_hf:units
+  res_build_ly_hf:revdays
+  res_build_ly_hf:totaltpm
+
+by
+  res_build_ly_hf:dtsdate/keyelement=1.1
+
+;
+run/parameterfile=resbuild_1 
+
+/*------------------------------------------------------------------------
+ Calculates the selected resevations based on input dates - LAST YEAR
+------------------------------------------------------------------------*/
+
+include "resbuild_i1.inc"
+define  
+  file rrm_to_resdb = access rrm,
+    set rrm:commonid=resdb:commonid,
+    one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_to_resdb:locationcodeout,
+    null fill on failure
+
+  number resdays = if (resdb:datedue - resdb:dateout = 0) then 1 else(resdb:datedue - resdb:dateout)
+
+-- Get selection criteria
+
+where (rrm_to_resdb:resstatus one of 
+   20, --open res
+   30, --open ra
+   40, --closed ra
+--   50, --cancelled   ******new logic required for this status ******
+   60) --noshow
+and
+   (rrm_to_resdb:dateout >= dateadd(dtsdate,0,-1) and rrm_to_resdb:dateout <= dateadd(dtedate,0,-1))
+and 
+   resdb:dateadded <= dateadd(dtDate1,0,-1) --todaysdate -  1 year
+and 
+   (rrm_to_resdb:locationcodeout = cLoc)
+  and (cLocGroup = "" or cLocGroup = alt_LocGroup:groupname )
+and
+  (rrm_to_resdb:product = cproduct or cproduct = "ALL")
+and
+  (rrm_to_resdb:reservedclass = cClass or cclass = "ALL")
+and 
+  (rrm_to_resdb:sourcecode = csource or csource = "ALL")
+
+
+sum/domain="resdb"/noheadings/nototals/hold="res_build_restotal_ly_hf"
+
+  units
+  resdb:totaltpm
+  resdays
+
+by
+  dateadd(resdb:dateout,0,1)/name="dateout"/keyelement=1.1
+
+;
+run/parameterfile=resbuild_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  file date_to_restot = access res_build_restotal_hf,
+    set res_build_restotal_hf:dateout = res_build_date_hf:select_date,
+    one to one,
+    zero fill on failure
+
+  file date_to_restot_ly = access res_build_restotal_ly_hf,
+    set res_build_restotal_ly_hf:dateout = res_build_date_hf:select_date,
+    one to one,
+    zero fill on failure
+  
+  file date_to_rundays = access res_build_rundays_hf,
+    set res_build_rundays_hf:dtsdate = res_build_date_hf:select_date,
+    one to one,
+    zero fill on failure
+
+  file date_to_rundays_ly = access res_build_rundays_ly_hf,
+    set res_build_rundays_ly_hf:dtsdate = res_build_date_hf:select_date,
+    one to one,
+    zero fill on failure
+
+  include "resbuild_i1.inc"
+
+where res_build_date_hf:select_date >= dtSdate and res_build_date_hf:select_date <= dtEdate
+  
+list/domain="res_build_date_hf"/title="Reservation Build Report"/nobanner/nototals
+  res_build_date_hf:select_date/heading="Selected-Date"/name="a" 
+  date_to_restot:res_build_restotal_hf_units/heading="Selected-Reservations"/name="b" 
+  date_to_restot_ly:res_build_restotal_ly_hf_units/heading="Previous Year-Reservations"/name="c"
+  ((date_to_restot:res_build_restotal_hf_units - date_to_restot_ly:res_build_restotal_ly_hf_units) divide date_to_restot_ly:res_build_restotal_ly_hf_units) * 100/mask="ZZZ9.9%"/heading="Reservation-Percentage"/name="d"
+  date_to_rundays:res_build_rundays_hf_units/heading="Selected-Running Days"/name="e" 
+  date_to_rundays_ly:res_build_rundays_ly_hf_units/heading="Previous Year-Running Days"/name="f"
+  ((date_to_rundays:res_build_rundays_hf_units - date_to_rundays_ly:res_build_rundays_ly_hf_units) divide date_to_rundays_ly:res_build_rundays_ly_hf_units) * 100/mask="ZZZ9.9%"/heading="Days-Percentage"/name="g"
+
+/*-----Diagnostic purposes only
+
+  date_to_rundays:revdays/heading="Revenue-Days"
+  date_to_rundays_ly:revdays/heading="LY Revenue-Days"
+  date_to_rundays:totaltpm/heading="Selected-TPM"
+  date_to_rundays_ly:totaltpm/heading="LY Selected-TPM"
+  date_to_restot:resdays/heading="Reservation-Days"
+  date_to_restot_ly:resdays/heading="LY Reservation-Days"
+
+-----------------------*/
+
+  if date_to_restot:res_build_restotal_hf_units = 0 then 0 else
+  (date_to_restot:resdays divide date_to_restot:res_build_restotal_hf_units)/decimalplaces=2/heading="Selected-LOR"/name="h"
+  if date_to_restot_ly:res_build_restotal_ly_hf_units = 0 then 0 else
+  (date_to_restot_ly:resdays divide date_to_restot_ly:res_build_restotal_ly_hf_units)/decimalplaces=2/heading="Previous Year-LOR"/name="i"
+  if (date_to_rundays:totaltpm = 0 or date_to_rundays:revdays = 0) then 0 else
+  (((date_to_restot:resdays divide date_to_restot:res_build_restotal_hf_units) - (date_to_restot_ly:resdays divide date_to_restot_ly:res_build_restotal_ly_hf_units)) divide (date_to_restot_ly:resdays divide date_to_restot_ly:res_build_restotal_ly_hf_units)) *100
+  /mask="ZZZ9.9%"/heading="LOR-Percentage"/name="j"
+  date_to_rundays:totaltpm divide date_to_rundays:revdays/decimalplaces=2/heading="Selected-T & M"/name="k"
+  if (date_to_rundays_ly:totaltpm = 0 or date_to_rundays_ly:revdays = 0) then 0 else
+  date_to_rundays_ly:totaltpm divide date_to_rundays_ly:revdays/decimalplaces=2/heading="Previous Year-T & M"/name="l"
+  (((date_to_rundays:totaltpm divide date_to_rundays:revdays) - (date_to_rundays_ly:totaltpm divide date_to_rundays_ly:revdays)) divide (date_to_rundays_ly:totaltpm divide date_to_rundays_ly:revdays)) * 100
+  /mask="ZZZ9.9%"/heading="T & M-Percentage"/name="m"
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Report dates: " + str(dtSdate) + " to " + str(dtEdate) + "    as of: " + str(dtDate1)/displaywidth=100/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Car Class: " + str(cClass)/newline
+  "Source Codes: " + str(csource)
+  end box/newlines=4
+
+end of report
+  /newline
+  "Totals: "/align=a
+  total[date_to_restot:res_build_restotal_hf_units]/align=b
+  total[date_to_restot_ly:res_build_restotal_ly_hf_units]/align=c
+  ((total[date_to_restot:res_build_restotal_hf_units]- total[date_to_restot_ly:res_build_restotal_ly_hf_units]) divide total[date_to_restot_ly:res_build_restotal_ly_hf_units]) * 100/mask="ZZZ9.9%"/align=d
+  total[date_to_rundays:res_build_rundays_hf_units]/align=e
+  total[date_to_rundays_ly:res_build_rundays_ly_hf_units]/align=f
+  ((total[date_to_rundays:res_build_rundays_hf_units] - total[date_to_rundays_ly:res_build_rundays_ly_hf_units])  divide total[date_to_rundays_ly:res_build_rundays_ly_hf_units] * 100)/mask="ZZZ9.9%"/align=g
+  (total[date_to_restot:resdays] divide total[date_to_restot:res_build_restotal_hf_units])/decimalplaces=2/align=h
+  (total[date_to_restot_ly:resdays] divide total[date_to_restot_ly:res_build_restotal_ly_hf_units])/decimalplaces=2/align=i
+  (((total[date_to_restot:resdays] divide total[date_to_restot:res_build_restotal_hf_units]) - (total[date_to_restot_ly:resdays] divide total[date_to_restot_ly:res_build_restotal_ly_hf_units])) divide (total[date_to_restot_ly:resdays] divide total[date_to_restot_ly:res_build_restotal_ly_hf_units])) *100
+  /mask="ZZZ9.9%"/align=j
+  total[date_to_rundays:totaltpm] divide total[date_to_rundays:revdays]/decimalplaces=2/align=k
+  total[date_to_rundays_ly:totaltpm] divide total[date_to_rundays_ly:revdays]/decimalplaces=2/align=l
+  (((total[date_to_rundays:totaltpm] divide total[date_to_rundays:revdays]) - (total[date_to_rundays_ly:totaltpm] divide total[date_to_rundays_ly:revdays])) divide (total[date_to_rundays_ly:totaltpm] divide total[date_to_rundays_ly:revdays])) * 100
+  /mask="ZZZ9.9%"/align=m
+
+;
+replace resbuild.eq
+run/parameterfile=resbuild_1 resbuild.eq
+rrepl resbuild
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view resbuild
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Reservation Build Report" -- Report Title
+   string rptname1    = "resbuild" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "resbuild_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

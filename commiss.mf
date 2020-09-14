@@ -1,0 +1,964 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Commission Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/8/2016
+Modified:
+
+Notes:
+$Workfile: commiss.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/commiss.mf $
+$Revision: 3 $
+$History: commiss.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 8/13/20    Time: 10:25a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added location grouping option.
+ * Added Prepaid gas separation.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+where rtmift:comm = 1
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"ALL"'
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Commissionable items to include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_code"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cloccomb = parameter/uppercase prompt "Combine Locations?: " valid "Y","N" default "Y"
+  include "param_product.cq"
+  string cemp = parameter prompt "Select employee by: " valid "Renting","Reserving","Added-by" default "Renting"
+  include "param_emps.cq"
+  include "param_code.cq"
+  string cselect = parameter valid "Include","Exclude" prompt "VIP customers?" default "Include"
+  string cselect2 = parameter valid "Include","Exclude","Only" prompt "Walkups:Include,Exclude,Only?" default "Include"
+  string cyield = parameter prompt "Calculate Yield by Actual or Charged days: " valid "Actual","Charged" default "Charged"
+  string cselect3 = parameter/uppercase prompt "Detail?: " valid "Y","N" default "Y"
+;
+replace commiss_i1.inc
+
+/*------------------------------------------------------------------------
+ VIP customer identification
+------------------------------------------------------------------------*/
+  include "commiss_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file renterlink = access renterra,
+   set renterra:commonid=rrm:commonid,
+   one to many, null fill on failure   
+
+define
+  number vip_flag =  if renterlink:systemid <> "" then 1 else 0
+  
+where 
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate)
+    and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus=3
+    
+list/domain="rrm"/hold = "commissVIP_hf"
+if count[rrm:commonid,rrm:commonid] = 0 then {
+  rrm:commonid /keyelement=1.1
+  rrm:ranumber
+  renterlink:systemid
+  renterlink:renter
+  vip_flag
+}
+
+sorted by
+  rrm:commonid
+  renterlink:renter /descending  -- renter will be used to check VIP first, failing that next driver will be used.
+
+;
+replace commiss_1.eq
+run/setparameter commiss_1.eq
+
+run/parameterfile=commiss_1 commiss_1.eq
+
+/*------------------------------------------------------------------------
+ Create location summary logic
+------------------------------------------------------------------------*/
+  include "commiss_i1.inc"
+
+list/domain="dummy"/nodefaults/nobanner/pagelength=0
+if cloccomb = "N" then {
+'  commiss_sum_hf:rptloccode/total'/newline
+'  commiss_sum_hf:employee/total'/newline
+'  commiss_sum_hf:ranumber'/newline
+''/newline
+'end of commiss_sum_hf:rptloccode'/newline
+''/newline
+'  "Totals for: " + commiss_sum_hf:rptloccode'/newline
+'  running total[tot_comm] divide running total[calc_days]/decimalplaces=2/align=col_9'/newline
+'  (running total[tot_comm] + running total[net_tm]) divide running total[calc_days]/decimalplaces=2/align=col_10'/newline
+''/newline
+' "Penetration #"/align=col_7/left'/newline
+' include "penetration_num2.cq"  -- pentration numbers'/newline
+''/newline
+' ""/newline'/newline
+' running count[commiss_sum_hf:ranumber,commiss_sum_hf:rptloccode]/heading="TOTAL RAs"/align=col_5'/newline
+''/newline
+' "Penetration %"/align=col_7/left'/newline
+' include "penetration_per2.cq"  -- pentration percentages'/newline
+}  else {
+'  commiss_sum_hf:employee/total'/newline
+'  commiss_sum_hf:ranumber'/newline
+''/newline
+}
+;
+run/parameterfile=commiss_1 
+rreplace commiss_i2
+
+/*------------------------------------------------------------------------
+ RA selection and revenue day calculation
+------------------------------------------------------------------------*/
+
+  include "commiss_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm:commonid,
+    one to many,generic,
+    null fill on failure
+
+  file renterlink = access commissVIP_hf,
+   set commissVIP_hf:commonid=rrm:commonid,
+   one to one, null fill on failure
+
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number tot_actdays = if (rrm:datein - rrm:dateout) = 0 then 1 else (rrm:datein - rrm:dateout)
+
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+  number calc_days =   if cyield = "Actual" then tot_actdays  else tot_revdays
+  
+where 
+
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate)
+    and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus=3
+  and ((renterlink:vip_flag = 0 and cselect = "Exclude") or (cselect = "Include"))
+  and ((rrm:resnumber = "" and cselect2 = "Only") or (rrm:resnumber <> "" and cselect2 = "Exclude") or (cselect2 = "Include"))
+
+    
+sum/domain="rrm"/hold = "commissDays_hf"
+  mileage/heading="mileage"
+  rentaldb:totaltime/heading="time"
+  rentaldb:rentaldiscountamt/heading="discount"
+  calc_days
+ 
+by
+  rrm:commonid/keyelement=1.1
+  rentaldb:ranumber/name="ra_number"/keyelement=2.1
+  rrm:rptdate/name="rpt_date"
+;
+run/parameterfile=commiss_1 
+
+/*------------------------------------------------------------------------
+ Calculate revenue days for contract adjustments
+------------------------------------------------------------------------*/
+
+  include "commiss_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=rcmift:commonid,
+   one to one, zero fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm_link:commonid,
+    one to many,generic,
+    null fill on failure
+
+  file renterlink = access commissVIP_hf,
+   set commissVIP_hf:commonid=rrm_link:commonid,
+   one to one, null fill on failure
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number tot_actdays = if (rrm:datein - rrm:dateout) = 0 then 1 else (rrm:datein - rrm:dateout)
+
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+  number calc_days = if cyield = "Actual" then tot_actdays  else tot_revdays
+  
+where 
+  (rcmift:rptdate >= dtSdate and rcmift:rptdate <= dtEdate)
+    and (rrm_link:rptloccode = cLoc or cLoc = "ALL")
+  and(cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and ((renterlink:vip_flag = 0 and cselect = "Exclude") or (cselect = "Include"))
+  and ((rrm_link:resnumber = "" and cselect2 = "Only") or (rrm_link:resnumber <> "" and cselect2 = "Exclude") or (cselect2 = "Include"))
+
+    
+list/domain="rcmift"/nodetail/hold = "commissDays2_hf"
+if (itemnumber[rcmift:commonid] = 1) then {
+
+  calc_days
+} 
+
+sorted by 
+  rcmift:commonid
+
+end of rcmift:commonid
+  rcmift:commonid/keyelement=1.1
+  calc_days
+;
+run/parameterfile=commiss_1 
+
+/*------------------------------------------------------------------------
+ Select misc charges for commission calculation
+------------------------------------------------------------------------*/
+
+include "commiss_i1.inc"
+
+  file rrm_link = access rrm,
+   set rrm:commonid=rcmift:commonid,
+   one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_link:rptloccode,
+    null fill on failure
+
+  file res_link = access resdb,
+   set resdb:commonid=rcmift:commonid,
+   one to one, null fill on failure
+
+  file renterlink = access commissVIP_hf,
+   set commissVIP_hf:commonid=rrm_link:commonid,
+   one to one, null fill on failure
+  
+   file days_to_rcm = access commissDays_hf,
+    set commissDays_hf:commonid=rcmift:commonid,
+    one to one, zero fill on failure
+
+   file alt_days = access commissdays2_hf,
+    set commissdays2_hf:commonid=rcmift:commonid,
+    one to one, zero fill on failure
+
+  string com_code = switch(rcmift:comm)
+    case 1  : if rcmift:type = 11 then rcmift:code+"-PP" else rcmift:code
+    default : "XXX"
+
+  number rev_days = if days_to_rcm:calc_days = 0 then alt_days:calc_days else days_to_rcm:calc_days -- if adjustment and 0 rev days use alt days
+  date rpt_date = if days_to_rcm:rpt_date = null then rcmift:rptdate else days_to_rcm:rpt_date
+
+  string res_employee = if res_link:addedbyemployeenumber = null then "null" else res_link:addedbyemployeenumber
+  
+where 
+  (rcmift:rptdate >= dtSdate and rcmift:rptdate <= dtEdate)
+    and (rrm_link:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and ((renterlink:vip_flag = 0 and cselect = "Exclude") or (cselect = "Include"))
+  and ((rrm_link:resnumber = "" and cselect2 = "Only") or (rrm_link:resnumber <> "" and cselect2 = "Exclude") or (cselect2 = "Include"))
+  and ((rcmift:code = cCode or cCode = "ALL" or rcmift:comm = 0))
+  and rcmift:tmpack=0
+    
+list/domain="rcmift"/hold = "commiss_hf"
+if ((res_employee <> "null" and cEmp = "Reserving") or cEmp = "Renting" or cEmp = "Added-by") then {
+  rcmift:commonid /keyelement=1.1
+  rrm_link:ranumber
+  com_code
+  rcmift:comm
+  rcmift:total
+  rcmift:rptloccode
+if cEmp = "Renting" then rentaldb:employeenumberout else 
+  if cEmp = "Reserving" then res_employee else
+  rcmift:employeesoldby/name="employee"
+  rev_days/name="calc_days"
+  days_to_rcm:mileage
+  days_to_rcm:totaltime
+  days_to_rcm:rentaldiscountamt
+  rpt_date
+  renterlink:renter
+  renterlink:vip_flag
+  renterlink:systemid
+}
+;
+run/parameterfile=commiss_1 
+
+
+/*------------------------------------------------------------------------
+ Consolidate commission data
+------------------------------------------------------------------------*/
+include "commiss_i1.inc"
+  
+define
+   number comm_amt = commiss_hf:total * commiss_hf:comm
+
+   file rrm_link = access rrm,
+    set rrm:commonid=commiss_hf:commonid,
+    one to one, zero fill on failure
+
+where rrm_link:commonid <> 0 -- must be contract or reservations - no misc sales
+
+sum/domain="commiss_hf"/hold="commiss_sum_hf"
+  commiss_hf:total
+  commiss_hf:comm
+  comm_amt
+across
+  commiss_hf:com_code
+by
+ commiss_hf:ranumber
+ commiss_hf:employee
+ commiss_hf:rptloccode
+
+end of commiss_hf:ranumber
+  commiss_hf:mileage
+  commiss_hf:totaltime
+  commiss_hf:rentaldiscountamt
+  commiss_hf:renter
+  commiss_hf:rpt_date
+  commiss_hf:systemid
+  commiss_hf:calc_days
+  commiss_hf:vip_flag
+  running total[comm_amt]/name="tot_comm"
+  running total[commiss_hf:total]/name="tot_chrgs"
+;
+run/parameterfile=commiss_1 
+
+/*------------------------------------------------------------------------
+ Create detail lines
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+ 'commiss_sum_hf:'+'total_'+cd_final+'/name='+'"col_'+cd_final+'"'
+;
+
+run/parameterfile=commiss_1
+rreplace detail_lines
+
+/*------------------------------------------------------------------------
+ Create penetration count lines -employee level
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',commiss_sum_hf:employee]/align=col_'+cd_final
+;
+run/parameterfile=commiss_1 
+rreplace penetration_num
+
+/*------------------------------------------------------------------------
+ Create penetration percentage lines -employee level
+------------------------------------------------------------------------*/
+
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',commiss_sum_hf:employee]  divide count[commiss_sum_hf:ranumber,commiss_sum_hf:employee] * 100/mask="ZZ9.9%"/align=col_'+cd_final
+;
+run/parameterfile=commiss_1 
+rreplace penetration_per
+
+/*------------------------------------------------------------------------
+ Create penetration count lines -locattion level
+------------------------------------------------------------------------*/
+
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',commiss_sum_hf:rptloccode]/align=col_'+cd_final
+;
+run/parameterfile=commiss_1 
+rreplace penetration_num2
+
+/*------------------------------------------------------------------------
+ Create penetration percentage lines -location level
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',commiss_sum_hf:rptloccode]  divide count[commiss_sum_hf:ranumber,commiss_sum_hf:rptloccode] * 100/mask="ZZ9.9%"/align=col_'+cd_final
+;
+
+run/parameterfile=commiss_1 
+rreplace penetration_per2
+
+/*------------------------------------------------------------------------
+ Create penetration count lines -report level
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',report]/align=col_'+cd_final
+;
+
+run/parameterfile=commiss_1 
+rreplace penetration_num3
+
+/*------------------------------------------------------------------------
+ Create penetration percentage lines -report level
+------------------------------------------------------------------------*/
+
+
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+    'running total[commiss_sum_hf:comm_'+cd_final+',report]  divide count[commiss_sum_hf:ranumber,report] * 100/mask="ZZ9.9%"/align=col_'+cd_final
+;
+
+run/parameterfile=commiss_1 
+rreplace penetration_per3
+
+
+
+/*------------------------------------------------------------------------
+ Create column headers
+------------------------------------------------------------------------*/
+
+include "commiss_i1.inc"
+define
+  string charge_type = switch(commiss_hf:com_code)
+    case "XXX" :  "*Non-Comm*"
+    default : commiss_hf:com_code
+  
+  string cd1 = replace(str(commiss_hf:com_code)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_") 
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="commiss_hf"
+  charge_type
+
+sorted by
+  charge_type
+
+end of charge_type 
+      '"'+charge_type+'"'+'/align=col_'+cd_final
+top of report
+   "top of page"
+   
+   '"company_logo.jpg"/image/width=20/left/newline'
+   'box/center/column=1'/newline
+   '"Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline' --+"   Product: " + str(cProduct)/newline
+   'if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline'
+   '"Run by " + str(cemp) + " Employee   "+str(cselect) + " VIP Rentals   "+str(cselect2) + " Walkups"'
+   'end box/newlines=4'
+   '"RA Number"/align=col_1'
+   '"Employee#"/align=col_2'
+   '"Location"/align=col_3'
+   '"Date"/align=col_4'
+   if cyield = "Actual" then '"Act Days"/align=col_5' else '"Chg Days"/align=col_5'
+   '"VIP"/align=col_6'
+   '"Net T&M"/align=col_7'
+   '"Total Comm"/align=col_8'
+   '"Non-TM Yield"/align=col_9'
+   '"Total Yield"/align=col_10'
+;
+
+run/parameterfile=commiss_1
+rreplace headers
+
+/*-----------------------------------------------------------------------
+ Detail level
+------------------------------------------------------------------------*/
+include "commiss_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+  if cselect3 = "Y" then "" else "/nodetail"
+;
+run/parameterfile=commiss_1 
+rreplace commiss_i3
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+  include "commiss_i1.inc"
+
+define
+   number net_tm = commiss_sum_hf:mileage + commiss_sum_hf:totaltime - commiss_sum_hf:rentaldiscountamt
+
+   string vip = if vip_flag = 0 then "" else "Y"
+
+  file emp_link = access employee,
+   set employee:employeenumber=commiss_sum_hf:employee,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+where (emp_name = cemps or cemps = "ALL") 
+
+list/domain="commiss_sum_hf"/title="Commission Report"/noheadings/nobanner/pageof
+
+include "commiss_i3.cq"
+  commiss_sum_hf:ranumber/name="col_1" /width=10 
+  commiss_sum_hf:employee/name="col_2"/width=8  
+  commiss_sum_hf:rptloccode /name="col_3"/width=8
+  commiss_sum_hf:rpt_date/name="col_4" /width=10 
+  commiss_sum_hf:calc_days /total/name="col_5"/width=5/center
+  vip /name="col_6" /width=5
+  net_tm/name="col_7" 
+
+  include "detail_lines.cq"  
+
+  tot_comm/total/name="col_8" 
+  tot_comm divide calc_days /decimalplaces=2/nototal/name="col_9" 
+  (tot_comm + net_tm) divide calc_days/decimalplaces=2/nototal/name="col_10" 
+
+sorted by
+ 
+  include "commiss_i2.cq"
+
+end of commiss_sum_hf:employee
+
+  "Totals for: " + str(commiss_sum_hf:employee)+ " - " +emp_name  
+  running total[tot_comm] divide running total[calc_days]/decimalplaces=2/align=col_9
+  (running total[tot_comm] + running total[net_tm]) divide running total[calc_days]/decimalplaces=2/align=col_10
+
+ "Penetration #"/align=col_7/left
+ include "penetration_num.cq"  -- pentration numbers
+
+ ""/newline
+ running count[commiss_sum_hf:ranumber,commiss_sum_hf:employee]/heading="TOTAL RAs"/align=col_5
+
+ "Penetration %"/align=col_7/left
+ include "penetration_per.cq"  -- pentration percentages 
+
+
+
+
+
+end of report
+
+  "Grand Totals:"
+  running total[tot_comm] divide running total[calc_days]/decimalplaces=2/align=col_9
+  (running total[tot_comm] + running total[net_tm]) divide running total[calc_days]/decimalplaces=2/align=col_10
+
+ "Penetration #"/align=col_7/left
+ include "penetration_num3.cq"  -- pentration numbers
+
+ ""/newline
+ running count[commiss_sum_hf:ranumber,report]/heading="TOTAL RAs"/align=col_5
+
+ "Penetration %"/align=col_7/left
+ include "penetration_per3.cq"  -- pentration percentages 
+
+
+
+ include "headers.cq"  -- column headers
+ ""/newline=2
+
+;
+replace commiss.eq
+run/parameterfile=commiss_1 commiss.eq
+rrepl commiss
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view commiss
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Commission Report" -- Report Title
+   string rptname1    = "commiss" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "commiss_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

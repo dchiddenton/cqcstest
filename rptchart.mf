@@ -1,0 +1,134 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Reporting Setup List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: rptchart.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rptchart.mf $
+$Revision: 2 $
+$History: rptchart.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+define
+
+  file district_link = access district,
+    set district:reportingregion=region:reportingregion,
+    one to many,null fill on failure
+
+  file city_link = access city,
+    set city:reportingdistrict=district_link:reportingdistrict,
+    one to many, null fill on failure
+
+  file location_link = access location,
+    set location:reportingcity=city_link:reportingcity,
+    one to many, null fill on failure
+
+  file nolink = access location,
+   set location:reportingcity = "",
+   one to many
+ 
+  string arrow_str = "|------------>"
+
+
+list/domain="region"/noheadings/nobanner/pageof/title="Reporting Setup List"/noreporttotals
+
+
+if itemnumber = 1 then {
+"*** No City Link ***"/duplicates/column=30
+nolink:locationcode/column=90
+}
+
+followed by
+""/newline
+  region:reportingregion/newline
+  if district_link:reportingdistrict <> "" then arrow_str/column=3
+  district_link:reportingdistrict/column=30/newline
+  if city_link:reportingcity <> "" then arrow_str/column=33
+  city_link:reportingcity/column=60/newline
+  if location_link:locationcode <> "" then arrow_str/column=63/duplicates
+  location_link:locationcode/column=90
+
+
+sorted by
+  region:reportingregion
+  district_link:reportingdistrict
+  city_link:reportingcity
+  location_link:locationcode
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline=5
+
+  "Regions"/align=region:reportingregion
+  "Districts"/align=district_link:reportingdistrict
+  "Cities"/align=city_link:reportingcity
+  "Locations"/align=location_link:locationcode/newline
+
+;
+replace rptchart.eq
+run/parameterfile rptchart.eq
+rrepl rptchart
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rptchart
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Reporting Setup List" -- Report Title
+   string rptname1    = "rptchart" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

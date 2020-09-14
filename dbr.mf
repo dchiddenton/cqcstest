@@ -1,0 +1,1936 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Daily Business Report
+  Author: David Chiddenton
+  $Revision: 5 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/5/2016
+Modified:
+
+Notes:
+$Workfile: dbr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/dbr.mf $
+$Revision: 5 $
+$History: dbr.mf $
+ * 
+ * *****************  Version 5  *****************
+ * User: Dchidden     Date: 7/02/20    Time: 11:19a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed reconciliation output.
+ * 
+ * *****************  Version 4  *****************
+ * User: Dchidden     Date: 6/04/20    Time: 11:50a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel multipage output option
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 4/02/20    Time: 10:18a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed imcompatible code for V8.22-1A
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameter file
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1 
+  time dtstime = parameter prompt "Start Time: " default 0:00 
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  time dtetime = parameter prompt "End Time: " default 23:59
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cconsolidate = parameter prompt "Consolidate Locations?" valid "Y","N" default "N"
+  include "param_product.cq"
+  string cdetail = parameter prompt "Charge Detail by: " valid "Code","Type","Consolidated" default "Code"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string cgrandtot = parameter prompt "Grand Totals Only?" valid "Y","N" default "N"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+
+;
+replace DBR_i1.inc
+
+include "dbr_i1.inc"
+define  
+
+  string time_st = str(dtSTime,"HH.MM")
+  string time_en = str(dtETime,"HH.MM")
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+end of report
+
+dtSdate /newline
+dtSTime/newline
+dtEdate /newline
+dtETime /newline
+str(cLoc) /newline
+cLocGroup/newline
+str(cProduct) /newline
+cDetail/newline
+csummary/newline
+timestamp(dtSdate,time(time_st))/newline
+timestamp(dtEdate,time(time_en))/newline
+;
+replace dbr_0.eq
+run/setparameter dbr_0.eq
+
+
+
+/*------------------------------------------------------------------------
+ Retrieve all RRM records and create Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+ 
+ where 
+  ( rrm:rptdate >= 
+    dtSdate
+  and rrm:rptdate <= 
+    dtEdate )
+  and (rrm:Product = cProduct or cProduct = "ALL")
+  and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/hold="rrm_hf"
+ if rrm:rastatus=3 or rrm:resstatus=60 then {  -- closed contracts or no-show reservations
+  rrm:commonid/keyelement=1.1
+  rrm:resnumber 
+  rrm:resstatus 
+  rrm:ranumber 
+  rrm:rastatus 
+  rrm:locationcodeout 
+  rrm:dateout 
+  rrm:timeout 
+  rrm:datein 
+  rrm:timein 
+  rrm:locationcodein 
+  rrm:product 
+  rrm:invclass 
+  rrm:reservedclass 
+  rrm:rentedasclass 
+  rrm:invtrxid 
+  rrm:datedue 
+  rrm:timedue 
+  rrm:locationcodedue 
+  rrm:renterid 
+  rrm:rptdate 
+  rrm:rpttime 
+  rrm:rptloccode 
+  rrm:invid 
+  rrm:rollover
+  rrm:noshowamount
+}
+
+;
+run/parameterfile=dbr_0
+
+/*------------------------------------------------------------------------
+ Retrieve all RCMift records and create Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rcmift:rptloccode,
+    null fill on failure
+
+  
+ where 
+  ( rcmift:rptdate >= 
+    dtSdate
+  and rcmift:rptdate <= 
+    dtEdate )
+  and (rcmift:Product = cProduct or cProduct = "ALL")
+  and (rcmift:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="rcmift"/hold="rcmift_hf"
+if rcmift:rev=1 then {
+  rcmift:type 
+  rcmift:code 
+  rcmift:locationcode 
+  rcmift:product 
+  rcmift:invclass 
+  rcmift:total 
+  rcmift:commonid /keyelement=1.1
+  rcmift:tmpack 
+  rcmift:rptdate 
+  rcmift:rpttime 
+  rcmift:rptloccode 
+  rcmift:accountid /keyelement=2.1
+  rcmift:rcmiftid /keyelement=3.1
+  rcmift:rev
+}
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve rollover income from the report period 
+------------------------------------------------------------------------*/
+
+include "DBR_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = bookedrev:rptloccode,
+    null fill on failure
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=bookedrev:commonid,
+   with rcmift:accountid=bookedrev:revid,
+   one to one,generic
+
+where 
+
+  (bookedrev:rptdate >=dtSdate and bookedrev:rptdate <= dtEdate) and     -- current rollover revenue
+  (rrm:Product = cProduct or cProduct = "ALL" ) and
+  (bookedrev:rptloccode = cLoc or cLoc = "ALL") and
+  (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="bookedrev"/noheadings/hold="booked_hf"
+  bookedrev:commonid/keyelement=1.1 
+  bookedrev:startdate 
+  bookedrev:enddate 
+  bookedrev:starttime 
+  bookedrev:endtime 
+  bookedrev:totalrevenue/width=14/decimalplaces=2/name="totalrevenue" 
+  bookedrev:paymentid/keyelement=2.1
+  bookedrev:revid 
+  rcmift_link:code
+  rcmift_link:type
+  bookedrev:rptdate 
+  bookedrev:rpttime /width=7/decimalplaces=2
+  bookedrev:rptloccode 
+  bookedrev:datedbrposted 
+  bookedrev:rcmiftid
+  70/name="rpt_section"  -- current booked income
+
+;
+run/parameterfile=dbr_0 
+
+
+/*------------------------------------------------------------------------
+ Retrieve all rollover previously reported income
+ on closed contracts in period and reverse
+------------------------------------------------------------------------*/
+
+define
+
+  file booked_link = access bookedrev,
+   set bookedrev:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+  file rcmift_link = access rcmift_hf,
+   set rcmift_hf:accountid=booked_link:revid,
+   one to one
+
+where booked_link:commonid <> 0
+
+list/domain="rrm_hf"/noheadings/hold="booked_hf"/append
+
+  booked_link:commonid/keyelement=1.1 
+  booked_link:startdate 
+  booked_link:enddate 
+  booked_link:starttime 
+  booked_link:endtime 
+  booked_link:totalrevenue*-1/width=14/decimalplaces=2/name="totalrevenue" 
+  booked_link:paymentid/keyelement=2.1
+  booked_link:revid 
+  rcmift_link:code
+  rcmift_link:type
+  rrm_hf:rptdate -- to report previously booked income on close report date/time
+  rrm_hf:rpttime /width=7/decimalplaces=2
+  booked_link:rptloccode 
+  booked_link:datedbrposted 
+  booked_link:rcmiftid
+  80/name="rpt_section"  -- previously booked income
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve all Payment records and create Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "DBR_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = payments:rptloccode,
+    null fill on failure
+
+  file rrm_link = access rrm,
+   set rrm:commonid=payments:commonid,
+   one to one, null fill on failure
+
+  
+ where 
+  ( payments:rptdate >= 
+    dtSdate
+  and payments:rptdate <= 
+    dtEdate )
+  and (payments:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="payments"/hold="payments_hf"
+  payments:commonid /keyelement=1.1
+  payments:resnumber 
+  payments:ranumber 
+  payments:paymentid 
+  payments:locationcode 
+  payments:paymentamount 
+  payments:paymenttype 
+  payments:deposit 
+  payments:paiddeposit 
+  payments:rptdate 
+  payments:rpttime 
+  payments:rptloccode
+  rrm_link:rollover
+  0/width=4/name="rpt_section"
+
+;
+run/parameterfile=dbr_0 
+
+
+/*------------------------------------------------------------------------
+ Retrieve all time discount and mileage charges
+ for contracts and create Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "DBR_i1.inc"
+
+
+define
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm_hf:commonid,
+   one to one, null fill on failure   
+
+  number timeamt = rental_link:totaltime /width=11/decimalplaces=2
+  number mileamt = rental_link:totaltpm - rental_link:totaltime/width=11/decimalplaces=2
+  number discamt = (rental_link:rentaldiscountamt * -1)/width=11/decimalplaces=2
+  number noshow = if rrm_hf:resstatus = 60 then rrm_hf:noshowamount else 0/width=11/decimalplaces=2
+  number rpt_section[4] = if (rrm_hf:rastatus=0 and rrm_hf:resstatus=60) then 15 else 10
+
+
+  
+where
+  rrm_hf:rastatus not one of 1,4
+
+
+list/domain="rrm_hf"/noheadings/hold="dbr_hf"
+  rrm_hf:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate
+  rrm_hf:rpttime
+  rrm_hf:dateout
+  rrm_hf:datein
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:rptloccode
+  71 /width=4/name="Chgtype" --time
+  "Time"/width=18/name="Code"
+  timeamt/name="Amount"
+  1/name="cl_flag"
+  rrm:commonid/width=13/name="uniqueid"
+
+followed by
+  rrm_hf:commonid
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate
+  rrm_hf:rpttime
+  rrm_hf:dateout
+  rrm_hf:datein
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:rptloccode
+  72/width=4  --mileage
+  "Mileage"/width=18
+  mileamt
+  0
+  rrm:commonid
+
+followed by 
+  rrm_hf:commonid
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate
+  rrm_hf:rpttime
+  rrm_hf:dateout
+  rrm_hf:datein
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:rptloccode
+  73/width=4 --discount
+  "Discount"/width=18
+  discamt
+  0
+  rrm:commonid
+
+followed by 
+  rrm_hf:commonid
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate
+  rrm_hf:rpttime
+  rrm_hf:dateout
+  rrm_hf:datein
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:rptloccode
+  74/width=4 --no-show
+  "No-Show"/width=18
+  noshow --no-show charges
+  0
+  rrm:commonid
+
+sorted by
+  rrm_hf:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve opened contracts and append Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  number rpt_section[4] = 40
+
+
+ where 
+  ( rrm:dateout >= 
+    dtSdate
+  and rrm:dateout <= 
+    dtEdate )
+  and (rrm:Product = cProduct or cProduct = "ALL")
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus one of 1,2,3,4
+
+list/domain="rrm"/noheadings/hold="dbr_hf"/append
+  rrm:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm:ranumber
+  rrm:resnumber
+  rrm:renterid
+  rrm:invid
+  rrm:dateout/name="rptdate"
+  rrm:timeout/name="rpttime"
+  rrm:dateout
+  rrm:datedue/name="datein"
+  rrm:timeout
+  rrm:timein
+  rrm:locationcodeout
+  rrm:locationcodedue
+  rrm:locationcodein
+  rrm:locationcodeout/width=20/name="rptloccode"
+  71 /width=4/name="Chgtype" --time
+  "Time"/width=18/name="Code"
+  0/width=11/decimalplaces=2/name="Amount"
+  0/name="cl_flag"
+  rrm:commonid/width=13/name="uniqueid"
+
+
+sorted by
+  rrm:ranumber
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve void contracts and append Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+define
+
+  number rpt_section[4] = 50 
+
+where
+ rrm_hf:rastatus = 4
+
+list/domain="rrm_hf"/noheadings/hold="dbr_hf"/append
+  rrm_hf:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate/name="rptdate"
+  rrm_hf:rpttime/name="rpttime"
+  rrm_hf:dateout
+  rrm_hf:datedue/name="datein"
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:locationcodeout/width=20/name="rptloccode"
+  71 /width=4/name="Chgtype" --time
+  "Time"/width=18/name="Code"
+  0/width=11/decimalplaces=2/name="Amount"
+  0/name="cl_flag"
+  rrm:commonid/width=13/name="uniqueid"
+
+
+sorted by
+  rrm_hf:ranumber
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve all time for rollover contracts and append to Hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+define
+  
+  number rpt_section[4] = booked_hf:rpt_section
+
+
+  file rrm_link = access rrm,
+   set rrm:commonid=booked_hf:commonid,
+   one to one, null fill on failure
+
+  number chgtype = switch(booked_hf:revid)
+    case 1 : 71
+    case 2 : 72
+    case 3 : 73
+    default : booked_hf:type
+
+  string code = switch(booked_hf:revid)
+    case 1 : "Time"
+    case 2 : "Mileage"
+    case 3 : "Discount"
+    case 4 : "No-Show"
+    default : booked_hf:code+str(booked_hf:type,"999")
+
+  
+
+list/domain="booked_hf"/noheadings/hold="dbr_hf"/append
+  booked_hf:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_link:ranumber
+  rrm_link:resnumber
+  rrm_link:renterid
+  rrm_link:invid
+  booked_hf:rptdate
+  booked_hf:rpttime
+  booked_hf:startdate/name="dateout"
+  booked_hf:enddate/name="datein"
+  booked_hf:starttime/name="timeout"
+  booked_hf:endtime/name="timein"
+  rrm_link:locationcodeout
+  rrm_link:locationcodedue
+  rrm_link:locationcodein
+  booked_hf:rptloccode
+  chgtype/width=4
+  code/width=18
+  booked_hf:totalrevenue/width=11/decimalplaces=2/name="Amount"
+  0/name="cl_flag"  -- count as closed contract?
+  booked_hf:rcmiftid/width=13/name="uniqueid"
+
+
+sorted by
+  rrm_link:ranumber
+  booked_hf:revid
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve all misc charges and fees for contracts and
+ append to time and miles hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+define
+  
+  file rrm_rcm = access rrm,
+    set rrm:commonid = rcmift_hf:commonid,
+    one to one,
+    null fill on failure
+
+  file misc_rcm = access miscsales,
+    set miscsales:commonid = rcmift_hf:commonid,
+    one to one,
+    zero fill on failure
+
+
+  number chgtype = rcmift_hf:type/width=4
+  number amount = rcmift_hf:total/width=11/decimalplaces=2
+
+  number rpt_section[4] = if rcmift_hf:rptdate = rrm_rcm:rptdate then 10 else 30  -- closed contract or adjustment?
+  
+
+where
+
+  rrm_rcm:rastatus not one of 0,1,4  
+   and misc_rcm:ticketnumber=""
+
+list/domain="rcmift_hf"/noheadings/hold="dbr_hf"/append
+  rrm_rcm:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_rcm:ranumber
+  rrm_rcm:resnumber
+  rrm_rcm:renterid
+  rrm_rcm:invid
+  rcmift_hf:rptdate
+  rcmift_hf:rpttime
+  rrm_rcm:dateout 
+  rrm_rcm:datein
+  rrm_rcm:timeout
+  rrm_rcm:timein
+  rrm_rcm:locationcodeout
+  rrm_rcm:locationcodedue
+  rrm_rcm:locationcodein
+  rcmift_hf:rptloccode
+  chgtype/name="Chgtype"
+  rcmift_hf:code+str(chgtype,"999")/width=18/name="Code"
+  amount/name="Amount"
+  0/name="cl_flag"
+  rcmift_hf:rcmiftid/width=13/name="uniqueid"
+
+sorted by
+  rrm_rcm:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Retrieve all misc charges and fees for Misc Sales and
+ append to hold file
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+include "DBR_i1.inc"
+
+define
+
+ 
+  file misc_rcm = access miscsales,
+    set miscsales:commonid = rcmift_hf:commonid,
+    one to one,
+    zero fill on failure
+
+
+  number chgtype = rcmift_hf:type/width=4
+  number amount = rcmift_hf:total/width=11/decimalplaces=2
+
+  number rpt_section[4] = 20
+
+  
+where
+
+    misc_rcm:ticketnumber<>""
+  
+
+list/domain="rcmift_hf"/noheadings/hold="dbr_hf"/append
+  misc_rcm:commonid/width=13/keyelement=1.1
+  rpt_section
+  misc_rcm:ticketnumber/name="ranumber"/width=20
+  misc_rcm:ticketnumber/name="resnumber"/width=30
+  0/width=11/name="renterid"
+  0/width=11/name="invid"
+  rcmift_hf:rptdate
+  rcmift_hf:rpttime
+  misc_rcm:dateout 
+  misc_rcm:datein
+  misc_rcm:timeout
+  misc_rcm:timein
+  misc_rcm:locationcode/name="locationcodeout"
+  misc_rcm:locationcode/name="locationcodedue"
+  misc_rcm:locationcode/name="locationcodein"
+  rcmift_hf:rptloccode
+  chgtype/name="Chgtype"
+  rcmift_hf:code+str(chgtype,"999")/width=18/name="Code"
+  amount/name="Amount"
+  0/name="cl_flag"
+  rcmift_hf:rcmiftid/width=13/name="uniqueid"
+
+sorted by
+  misc_rcm:ticketnumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Deposits applied retrieval
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+define file rrm_pmt = access payments,
+   set payments:commonid=rrm_hf:commonid,
+   one to many,
+   zero fill on failure
+  number rpt_section[4] = 10
+
+where
+
+   rrm_hf:rastatus not one of 1,4
+ 
+
+list/domain="rrm_hf"/noheadings/hold="dbr_hf"/append
+
+if (rrm_pmt:deposit=1 and rrm_pmt:paiddeposit=1) then
+{
+  rrm_hf:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_hf:ranumber
+  rrm_hf:resnumber
+  rrm_hf:renterid
+  rrm_hf:invid
+  rrm_hf:rptdate
+  rrm_hf:rpttime
+  rrm_hf:dateout
+  rrm_hf:datein
+  rrm_hf:timeout
+  rrm_hf:timein
+  rrm_hf:locationcodeout
+  rrm_hf:locationcodedue
+  rrm_hf:locationcodein
+  rrm_hf:rptloccode
+  175/width=4/name="Chgtype"
+  rrm_pmt:paymenttype/width=18/name="Code"
+  rrm_pmt:paymentamount/name="Amount"/width=11/decimalplaces=2
+  0/name="cl_flag"
+  rrm_pmt:paymentid/width=13/name="uniqueid"
+
+}
+  
+sorted by
+  rrm_hf:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Received Deposits
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = payments_hf:rptloccode,
+    null fill on failure
+
+define file rrm_link = access rrm,
+   set rrm:commonid=payments_hf:commonid,
+   one to one,
+   zero fill on failure
+
+  number rpt_section[4] = 60
+
+ where 
+  ( payments_hf:rptdate >= 
+    dtSdate
+  and payments_hf:rptdate <= 
+    dtEdate ) 
+  and (payments_hf:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+ 
+ -- and rrm_link:rastatus <> 4
+
+list/domain="payments_hf"/noheadings/hold="dbr_hf"/append
+
+if (payments_hf:deposit=1 and payments_hf:paiddeposit = 1) then  
+{
+  rrm_link:commonid/width=13/keyelement=1.1
+  rpt_section
+  rrm_link:ranumber
+  rrm_link:resnumber
+  rrm_link:renterid
+  rrm_link:invid
+  payments_hf:rptdate
+  payments_hf:rpttime
+  rrm_link:dateout
+  rrm_link:datein
+  rrm_link:timeout
+  rrm_link:timein
+  rrm_link:locationcodeout
+  rrm_link:locationcodedue
+  rrm_link:locationcodein
+  payments_hf:rptloccode
+  150/width=4/name="Chgtype"
+  payments_hf:paymenttype/width=18/name="Code"
+  payments_hf:paymentamount/name="Amount"/width=11/decimalplaces=2
+  0/name="cl_flag"
+  payments_hf:paymentid/width=13/name="uniqueid"
+
+}
+followed by
+if (payments_hf:deposit=1 and payments_hf:paiddeposit=1) then
+{
+  rrm_link:commonid/width=13
+  rpt_section
+  rrm_link:ranumber
+  rrm_link:resnumber
+  rrm_link:renterid
+  rrm_link:invid
+  payments_hf:rptdate
+  payments_hf:rpttime
+  rrm_link:dateout
+  rrm_link:datein
+  rrm_link:timeout
+  rrm_link:timein
+  rrm_link:locationcodeout
+  rrm_link:locationcodedue
+  rrm_link:locationcodein
+  payments_hf:rptloccode
+  200/width=4
+  payments_hf:paymenttype+"200"/width=18
+  payments_hf:paymentamount/width=11/decimalplaces=2
+  0
+  payments_hf:paymentid/width=13
+}
+  
+sorted by
+  rrm_link:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Payments retrieval
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+define 
+
+  file rrm_link = access rrm,
+   set rrm:commonid=payments_hf:commonid,
+    one to one, null fill on failure
+
+  file misc_rcm = access miscsales,
+    set miscsales:commonid = payments_hf:commonid,
+    one to one,
+    null fill on failure
+
+  file booked_link = access booked_hf,
+   set booked_hf:paymentid=payments_hf:paymentid,
+   one to one, zero fill on failure
+
+  string ra_number[20] = if misc_rcm:ticketnumber <> "" then misc_rcm:ticketnumber else rrm_link:ranumber
+
+  number rpt_section[4] = if misc_rcm:ticketnumber <> "" then 20 else
+                          if (booked_link:commonid<>0) then 70 else
+                          if payments_hf:rptdate <> rrm_link:rptdate then 30 else 10
+
+  date dateout = if booked_link:commonid <> 0 then booked_link:startdate else rrm_link:dateout
+  date datein = if booked_link:commonid <> 0 then booked_link:enddate else  rrm_link:datein
+  number timeout = if booked_link:commonid <> 0 then booked_link:starttime else  rrm_link:timeout
+  number timein = if booked_link:commonid <> 0 then booked_link:endtime else rrm_link:timein
+
+
+where
+
+ ((rrm_link:rastatus <> 4 and rpt_section=10) or (rpt_section <> 10))
+ 
+
+list/domain="payments_hf"/noheadings/hold="dbr_hf"/append
+
+if (payments_hf:deposit=0) then  --not a deposit
+{
+  payments_hf:commonid/width=13/keyelement=1.1
+  rpt_section
+  ra_number/name="ranumber"
+  rrm_link:resnumber
+  rrm_link:renterid
+  rrm_link:invid
+  payments_hf:rptdate
+  payments_hf:rpttime
+  dateout
+  datein
+  timeout/width=7/decimalplaces=2
+  timein/width=7/decimalplaces=2
+  rrm_link:locationcodeout
+  rrm_link:locationcodedue
+  rrm_link:locationcodein
+  payments_hf:rptloccode
+  200/width=4/name="Chgtype"
+  payments_hf:paymenttype+"200"/width=18/name="Code"
+  payments_hf:paymentamount/name="Amount"/width=11/decimalplaces=2
+  0/name="cl_flag"
+  payments_hf:paymentid/width=13/name="uniqueid"
+}
+  
+sorted by
+  payments_hf:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Revenue day calculation
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = dbr_hf:commonid,
+    one to many,
+    generic,
+    zero fill on failure
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <>
+    0) then (revdays_link:minsperx div 1440) * revdays_link:totunits else 0
+
+where dbr_hf:cl_flag = 1
+
+sum/domain="dbr_hf"/hold = "Rev_days_hf"
+  tot_revdays/heading="rev_days"
+
+by
+  dbr_hf:commonid/keyelement=1.1
+  dbr_hf:ranumber
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Create detail fields
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+define
+
+  number sort_order_num = switch(dbr_hf:chgtype)
+    case 71 : 1 -- Time  
+    case 72 : 2 --Mileage
+    case 73 : 3 --Discount
+    case 74 : 4 --NoShow
+    case 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 : 4--Misc Charge  
+    case 50 : 5 --Misc Fee
+    case 51,52,53 : 6 --Sales Tax
+    case 150 : 7 --Deposits Rec
+    case 175 : 8 --Deposits App
+    case 200 : 9 --Payments;
+
+  number charge_order_num = if dbr_hf:chgtype <=150 then 1 else 2
+
+  string section_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 : "Misc Charges"  
+    case 50 : "Misc Fees"
+    case 51,52,53 : "Taxes"
+    case 150 : "Deposits Received"
+    case 175 : "Deposits App"
+    case 200 : "Payments"
+
+  string charge_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1 : "Misc Charge"  
+    case 2 : "CDW"
+    case 3 : "PAI"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 6 : "AD"
+    case 7 : "UD"
+    case 8 : "Upgrade"
+    case 9 : "Drop"
+    case 10 : "Gas"
+    case 11 : "PPG"
+    case 12 : "Prev Gas"
+    case 13 : "FF Fee"
+    case 14 : "Equipment"
+    case 15 : "Delivery Fee"
+    case 50 : "Misc Fee"
+    case 51 : "Sales Tax"
+    case 52 : "Fed Tax"
+    case 53 : "Other Tax"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : uppercase(dbr_hf:code)
+
+
+
+  string Code_Type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : uppercase(dbr_hf:code)
+    default  : uppercase(dbr_hf:code)
+
+  
+  string sort_order = switch(cDetail)
+    case "Type"    : str(sort_order_num) + charge_type
+    case "Code"    : str(sort_order_num) + code_type
+    case "Consolidated" : str(sort_order_num) + section_type
+    
+
+  string charge_detail = switch(cDetail)
+    case "Type"    : charge_type
+    case "Code"    : code_type
+    case "Consolidated" : section_type
+
+  string cd1 = replace(str(charge_detail)," ","_")  -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_") 
+  string cd3 = replace(str(cd2),"$","_")
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_")
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  string cd29 = replace(str(cd28),".","_")
+
+  string cd_final = replace(str(cd29),"*","_")
+
+   
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="dbr_hf"
+  charge_detail
+
+sorted by
+  charge_order_num
+  sort_order
+
+end of charge_order_num
+ if charge_order_num = 1 then {
+  'dbr_sum_hf:tot_chrgs_ra /total /name="tot_chrgs_ra"'
+}
+
+end of sort_order 
+ 
+  'dbr_sum_hf:'+'amount_'+cd_final+'/name='+'"amount_'+cd_final+'"'
+
+
+end of report
+  'dbr_sum_hf:tot_pmts_ra /total /name="tot_pmts_ra"'
+
+;
+run/parameterfile=dbr_0 
+rrepl dbr_detail.cq
+
+/*------------------------------------------------------------------------
+ Create detail headers
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+define
+
+  number sort_order_num = switch(dbr_hf:chgtype)
+    case 71 : 1 -- Time  
+    case 72 : 2 --Mileage
+    case 73 : 3 --Discount
+    case 74 : 4 --NoShow
+    case 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 : 4--Misc Charge  
+    case 50 : 5 --Misc Fee
+    case 51,52,53 : 6 --Sales Tax
+    case 150 : 7 --Deposits Rec
+    case 175 : 8 --Deposits App
+    case 200 : 9 --Payments
+
+  number charge_order_num = if dbr_hf:chgtype <=150 then 1 else 2
+
+  string section_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 : "Misc Charges"  
+    case 50 : "Misc Fees"
+    case 51,52,53 : "Taxes"
+    case 150 : "Deposits Received"
+    case 175 : "Deposits App"
+    case 200 : "Payments"
+
+  string charge_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1 : "Misc Charge"  
+    case 2 : "CDW"
+    case 3 : "PAI"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 6 : "AD"
+    case 7 : "UD"
+    case 8 : "Upgrade"
+    case 9 : "Drop"
+    case 10 : "Gas"
+    case 11 : "PPG"
+    case 12 : "Prev Gas"
+    case 13 : "FF Fee"
+    case 14 : "Equipment"
+    case 15 : "Delivery Fee"
+    case 50 : "Misc Fee"
+    case 51 : "Sales Tax"
+    case 52 : "Fed Tax"
+    case 53 : "Other Tax"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : dbr_hf:code
+
+
+  string Code_Type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : dbr_hf:code
+    default  : dbr_hf:code
+
+  
+  string sort_order = switch(cDetail)
+    case "Type"    : str(sort_order_num) + charge_type
+    case "Code"    : str(sort_order_num) + code_type
+    case "Consolidated" : str(sort_order_num) + section_type
+    
+
+  string charge_detail = switch(cDetail)
+    case "Type"    : charge_type
+    case "Code"    : code_type
+    case "Consolidated" : section_type
+
+  string code_type_name = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 150 : "Deposits Received"
+    case 175 : "Deposits App"
+    default : str(code_type,len(code_type)-3)
+
+
+  string charge_type_name = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1 : "Misc Charge"  
+    case 2 : "CDW"
+    case 3 : "PAI"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 6 : "AD"
+    case 7 : "UD"
+    case 8 : "Upgrade"
+    case 9 : "Drop"
+    case 10 : "Gas"
+    case 11 : "PPG"
+    case 12 : "Prev Gas"
+    case 13 : "FF Fee"
+    case 14 : "Equipment"
+    case 15 : "Delivery Fee"
+    case 50 : "Misc Fee"
+    case 51 : "Sales Tax"
+    case 52 : "Fed Tax"
+    case 53 : "Other Tax"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : str(dbr_hf:code,len(dbr_hf:code)-3)
+
+  string field_name = switch(cDetail)
+    case "Type"    : charge_type_name
+    case "Code"    : code_type_name
+    case "Consolidated" : charge_detail
+
+  string cd1 = replace(str(charge_detail)," ","_")  -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_") 
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_") 
+  string cd9 = replace(str(cd8),"#","_") 
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_") 
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  string cd29 = replace(str(cd28),".","_")
+  string cd_final = replace(str(cd29),"*","_")
+
+   
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="dbr_hf"
+  charge_detail
+
+sorted by
+  charge_order_num
+  sort_order
+
+end of charge_order_num
+ if charge_order_num = 1 then {
+  '"Total Charges"/align=tot_chrgs_ra'
+}
+
+end of sort_order 
+
+  '"'+field_name+'"/align=amount_'+cd_final
+
+
+end of report
+  '"Total Payments"/align=tot_pmts_ra'
+
+;
+run/parameterfile=dbr_0 
+rrepl dbr_header.cq
+/*------------------------------------------------------------------------
+ Summarize data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "dbr_i1.inc"
+
+define
+
+  string section_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 : "Misc Charges"  
+    case 50 : "Misc Fees"
+    case 51,52,53 : "Taxes"
+    case 150 : "Deposits Received"
+    case 175 : "Deposits App"
+    case 200 : "Payments"
+
+  string charge_type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 1 : "Misc Charge"  
+    case 2 : "CDW"
+    case 3 : "PAI"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 6 : "AD"
+    case 7 : "UD"
+    case 8 : "Upgrade"
+    case 9 : "Drop"
+    case 10 : "Gas"
+    case 11 : "PPG"
+    case 12 : "Prev Gas"
+    case 13 : "FF Fee"
+    case 14 : "Equipment"
+    case 15 : "Delivery Fee"
+    case 50 : "Misc Fee"
+    case 51 : "Sales Tax"
+    case 52 : "Fed Tax"
+    case 53 : "Other Tax"
+    case 150 : "Deposits Rec"
+    case 175 : "Deposits App"
+    case 200 : dbr_hf:code
+
+
+  string Code_Type = switch(dbr_hf:chgtype)
+    case 71 : "Time"  
+    case 72 : "Mileage"
+    case 73 : "Discount"
+    case 74 : "No-Show"
+    case 150 : "Deposits_Rec"
+    case 175 : "Deposits_App"
+    case 200 : dbr_hf:code
+    default  : dbr_hf:code
+
+  number chrgs_ra = if (dbr_hf:chgtype not one of 175,200) then dbr_hf:amount
+  
+  number tot_chrgs_ra = total[chrgs_ra,dbr_hf:dateout]
+  
+  number pmts_ra = if (dbr_hf:chgtype one of 175,200) then dbr_hf:amount
+  
+  number tot_pmts_ra = total[pmts_ra,dbr_hf:dateout]
+
+
+  
+sum/domain="dbr_hf"/hold="dbr_sum_hf"
+  dbr_hf:amount
+
+across
+if cDetail = "Type" then
+  charge_type else
+if cDetail = "Code" then
+  code_type else
+if cDetail = "Consolidated" then
+  section_type 
+
+by
+  dbr_hf:rptloccode
+  dbr_hf:rptdate
+  dbr_hf:rpttime
+  dbr_hf:rpt_section
+  dbr_hf:commonid/keyelement=1.1
+  dbr_hf:dateout
+
+
+end of dbr_hf:dateout
+  tot_chrgs_ra
+  tot_pmts_ra
+  dbr_hf:datein
+  dbr_hf:timein
+  dbr_hf:timeout
+  dbr_hf:invid
+  dbr_hf:ranumber
+  dbr_hf:renterid
+  dbr_hf:resnumber
+  dbr_hf:locationcodeout
+  dbr_hf:locationcodedue
+  dbr_hf:locationcodein
+  total[dbr_hf:cl_flag]/name="cl_flag"
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Check for out of balance contracts by rpt date
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "DBR_i1.inc"
+
+define
+
+  timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+  timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+  timestamp time_dbr = timestamp(dbr_sum_hf:rptdate,time(replace(str(dbr_sum_hf:rpttime,"99.99"),".",":")))
+ 
+  number ra_balance = dbr_sum_hf:tot_chrgs_ra - dbr_sum_hf:tot_pmts_ra
+
+where time_dbr >= time_st and time_dbr <= time_en and ra_balance <> 0
+
+list/domain="dbr_sum_hf"/nodetail/hold="dbr_os_balance_hf"
+  dbr_sum_hf:ranumber
+  dbr_sum_hf:rptdate
+  dbr_sum_hf:rptloccode
+  dbr_sum_hf:commonid 
+  ra_balance
+
+
+sorted by
+  dbr_sum_hf:rptloccode
+  dbr_sum_hf:commonid
+  dbr_sum_hf:rptdate
+
+
+end of dbr_sum_hf:commonid
+  if total[ra_balance,dbr_sum_hf:commonid] <> 0 then {
+  dbr_sum_hf:commonid/keyelement=1.2
+  dbr_sum_hf:rptdate/keyelement=1.1
+  dbr_sum_hf:ranumber
+  dbr_sum_hf:rptloccode
+  total[dbr_sum_hf:tot_chrgs_ra,dbr_sum_hf:commonid]/name="tot_chrgs_ra"
+  total[dbr_sum_hf:tot_pmts_ra,dbr_sum_hf:commonid]/name="tot_pmts_ra"
+  total[ra_balance,dbr_sum_hf:commonid]/name="balance"
+}
+
+;
+run/parameterfile=dbr_0 
+
+list/domain="dbr_os_balance_hf"/nodetail/hold="osflag_hf"
+  dbr_os_balance_hf:commonid 
+  dbr_os_balance_hf:rptdate 
+  dbr_os_balance_hf:ranumber 
+  dbr_os_balance_hf:rptloccode 
+  dbr_os_balance_hf:tot_chrgs_ra 
+  dbr_os_balance_hf:tot_pmts_ra 
+  dbr_os_balance_hf:balance
+
+sorted by
+  dbr_os_balance_hf:commonid
+
+end of dbr_os_balance_hf:commonid
+  dbr_os_balance_hf:commonid/keyelement=1.1
+  dbr_os_balance_hf:ranumber
+  if total[dbr_os_balance_hf:tot_chrgs_ra,dbr_os_balance_hf:commonid]
+     -total[dbr_os_balance_hf:tot_pmts_ra,dbr_os_balance_hf:commonid] = 0 then "*" else "**"/name="os_flag"
+
+;
+run/parameterfile=dbr_0 
+
+/*------------------------------------------------------------------------
+ Summary of detail  
+------------------------------------------------------------------------*/
+include "dbr_i1.inc"
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if csummary = "Summary" or cgrandtot = "Y" then "/nodetail"  else ""
+;
+run/parameterfile=dbr_0
+rrepl dbr_i2
+
+/*------------------------------------------------------------------------
+ Sorted by section
+------------------------------------------------------------------------*/
+include "dbr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if cgrandtot = "Y" then {""} else {
+  if cconsolidate = "N" then 
+    if cexcel = "Y" then {
+     'sorted by -- Separate locations Excel - blank if grand total'/newline
+     '  dbr_sum_hf:rptloccode/total/sheet'/newline
+     '  dbr_sum_hf:rptdate'/newline
+     '  dbr_sum_hf:rpt_section'/newline
+     '  dbr_sum_hf:ranumber'/newline
+     '  '/newline
+  } else {
+     'sorted by -- separate locations   - blank if grand total'/newline
+     '  dbr_sum_hf:rptloccode/total/heading="@"'/newline
+     '  dbr_sum_hf:rptdate/total/heading=date_str'/newline
+     '  dbr_sum_hf:rpt_section'/newline
+     '  dbr_sum_hf:ranumber '/newline
+     '  '/newline
+  } else if cexcel = "Y" then {
+     'sorted by -- Consolidated locations Excel - blank if grand total'/newline
+     '  dbr_sum_hf:rptdate'/newline
+     '  dbr_sum_hf:rpt_section'/newline
+     '  dbr_sum_hf:rptloccode'/newline
+     '  dbr_sum_hf:ranumber'/newline
+     '  '/newline
+  } else {
+     'sorted by -- consolidated locations  - blank if grand total'/newline
+     '  dbr_sum_hf:rptdate/total/heading="@"'/newline
+     '  dbr_sum_hf:rpt_section'/newline
+     '  dbr_sum_hf:rptloccode'/newline
+     '  dbr_sum_hf:ranumber'/newline
+  }
+}
+;
+
+run/parameterfile=dbr_0
+rrepl dbr_i3
+
+/*------------------------------------------------------------------------
+ End of section - summary or detail
+------------------------------------------------------------------------*/
+include "dbr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cgrandtot = "Y" then {""} else {
+if (csummary = "Summary") then {
+--summary
+
+
+'end of dbr_sum_hf:rptdate'/newline
+  'str(total[open_count]) + " opened"'/newline
+  'str(total[closed_count]) + " closed"'/newline
+  'str(total[void_count]) + " voided"'/newline
+  'str(total[rev_days]) + " days"'/newline
+} else 
+ {
+
+--detail
+
+'top of dbr_sum_hf:rpt_section '/newline
+  '""/newline'/newline
+  if cconsolidate = "Y" then {
+  'dbr_sum_hf:rptdate/heading="Date"/align=a'/newline
+  } else {
+  'dbr_sum_hf:rptloccode/heading="Location"/align=a'/newline
+  'dbr_sum_hf:rptdate/heading="Date"'/newline
+  }
+  'section/noheading/newlines=2'/newline
+
+'end of dbr_sum_hf:rptdate'/newline
+  'str(total[open_count]) + " opened"'/newline
+  'str(total[closed_count]) + " closed"'/newline
+  'str(total[void_count]) + " voided"'/newline
+  'str(total[rev_days]) + " days"'/newline
+  '""/newline'/newline
+  'include "dbr_header.cq"'/newline  
+  '"Balance Offset"/align=k'/newline
+} 
+}
+
+;
+
+run/parameterfile=dbr_0
+rrepl dbr_i4
+
+/*------------------------------------------------------------------------
+ End of location
+------------------------------------------------------------------------*/
+include "dbr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if cgrandtot = "Y" or cconsolidate = "Y" then {""} else {
+    if cexcel = "N" then {
+     'end of dbr_sum_hf:rptloccode  --not used in grand total only'/newline
+     '  str(total[open_count]) + " opened"'/newline
+     '  str(total[closed_count]) + " closed"'/newline
+     '  str(total[void_count]) + " voided"'/newline
+     '  str(total[rev_days]) + " days"'/newline
+     ''/newline
+    } else {
+     'end of dbr_sum_hf:rptloccode  -- Separate locations Excel - blank if grand total'/newline
+     '  str(total[open_count]) + " opened"'/newline
+     '  str(total[closed_count]) + " closed"'/newline
+     '  str(total[void_count]) + " voided"'/newline
+     '  str(total[rev_days]) + " days"/newline'/newline
+    '  if total[bal_offset,dbr_sum_hf:rptloccode] = 0 then "** "+str(dbr_sum_hf:rptloccode)+" DBR is in balance **" else "** "+str(dbr_sum_hf:rptloccode)+" is OUT OF BALANCE by "+str(total[bal_offset,dbr_sum_hf:rptloccode])+" **"/newline'/newline
+  }
+} 
+;
+
+run/parameterfile=dbr_0
+rrepl dbr_i5
+/*------------------------------------------------------------------------
+ Output DBR
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "DBR_i1.inc"
+
+define
+
+  file renter_link = access renter,
+    set renter:renterid = dbr_sum_hf:renterid,
+    one to one,
+    null fill on failure
+    
+  file inv_link = access inv,
+    set inv:invid = dbr_sum_hf:invid,
+    one to one,
+    null fill on failure
+
+  file os_balance = access osflag_hf,
+   set osflag_hf:commonid=dbr_sum_hf:commonid,
+   one to one, zero fill on failure
+
+
+  string section = switch(dbr_sum_hf:rpt_section)
+    case 10 : "Contracts Closed"
+    case 15 : "No-Shows"
+    case 20 : "Misc Sales"
+    case 30 : "Adjustments"
+    case 40 : "Contracts Open"
+    case 50 : "Contracts Voided"
+    case 60 : "Deposits"
+    case 70 : "Rollovers"
+    case 80 : "Previously Booked"
+
+  
+  number open_count = if (dbr_sum_hf:rpt_section = 40)  then 1
+  number closed_count = if ((dbr_sum_hf:rpt_section = 10 or dbr_sum_hf:rpt_section = 70) and (dbr_sum_hf:cl_flag = 1)) then 1
+  number void_count = if (dbr_sum_hf:rpt_section = 50) then 1
+  number act_days = if dbr_sum_hf:rpt_section = 10 then if (dbr_sum_hf:datein - dbr_sum_hf:dateout) = 0 then 1 else (dbr_sum_hf:datein - dbr_sum_hf:dateout)else 0
+  number rev_days = if (dbr_sum_hf:rpt_section = 70 and dbr_sum_hf:cl_flag = 1) then rev_days_hf:tot_revdays 
+   else if (dbr_sum_hf:tot_chrgs_ra = 0 or dbr_sum_hf:rpt_section <> 10 ) then 0 else rev_days_hf:tot_revdays --if tot charges = 0 only payment record - no chrg days
+
+
+  timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+  timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+  timestamp time_dbr = timestamp(dbr_sum_hf:rptdate,time(replace(str(dbr_sum_hf:rpttime,"99.99"),".",":")))
+
+  number bal_offset = dbr_sum_hf:tot_chrgs_ra - dbr_sum_hf:tot_pmts_ra
+
+  string date_str = str(dbr_sum_hf:rptdate)+"  "+str(dbr_sum_hf:rptloccode)
+   
+
+where time_dbr >= time_st and time_dbr <= time_en
+
+  
+list/domain="dbr_sum_hf"/title="Daily Business Report"/pageof/nobanner/zerosuppress/noheadings/duplicates/pagelength=100 include "dbr_i2.cq" 
+  if cconsolidate = "Y" then  dbr_sum_hf:rptloccode/displaywidth=15/name="aa"
+  dbr_sum_hf:ranumber/displaywidth=15/name="a"
+  dbr_sum_hf:resnumber/displaywidth=15/name="b"
+  renter_link:customerlastname/displaywidth=20/name="c"
+  inv_link:unitnumber/displaywidth=10/name="d"
+  dbr_sum_hf:dateout/displaywidth=10/name="e"
+  dbr_sum_hf:timeout/mask="z9.99"/nozerosuppress/displaywidth=10/name="f"
+  dbr_sum_hf:datein/displaywidth=10/name="g"
+  dbr_sum_hf:timein/mask="z9.99"/nozerosuppress/displaywidth=10/name="h"
+  dbr_sum_hf:rpttime/mask="z9.99"/nozerosuppress/displaywidth=10/name="i"
+  rev_days/displaywidth=6/zerosuppress/nototal/name="j"
+
+  include "dbr_detail.cq"
+
+  bal_offset/name="k"
+  if bal_offset=0 then "" else os_balance:os_flag/noheading
+
+include "dbr_i3.cq"
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Range: "+str(time_st)+" to "+str(time_en)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Detail: " + str(cDetail)
+  end box/newline=4
+  if cconsolidate = "Y" then "Location"/align=aa
+  "RA Number"/align=a
+  "Res Number"/align=b
+  "Name"/align=c
+  "Unit#"/align=d
+  "Date Out"/align=e
+  "Time Out"/align=f
+  "Date In"/align=g 
+  "Time In"/align=h
+  "Rpt Time"/align=i
+  "Days"/align=j
+  
+  include "dbr_header.cq"  
+
+  "Balance Offset"/align=k
+ 
+
+include "dbr_i4.cq"  --not used in grand total only
+
+include "dbr_i5.cq"
+
+
+end of report 
+  str(total[open_count]) + " opened"
+  str(total[closed_count]) + " closed"
+  str(total[void_count]) + " voided"
+  str(total[rev_days]) + " days"
+  ""/newline=2
+  if total[bal_offset] = 0 then "** DBR is in balance **" else "** DBR is OUT OF BALANCE by "+str(total[bal_offset])+" **"/newline
+
+;
+replace dbr.eq
+
+
+/*------------------------------------------------------------------------
+ Output DBR XL
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "DBR_i1.inc"
+
+define
+
+  file renter_link = access renter,
+    set renter:renterid = dbr_sum_hf:renterid,
+    one to one,
+    null fill on failure
+    
+  file inv_link = access inv,
+    set inv:invid = dbr_sum_hf:invid,
+    one to one,
+    null fill on failure
+
+  file os_balance = access osflag_hf,
+   set osflag_hf:commonid=dbr_sum_hf:commonid,
+   one to one, zero fill on failure
+
+
+  string section = switch(dbr_sum_hf:rpt_section)
+    case 10 : "Contracts Closed"
+    case 15 : "No-Shows"
+    case 20 : "Misc Sales"
+    case 30 : "Adjustments"
+    case 40 : "Contracts Open"
+    case 50 : "Contracts Voided"
+    case 60 : "Deposits"
+    case 70 : "Rollovers"
+    case 80 : "Previously Booked"
+
+  
+  number open_count = if (dbr_sum_hf:rpt_section = 40)  then 1
+  number closed_count = if ((dbr_sum_hf:rpt_section = 10 or dbr_sum_hf:rpt_section = 70) and (dbr_sum_hf:cl_flag = 1)) then 1
+  number void_count = if (dbr_sum_hf:rpt_section = 50) then 1
+  number act_days = if dbr_sum_hf:rpt_section = 10 then if (dbr_sum_hf:datein - dbr_sum_hf:dateout) = 0 then 1 else (dbr_sum_hf:datein - dbr_sum_hf:dateout)else 0
+  number rev_days = if (dbr_sum_hf:rpt_section = 70 and dbr_sum_hf:cl_flag = 1) then rev_days_hf:tot_revdays 
+   else if (dbr_sum_hf:tot_chrgs_ra = 0 or dbr_sum_hf:rpt_section <> 10 ) then 0 else rev_days_hf:tot_revdays --if tot charges = 0 only payment record - no chrg days
+
+
+  timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+  timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+  timestamp time_dbr = timestamp(dbr_sum_hf:rptdate,time(replace(str(dbr_sum_hf:rpttime,"99.99"),".",":")))
+
+  number bal_offset = dbr_sum_hf:tot_chrgs_ra - dbr_sum_hf:tot_pmts_ra
+   
+
+where time_dbr >= time_st and time_dbr <= time_en
+
+  
+list/domain="dbr_sum_hf"/title="Daily Business Report"/pagelength=0/nobanner/zerosuppress/noheadings/duplicates 
+  dbr_sum_hf:rptloccode/displaywidth=15/name="aa"
+  dbr_sum_hf:rptdate/displaywidth=10/name="aaa"
+  dbr_sum_hf:rpttime/displaywidth=10/mask="z9.99"/nozerosuppress/name="aaa_2"
+  section/displaywidth=20/name="aaaa"
+  dbr_sum_hf:ranumber/displaywidth=15/name="a"
+  dbr_sum_hf:resnumber/displaywidth=15/name="b"
+  renter_link:customerlastname/displaywidth=20/name="c"
+  inv_link:unitnumber/displaywidth=10/name="d"
+  dbr_sum_hf:dateout/displaywidth=10/name="e"
+  dbr_sum_hf:timeout/mask="z9.99"/nozerosuppress/displaywidth=10/name="f"
+  dbr_sum_hf:datein/displaywidth=10/name="g"
+  dbr_sum_hf:timein/mask="z9.99"/nozerosuppress/displaywidth=10/name="h"
+  rev_days/displaywidth=6/zerosuppress/nototal/name="j"
+
+  include "dbr_detail.cq"
+
+  bal_offset/name="k"
+  if bal_offset=0 then "" else os_balance:os_flag/noheading
+
+include "dbr_i3.cq"
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Range: "+str(time_st)+" to "+str(time_en)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Detail: " + str(cDetail)
+  end box/newlines=4
+
+  "Report Location"/align=aa
+  "Report Date"/align=aaa
+  "Report Time"/align=aaa_2
+  "Trans Type"/align=aaaa
+  "RA Number"/align=a
+  "Res Number"/align=b
+  "Name"/align=c
+  "Unit#"/align=d
+  "Date Out"/align=e
+  "Time Out"/align=f
+  "Date In"/align=g
+  "Time In"/align=h
+  "Days"/align=j
+  
+  include "dbr_header.cq"  
+
+  "Balance Offset"/align=k
+
+include "dbr_i5.cq"
+
+
+end of report
+  str(total[open_count]) + " opened"
+  str(total[closed_count]) + " closed"
+  str(total[void_count]) + " voided"
+  str(total[rev_days]) + " days"
+  ""/newline=2
+  if total[bal_offset,report] = 0 then "** DBR is in balance **" else "** DBR is OUT OF BALANCE by "+str(total[bal_offset])+" **"/newline
+
+;
+replace dbrxl.eq
+
+/*------------------------------------------------------------------------
+ Output reconciliation report
+------------------------------------------------------------------------*/
+
+list/domain="dbr_os_balance_hf"/title="Reconciliation"/nobanner
+ 
+  dbr_os_balance_hf:ranumber /heading="RA Number"
+  dbr_os_balance_hf:rptdate/heading="Reported on"
+  dbr_os_balance_hf:rptloccode /heading="Report Location"
+  dbr_os_balance_hf:tot_chrgs_ra /heading="Total Charges"
+  dbr_os_balance_hf:tot_pmts_ra /heading="Total Payments"
+  dbr_os_balance_hf:balance /total /heading="Difference"
+  0/name="Balance"/zerosuppress
+
+
+sorted by
+  dbr_os_balance_hf:ranumber
+end of dbr_os_balance_hf:ranumber
+  total[dbr_os_balance_hf:balance]/align=Balance
+;
+replace dbrrecon.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "dbr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+'run/parameterfile=dbr_0 dbr.eq'/newline
+'rrepl dbr'/newline
+''/newline
+'run/parameterfile=dbr_0 dbrrecon.eq'/newline
+'rrepl dbrrecon'/newline
+'compose dbr over'/newline 
+'dbrrecon;'/newline
+'view'/newline
+} else { 
+'run/parameterfile=dbr_0 dbrxl.eq'/newline
+'rrepl dbr'/newline
+''/newline
+'run/parameterfile=dbr_0 dbrrecon.eq'/newline
+'rrepl dbrrecon'/newline
+'cli cqe2xls /output="dbr" /sheet="DBR" dbr.cqe /sheet="Reconciliation" dbrrecon.cqe'/newline
+'view dbr.xlsx'/newline
+}
+;
+run/parameterfile=dbr_0
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Daily Business Report" -- Report Title
+   string rptname1    = "dbr" -- output file1
+   string rptname2    = "dbrrecon" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "dbr_0.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

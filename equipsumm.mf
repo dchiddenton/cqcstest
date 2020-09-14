@@ -1,0 +1,322 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Equipment Summary Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/6/2019
+Modified:
+
+Notes:
+$Workfile: equipsumm.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/equipsumm.mf $
+$Revision: 1 $
+$History: equipsumm.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 12/09/19   Time: 5:07p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="equiptype"
+if itemnumber=1 then '"'+equiptype:equiptype+'"' else
+   ',"'+equiptype:equiptype+'"'
+
+sorted by
+   equiptype:equiptype
+top of report
+'string cequiptype[8192] = multivalue parameter prompt "Equipment Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_equiptype"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_equiptype.cq"
+  string cdetail = parameter prompt "Print?" valid "Summary","Detail" default "Detail"
+
+;
+replace equipsumm_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve equipment records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "equipsumm_i1.inc"
+
+   file stat_desc = access invstatus,
+   set invstatus:invstatus=equip:equipstatus,
+   null fill on failure
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = equip:locationcode,
+    null fill on failure
+
+   string equipstat = if equip:equipstatus = 0 then "N/A" else stat_desc:description;
+
+   number stat_order = if equip:equipstatus = 0 then 9999 else equip:equipstatus
+
+   string avail_flag = if stat_desc:statustype >= 5 then "Unavailable" else "Available"
+
+where (equip:equiptype  = cequiptype or cequiptype = 'ALL' )
+  and (equip:locationcode = cLoc or cLoc = 'ALL' )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+list/domain="equip"/hold="equipsumm1"
+  avail_flag/width=12
+  equip:locationcode/width=22
+  equip:equiptype/width=22/keyelement=1.1
+  equipstat/name="description"/width=62
+  stat_order
+
+;
+replace equipsumm_1.eq
+run/setparameter equipsumm_1.eq
+
+run/parameterfile=equipsumm_1 equipsumm_1.eq
+
+if selected = 0  
+echo No records in range.
+stop
+endif
+
+/*------------------------------------------------------------------------
+ Summary or Detail
+------------------------------------------------------------------------*/
+include "equipsumm_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cdetail = "Summary" then 
+"" else "/page"
+;
+run/parameterfile=equipsumm_1
+rrepl "equipsumm_i2"
+
+/*------------------------------------------------------------------------
+ Calculate status summary by type
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+sum/domain="equipsumm1"/hold="equipsumm2"
+  0/name="loc_units"
+  0.000/name="loc_per"
+  equipsumm1:units /name="type_units"
+  %equipsumm1:units of sub column total/decimalplaces=3 /name="type_per"
+
+across
+  equipsumm1:avail_flag/total/singletotals
+by
+
+  equipsumm1:equiptype/width=22
+  stat_order
+  equipsumm1:description/name="descrip"/width=62
+  "type"/name="stat_type"/width=8
+;
+run/parameterfile=equipsumm_1 
+
+/*------------------------------------------------------------------------
+ Calculate location summary by type
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+sum/domain="equipsumm1"/hold="equipsumm2"/append
+  equipsumm1:units /name="loc_units"
+  %equipsumm1:units of sub column total/decimalplaces=3/name="loc_per"
+  0/name="type_units"
+  0.000/name="type_per"
+
+
+across
+  equipsumm1:avail_flag/total/singletotals
+
+by
+
+  equipsumm1:equiptype/width=22
+  0/width=19/name="stat_order"
+  equipsumm1:locationcode/name="descrip"/width=62
+  "loc"/name="stat_type"/width=8
+;
+run/parameterfile=equipsumm_1 
+
+/*------------------------------------------------------------------------
+ Calculate status summary total
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="equipsumm1"/hold="equipsumm2" /append
+  0/name="loc_units"
+  0.000/name="loc_per"
+  equipsumm1:units /name="type_units"
+  %equipsumm1:units of column/decimalplaces=3 /name="type_per"
+
+
+across
+  equipsumm1:avail_flag/total/singletotals
+by
+
+  'ALL'/width=22/name='equiptype'
+  stat_order
+  equipsumm1:description/name="descrip"/width=62
+  "type"/name="stat_type"/width=8
+;
+run/parameterfile=equipsumm_1 
+
+
+/*------------------------------------------------------------------------
+ Calculate location summary total
+------------------------------------------------------------------------*/
+viewpoint native;
+
+sum/domain="equipsumm1"/hold="equipsumm2"/append
+  equipsumm1:units /name="loc_units"
+  %equipsumm1:units of column/decimalplaces=3/name="loc_per"
+  0/name="type_units"
+  0.000/name="type_per"
+
+
+across
+  equipsumm1:avail_flag/total/singletotals
+
+by
+
+  'ALL'/width=22/name='equiptype'
+  0/width=19/name="stat_order"
+  equipsumm1:locationcode/name="descrip"/width=62
+  "loc"/name="stat_type"/width=8
+;
+run/parameterfile=equipsumm_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "equipsumm_i1.inc"
+
+define
+  number sort_order = switch(equipsumm2:equiptype)
+    case "ALL" : 2
+    default    : 1
+
+  string sort_label = switch(equipsumm2:equiptype)
+    case "ALL" : "ALL - " + str(cequiptype)
+    default    : equipsumm2:equiptype
+
+
+list/domain="equipsumm2"/nobanner/noreporttotals/zerosuppress/pageof/title="Equipment Summary Report"
+
+if ((cDetail = "Summary" and equipsumm2:equiptype = "ALL") or cDetail = "Detail") then {
+if equipsumm2:stat_type = "type" then {
+box/column=1/line=3/noblanklines
+  equipsumm2:descrip/heading="Status" /width=20 
+  equipsumm2:type_units_total/heading="Qty"/name="a"
+  equipsumm2:type_per_total divide 10000000/mask="ZZ9.99%"/heading="% of Gross"/name="b"    --divide by 10,000,000 due to CQ bug when data sent to hold file
+  equipsumm2:type_per_available/mask="ZZ9.99%"/heading="% of Avail"/name="c"
+ end box
+}
+if equipsumm2:stat_type = "loc" then {
+box/column=70/line=3/noblanklines
+  equipsumm2:descrip/heading="Location"/width=20  
+  equipsumm2:loc_units_total/heading="Qty"/name="aa"
+  equipsumm2:loc_per_total divide 10000000/mask="ZZ9.99%"/heading="% of Total"/name="bb"  --divide by 10,000,000 due to CQ bug when data sent to hold file
+end box
+}
+}
+sorted by
+  sort_order
+  equipsumm2:equiptype include "equipsumm_i2.cq"
+  equipsumm2:stat_type
+  equipsumm2:stat_order
+  equipsumm2:descrip
+
+top of equipsumm2:equiptype
+if ((cDetail = "Summary" and equipsumm2:equiptype = "ALL") or cDetail = "Detail") then {
+  sort_label/column=1/heading="Type"/left
+}
+end of equipsumm2:equiptype
+if ((cDetail = "Summary" and equipsumm2:equiptype = "ALL") or cDetail = "Detail") then {
+  ""/newline
+  "Totals:"
+  running total[equipsumm2:type_units_total]/align=a
+  running total[equipsumm2:loc_per_total] divide 10000000/mask="ZZ9.99%"/align=b  --divide by 10,000,000 due to CQ bug when data sent to hold file
+  running total[equipsumm2:loc_per_available]/mask="ZZ9.99%"/align=c
+
+  running total[equipsumm2:loc_units_total]/align=aa
+  running total[equipsumm2:loc_per_total] divide 10000000/mask="ZZ9.99%"/align=bb/newline  --divide by 10,000,000 due to CQ bug when data sent to hold file
+}
+top of page
+if ((cDetail = "Summary" and equipsumm2:equiptype = "ALL") or cDetail = "Detail") then {
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Equipment Type: "+str(cequiptype)/displaywidth=100/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  end box /newlines=4
+}
+;
+replace equipsumm.eq
+run/parameterfile=equipsumm_1 equipsumm.eq
+rrepl equipsumm
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view equipsumm
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Equipment Summary Report" -- Report Title
+   string rptname1    = "equipsumm" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "equipsumm_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

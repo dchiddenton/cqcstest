@@ -1,0 +1,1749 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Location Performance Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/8/2017
+Modified:
+
+Notes:
+$Workfile: lpr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/lpr.mf $
+$Revision: 2 $
+$History: lpr.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"None","'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Misc Charges to Include or ALL: "'
+"Valid "
+end of report
+'Default "None"'
+;
+run/parameterfile
+rrepl "param_rtmift"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  
+  date dtsdate = parameter prompt "Start Date: " default (todaysdate-1)-day(todaysdate-1)+1
+  date dtedate = parameter prompt "End Date: "  default todaysdate-1  error "End Date must be < today and > Start Date. (Max 365 days)" if (dtEdate < dtSDate) or (dtEdate > dateadd(dtSDate,0,1)) or (dtEdate >= todaysdate)
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string clocsum = parameter/uppercase prompt "Consolidate Locations?" default "Y" valid "Y","N"
+  string cclasssum = parameter/uppercase prompt "Consolidate Class?" default "Y" valid "Y","N"
+  string ccalc = parameter prompt "Calculate UT by: " valid "Charged Days","Actual Days" default "Charged Days"
+  include "param_rtmift.cq"
+;
+replace lpr_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters - retrieve invlocstato/locra records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "lpr_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = locinvstat:locationcode,
+    null fill on failure
+  
+  string mn = if month(dtSDate) < 10 then "0"+str(month(dtSDate))
+    else str(month(dtSDate))
+  
+  string yymm = str(year(dtSDate))+ mn
+  
+  string mn2 = if month(dtEdate) < 10 then "0"+str(month(dtEdate))
+    else str(month(dtEdate))
+  
+  string yymm2 = str(year(dtEdate))+ mn2
+
+  
+  file locra_link = access locra,
+    set locra:locationcode = locinvstat:locationcode,
+    locra:invclass = locinvstat:invclass,
+    zero fill on failure,
+    with locra:yrmn=locinvstat:yrmn
+  
+where 
+  (locinvstat:yrmn => val(yymm) and locinvstat:yrmn <= val(yymm2))
+  and
+   (locinvstat:locationcode = cloc or cloc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (locinvstat:invclass = CClass or cClass = "ALL")
+
+
+list/domain="locinvstat"/hold="lprstat_hf"
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(1,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))/name="date_line"
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[1]
+  locinvstat:invinflt[1]
+  locinvstat:invos[1]
+  locinvstat:invunavail[1]
+  locra_link:actdays[1]
+  locra_link:closed[1]
+  locra_link:closeddays[1]
+  locra_link:noshow[1]
+  locra_link:rented[1]
+  locra_link:rentedavgrate[1]
+  locra_link:res[1]
+  locra_link:resavgrate[1]
+  locra_link:revdays[1]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(2,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[2]
+  locinvstat:invinflt[2]
+  locinvstat:invos[2]
+  locinvstat:invunavail[2]
+  locra_link:actdays[2]
+  locra_link:closed[2]
+  locra_link:closeddays[2]
+  locra_link:noshow[2]
+  locra_link:rented[2]
+  locra_link:rentedavgrate[2]
+  locra_link:res[2]
+  locra_link:resavgrate[2]
+  locra_link:revdays[2]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(3,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[3]
+  locinvstat:invinflt[3]
+  locinvstat:invos[3]
+  locinvstat:invunavail[3]
+  locra_link:actdays[3]
+  locra_link:closed[3]
+  locra_link:closeddays[3]
+  locra_link:noshow[3]
+  locra_link:rented[3]
+  locra_link:rentedavgrate[3]
+  locra_link:res[3]
+  locra_link:resavgrate[3]
+  locra_link:revdays[3]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(4,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[4]
+  locinvstat:invinflt[4]
+  locinvstat:invos[4]
+  locinvstat:invunavail[4]
+  locra_link:actdays[4]
+  locra_link:closed[4]
+  locra_link:closeddays[4]
+  locra_link:noshow[4]
+  locra_link:rented[4]
+  locra_link:rentedavgrate[4]
+  locra_link:res[4]
+  locra_link:resavgrate[4]
+  locra_link:revdays[4]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(5,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[5]
+  locinvstat:invinflt[5]
+  locinvstat:invos[5]
+  locinvstat:invunavail[5]
+  locra_link:actdays[5]
+  locra_link:closed[5]
+  locra_link:closeddays[5]
+  locra_link:noshow[5]
+  locra_link:rented[5]
+  locra_link:rentedavgrate[5]
+  locra_link:res[5]
+  locra_link:resavgrate[5]
+  locra_link:revdays[5]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(6,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[6]
+  locinvstat:invinflt[6]
+  locinvstat:invos[6]
+  locinvstat:invunavail[6]
+  locra_link:actdays[6]
+  locra_link:closed[6]
+  locra_link:closeddays[6]
+  locra_link:noshow[6]
+  locra_link:rented[6]
+  locra_link:rentedavgrate[6]
+  locra_link:res[6]
+  locra_link:resavgrate[6]
+  locra_link:revdays[6]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(7,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[7]
+  locinvstat:invinflt[7]
+  locinvstat:invos[7]
+  locinvstat:invunavail[7]
+  locra_link:actdays[7]
+  locra_link:closed[7]
+  locra_link:closeddays[7]
+  locra_link:noshow[7]
+  locra_link:rented[7]
+  locra_link:rentedavgrate[7]
+  locra_link:res[7]
+  locra_link:resavgrate[7]
+  locra_link:revdays[7]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(8,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[8]
+  locinvstat:invinflt[8]
+  locinvstat:invos[8]
+  locinvstat:invunavail[8]
+  locra_link:actdays[8]
+  locra_link:closed[8]
+  locra_link:closeddays[8]
+  locra_link:noshow[8]
+  locra_link:rented[8]
+  locra_link:rentedavgrate[8]
+  locra_link:res[8]
+  locra_link:resavgrate[8]
+  locra_link:revdays[8]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(9,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[9]
+  locinvstat:invinflt[9]
+  locinvstat:invos[9]
+  locinvstat:invunavail[9]
+  locra_link:actdays[9]
+  locra_link:closed[9]
+  locra_link:closeddays[9]
+  locra_link:noshow[9]
+  locra_link:rented[9]
+  locra_link:rentedavgrate[9]
+  locra_link:res[9]
+  locra_link:resavgrate[9]
+  locra_link:revdays[9]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(10,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[10]
+  locinvstat:invinflt[10]
+  locinvstat:invos[10]
+  locinvstat:invunavail[10]
+  locra_link:actdays[10]
+  locra_link:closed[10]
+  locra_link:closeddays[10]
+  locra_link:noshow[10]
+  locra_link:rented[10]
+  locra_link:rentedavgrate[10]
+  locra_link:res[10]
+  locra_link:resavgrate[10]
+  locra_link:revdays[10]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(11,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[11]
+  locinvstat:invinflt[11]
+  locinvstat:invos[11]
+  locinvstat:invunavail[11]
+  locra_link:actdays[11]
+  locra_link:closed[11]
+  locra_link:closeddays[11]
+  locra_link:noshow[11]
+  locra_link:rented[11]
+  locra_link:rentedavgrate[11]
+  locra_link:res[11]
+  locra_link:resavgrate[11]
+  locra_link:revdays[11]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(12,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[12]
+  locinvstat:invinflt[12]
+  locinvstat:invos[12]
+  locinvstat:invunavail[12]
+  locra_link:actdays[12]
+  locra_link:closed[12]
+  locra_link:closeddays[12]
+  locra_link:noshow[12]
+  locra_link:rented[12]
+  locra_link:rentedavgrate[12]
+  locra_link:res[12]
+  locra_link:resavgrate[12]
+  locra_link:revdays[12]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(13,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[13]
+  locinvstat:invinflt[13]
+  locinvstat:invos[13]
+  locinvstat:invunavail[13]
+  locra_link:actdays[13]
+  locra_link:closed[13]
+  locra_link:closeddays[13]
+  locra_link:noshow[13]
+  locra_link:rented[13]
+  locra_link:rentedavgrate[13]
+  locra_link:res[13]
+  locra_link:resavgrate[13]
+  locra_link:revdays[13]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(14,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[14]
+  locinvstat:invinflt[14]
+  locinvstat:invos[14]
+  locinvstat:invunavail[14]
+  locra_link:actdays[14]
+  locra_link:closed[14]
+  locra_link:closeddays[14]
+  locra_link:noshow[14]
+  locra_link:rented[14]
+  locra_link:rentedavgrate[14]
+  locra_link:res[14]
+  locra_link:resavgrate[14]
+  locra_link:revdays[14]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(15,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[15]
+  locinvstat:invinflt[15]
+  locinvstat:invos[15]
+  locinvstat:invunavail[15]
+  locra_link:actdays[15]
+  locra_link:closed[15]
+  locra_link:closeddays[15]
+  locra_link:noshow[15]
+  locra_link:rented[15]
+  locra_link:rentedavgrate[15]
+  locra_link:res[15]
+  locra_link:resavgrate[15]
+  locra_link:revdays[15]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(16,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[16]
+  locinvstat:invinflt[16]
+  locinvstat:invos[16]
+  locinvstat:invunavail[16]
+  locra_link:actdays[16]
+  locra_link:closed[16]
+  locra_link:closeddays[16]
+  locra_link:noshow[16]
+  locra_link:rented[16]
+  locra_link:rentedavgrate[16]
+  locra_link:res[16]
+  locra_link:resavgrate[16]
+  locra_link:revdays[16]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(17,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[17]
+  locinvstat:invinflt[17]
+  locinvstat:invos[17]
+  locinvstat:invunavail[17]
+  locra_link:actdays[17]
+  locra_link:closed[17]
+  locra_link:closeddays[17]
+  locra_link:noshow[17]
+  locra_link:rented[17]
+  locra_link:rentedavgrate[17]
+  locra_link:res[17]
+  locra_link:resavgrate[17]
+  locra_link:revdays[17]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(18,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[18]
+  locinvstat:invinflt[18]
+  locinvstat:invos[18]
+  locinvstat:invunavail[18]
+  locra_link:actdays[18]
+  locra_link:closed[18]
+  locra_link:closeddays[18]
+  locra_link:noshow[18]
+  locra_link:rented[18]
+  locra_link:rentedavgrate[18]
+  locra_link:res[18]
+  locra_link:resavgrate[18]
+  locra_link:revdays[18]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(19,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[19]
+  locinvstat:invinflt[19]
+  locinvstat:invos[19]
+  locinvstat:invunavail[19]
+  locra_link:actdays[19]
+  locra_link:closed[19]
+  locra_link:closeddays[19]
+  locra_link:noshow[19]
+  locra_link:rented[19]
+  locra_link:rentedavgrate[19]
+  locra_link:res[19]
+  locra_link:resavgrate[19]
+  locra_link:revdays[19]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(20,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[20]
+  locinvstat:invinflt[20]
+  locinvstat:invos[20]
+  locinvstat:invunavail[20]
+  locra_link:actdays[20]
+  locra_link:closed[20]
+  locra_link:closeddays[20]
+  locra_link:noshow[20]
+  locra_link:rented[20]
+  locra_link:rentedavgrate[20]
+  locra_link:res[20]
+  locra_link:resavgrate[20]
+  locra_link:revdays[20]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(21,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[21]
+  locinvstat:invinflt[21]
+  locinvstat:invos[21]
+  locinvstat:invunavail[21]
+  locra_link:actdays[21]
+  locra_link:closed[21]
+  locra_link:closeddays[21]
+  locra_link:noshow[21]
+  locra_link:rented[21]
+  locra_link:rentedavgrate[21]
+  locra_link:res[21]
+  locra_link:resavgrate[21]
+  locra_link:revdays[21]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(22,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[22]
+  locinvstat:invinflt[22]
+  locinvstat:invos[22]
+  locinvstat:invunavail[22]
+  locra_link:actdays[22]
+  locra_link:closed[22]
+  locra_link:closeddays[22]
+  locra_link:noshow[22]
+  locra_link:rented[22]
+  locra_link:rentedavgrate[22]
+  locra_link:res[22]
+  locra_link:resavgrate[22]
+  locra_link:revdays[22]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(23,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[23]
+  locinvstat:invinflt[23]
+  locinvstat:invos[23]
+  locinvstat:invunavail[23]
+  locra_link:actdays[23]
+  locra_link:closed[23]
+  locra_link:closeddays[23]
+  locra_link:noshow[23]
+  locra_link:rented[23]
+  locra_link:rentedavgrate[23]
+  locra_link:res[23]
+  locra_link:resavgrate[23]
+  locra_link:revdays[23]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(24,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[24]
+  locinvstat:invinflt[24]
+  locinvstat:invos[24]
+  locinvstat:invunavail[24]
+  locra_link:actdays[24]
+  locra_link:closed[24]
+  locra_link:closeddays[24]
+  locra_link:noshow[24]
+  locra_link:rented[24]
+  locra_link:rentedavgrate[24]
+  locra_link:res[24]
+  locra_link:resavgrate[24]
+  locra_link:revdays[24]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(25,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[25]
+  locinvstat:invinflt[25]
+  locinvstat:invos[25]
+  locinvstat:invunavail[25]
+  locra_link:actdays[25]
+  locra_link:closed[25]
+  locra_link:closeddays[25]
+  locra_link:noshow[25]
+  locra_link:rented[25]
+  locra_link:rentedavgrate[25]
+  locra_link:res[25]
+  locra_link:resavgrate[25]
+  locra_link:revdays[25]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(26,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[26]
+  locinvstat:invinflt[26]
+  locinvstat:invos[26]
+  locinvstat:invunavail[26]
+  locra_link:actdays[26]
+  locra_link:closed[26]
+  locra_link:closeddays[26]
+  locra_link:noshow[26]
+  locra_link:rented[26]
+  locra_link:rentedavgrate[26]
+  locra_link:res[26]
+  locra_link:resavgrate[26]
+  locra_link:revdays[26]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(27,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[27]
+  locinvstat:invinflt[27]
+  locinvstat:invos[27]
+  locinvstat:invunavail[27]
+  locra_link:actdays[27]
+  locra_link:closed[27]
+  locra_link:closeddays[27]
+  locra_link:noshow[27]
+  locra_link:rented[27]
+  locra_link:rentedavgrate[27]
+  locra_link:res[27]
+  locra_link:resavgrate[27]
+  locra_link:revdays[27]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(28,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[28]
+  locinvstat:invinflt[28]
+  locinvstat:invos[28]
+  locinvstat:invunavail[28]
+  locra_link:actdays[28]
+  locra_link:closed[28]
+  locra_link:closeddays[28]
+  locra_link:noshow[28]
+  locra_link:rented[28]
+  locra_link:rentedavgrate[28]
+  locra_link:res[28]
+  locra_link:resavgrate[28]
+  locra_link:revdays[28]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(29,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[29]
+  locinvstat:invinflt[29]
+  locinvstat:invos[29]
+  locinvstat:invunavail[29]
+  locra_link:actdays[29]
+  locra_link:closed[29]
+  locra_link:closeddays[29]
+  locra_link:noshow[29]
+  locra_link:rented[29]
+  locra_link:rentedavgrate[29]
+  locra_link:res[29]
+  locra_link:resavgrate[29]
+  locra_link:revdays[29]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(30,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[30]
+  locinvstat:invinflt[30]
+  locinvstat:invos[30]
+  locinvstat:invunavail[30]
+  locra_link:actdays[30]
+  locra_link:closed[30]
+  locra_link:closeddays[30]
+  locra_link:noshow[30]
+  locra_link:rented[30]
+  locra_link:rentedavgrate[30]
+  locra_link:res[30]
+  locra_link:resavgrate[30]
+  locra_link:revdays[30]
+followed by
+  date(str(locinvstat:yrmn-(trunc(locinvstat:yrmn divide 100)*100),"99")
+   + str(31,"99") + str(trunc(locinvstat:yrmn divide 100),"9999"))
+  locinvstat:locationcode 
+  locinvstat:invclass 
+  locinvstat:invonrent[31]
+  locinvstat:invinflt[31]
+  locinvstat:invos[31]
+  locinvstat:invunavail[31]
+  locra_link:actdays[31]
+  locra_link:closed[31]
+  locra_link:closeddays[31]
+  locra_link:noshow[31]
+  locra_link:rented[31]
+  locra_link:rentedavgrate[31]
+  locra_link:res[31]
+  locra_link:resavgrate[31]
+  locra_link:revdays[31]
+
+
+sorted by
+  locinvstat:locationcode
+  locinvstat:yrmn
+  locinvstat:invclass
+
+
+;
+replace lpr_1.eq
+run/setparameter lpr_1.eq
+
+run/parameterfile=lpr_1 lpr_1.eq
+
+/*------------------------------------------------------------------------
+ Create include file for open contract revenue days
+------------------------------------------------------------------------*/
+
+include "lpr_i1.inc"
+define
+   number max_days = dtEdate - dtSdate + 1
+
+   file counter_i = access counter,
+    set min=1, max=max_days
+
+
+list/domain="dummy"/nodefaults
+if counter_i:position < max_days then {
+ "followed by"/newline
+ "if (rrm:dateout <= dtSdate+"+str(counter_i:position)+") then {"/newline
+  "dtSdate+"+str(counter_i:position)/newline
+  "1"/newline
+  "rrm:locationcodeout"/newline
+  "rrm:invclass"/newline
+  "}"/newline
+}
+
+top of report
+ "if (rrm:dateout <= dtSdate) then {"/newline
+  "dtSdate/heading='date_line'"/newline
+  "1/heading='rvd'"/newline
+  "rrm:locationcodeout"/newline
+  "rrm:invclass"/newline
+  "}"/newline
+;
+
+run/parameterfile=lpr_1
+rrepl rvd_inc
+
+/*------------------------------------------------------------------------
+ Get revenue days for open contracts
+------------------------------------------------------------------------*/
+
+include "lpr_i1.inc"
+
+
+where 
+  rrm:rastatus = 
+    2
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+
+list/domain="rrm"/hold="oprvd_1"
+include "rvd_inc.cq"
+;
+
+run/parameterfile=lpr_1
+
+/*------------------------------------------------------------------------
+ Summarize open days
+------------------------------------------------------------------------*/
+
+sum/domain="oprvd_1"/hold="oprvd_hf"
+  oprvd_1:rvd
+
+by
+  oprvd_1:locationcodeout/keyelement=1.1
+  oprvd_1:invclass/keyelement=1.2
+  oprvd_1:dtsdate/keyelement=1.3
+
+;
+
+run/parameterfile=lpr_1
+
+/*------------------------------------------------------------------------
+ Consolidate or separate include - lprstat
+------------------------------------------------------------------------*/
+
+
+include "lpr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if clocsum = "Y" and cclasssum = "Y" then { --consolidate all
+     'by'/newline
+     '"ALL"/width=20/name="locationcode"'/newline
+     '"ALL"/width=16/name="invclass"'/newline
+     'lprstat_hf:date_line'/newline
+}
+ else 
+if clocsum = "Y" and cclasssum = "N" then {-- consolidate location only
+  'by'/newline
+    '"ALL"/width=20/name="locationcode"'/newline
+    'lprstat_hf:invclass'/newline
+    'lprstat_hf:date_line'/newline
+
+}
+ else
+if clocsum = "N" and cclasssum = "Y" then {-- consolidate class only
+  'by'/newline
+    'lprstat_hf:locationcode'/newline
+    '"ALL"/width=16/name="invclass"'/newline
+    'lprstat_hf:date_line'/newline
+}
+ else 
+if clocsum = "N" and cclasssum = "N" then {-- separate all
+  'by'/newline
+    'lprstat_hf:locationcode'/newline
+    'lprstat_hf:invclass'/newline
+    'lprstat_hf:date_line'/newline
+}
+;
+run/parameterfile=lpr_1
+rrepl lpr_i4
+
+/*------------------------------------------------------------------------
+ Consolidate or separate include - lprrev
+------------------------------------------------------------------------*/
+
+include "lpr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if clocsum = "Y" and cclasssum = "Y" then { --consolidate all
+     'by'/newline
+     '"ALL"/width=20/name="locationcode"/keyelement=1.1'/newline
+     '"ALL"/width=16/name="invclass"/keyelement=1.2'/newline
+     'lprrev_hf:date_line/keyelement=1.3'/newline
+}
+ else 
+if clocsum = "Y" and cclasssum = "N" then {-- consolidate location only
+  'by'/newline
+    '"ALL"/width=20/name="locationcode"/keyelement=1.1'/newline
+    'lprrev_hf:invclass/keyelement=1.2'/newline
+    'lprrev_hf:date_line/keyelement=1.3'/newline
+
+}
+ else
+if clocsum = "N" and cclasssum = "Y" then {-- consolidate class only
+  'by'/newline
+    'lprrev_hf:locationcode/keyelement=1.1'/newline
+    '"ALL"/width=16/name="invclass"/keyelement=1.2'/newline
+    'lprrev_hf:date_line/keyelement=1.3'/newline
+}
+ else 
+if clocsum = "N" and cclasssum = "N" then {-- separate all
+  'by'/newline
+    'lprrev_hf:locationcode/keyelement=1.1'/newline
+    'lprrev_hf:invclass/keyelement=1.2'/newline
+    'lprrev_hf:date_line/keyelement=1.3'/newline
+}
+;
+run/parameterfile=lpr_1
+rrepl lpr_i3
+
+/*------------------------------------------------------------------------
+ Summarize lprstat data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "lpr_i1.inc"
+
+define
+
+  file oprvd_link = access oprvd_hf,
+   set oprvd_hf:locationcodeout=lprstat_hf:locationcode,
+    oprvd_hf:invclass=lprstat_hf:invclass,
+    oprvd_hf:dtsdate=lprstat_hf:date_line,
+    one to one, zero fill on failure
+ 
+  string mn = if month(dtSDate) < 10 then "0"+str(month(dtSDate))
+    else str(month(dtSDate))
+  
+  string yymm = str(year(dtSDate))+ mn
+
+  number rev_days_combined = lprstat_hf:rev_days + oprvd_link:rvd
+  
+where
+   lprstat_hf:date_line >= dtsdate and lprstat_hf:date_line <= dtedate
+
+sum/domain="lprstat_hf"/hold="lprsum_hf"
+  rev_days_combined
+  lprstat_hf:in_fleet 
+  lprstat_hf:on_rent 
+  lprstat_hf:o_s 
+  lprstat_hf:unavailable 
+  lprstat_hf:closed 
+  lprstat_hf:closed_days 
+  lprstat_hf:actual_days
+  lprstat_hf:in_fleet+lprstat_hf:o_s/name="days_avail"
+  lprstat_hf:res
+  lprstat_hf:rented
+  lprstat_hf:rent_avg
+  lprstat_hf:res_avg
+  lprstat_hf:no_show
+
+include "lpr_i4.cq"
+
+;
+run/parameterfile=lpr_1 
+
+/*------------------------------------------------------------------------
+ Create daily lprrev data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "lpr_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = locrev:locationcode,
+    null fill on failure
+  
+  string mn = if month(dtSDate) < 10 then "0"+str(month(dtSDate))
+    else str(month(dtSDate))
+  
+  string yymm = str(year(dtSDate))+ mn
+  
+  string mn2 = if month(dtEdate) < 10 then "0"+str(month(dtEdate))
+    else str(month(dtEdate))
+  
+  string yymm2 = str(year(dtEdate))+ mn2
+
+  
+where 
+  (locrev:yrmn => val(yymm) and locrev:yrmn <= val(yymm2))
+  and
+   (locrev:locationcode = cloc or cloc="ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (locrev:invclass = CClass or cClass = "ALL")
+  and 
+   (locrev:code = ccode or ccode = "ALL" or locrev:code = "!TM")
+
+
+list/domain="locrev"/hold="lprrev_hf"
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(1,"99") + str(trunc(locrev:yrmn divide 100),"9999"))/name="date_line"
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[1]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(2,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[2]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(3,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[3] 
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(4,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[4]  
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(5,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[5]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(6,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[6]
+ 
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(7,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[7]
+ 
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(8,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[8]
+ 
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(9,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[9] 
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(10,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[10]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(11,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[11]  
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(12,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[12]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(13,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[13]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(14,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[14]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(15,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[15]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(16,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[16]
+ 
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(17,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[17]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(18,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[18]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(19,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[19]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(20,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[20]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(21,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[21]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(22,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[22]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(23,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[23]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(24,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[24]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(25,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[25]
+ 
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(26,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[26]
+
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(27,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[27]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(28,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[28]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(29,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[29]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(30,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[30]
+  
+followed by
+  date(str(locrev:yrmn-(trunc(locrev:yrmn divide 100)*100),"99")
+   + str(31,"99") + str(trunc(locrev:yrmn divide 100),"9999"))
+  locrev:locationcode
+  locrev:invclass
+  locrev:code
+  locrev:type
+  locrev:amt[31]
+  
+sorted by
+  locrev:locationcode
+  locrev:yrmn
+  locrev:invclass
+
+top of report
+  date(str(val(yymm)-(trunc(val(yymm) divide 100)*100),"99")
+   + str(1,"99") + str(trunc(val(yymm) divide 100),"9999"))
+  "ALL"/width=20
+  "ALL"/width=16
+  "!TM"/width=16
+  0/width=11
+  0/width=14/decimalplaces=2
+
+
+;
+run/parameterfile=lpr_1 
+
+/*------------------------------------------------------------------------
+ Summarize revenue by charge
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  string charge_type = switch(lprrev_hf:code)
+    case "!TM" :  "NetTM"
+    default : lprrev_hf:code
+    
+  string cd1 = replace(str(charge_type)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")  
+  string cd_final = replace(str(cd28),"*","_")
+
+sum/domain="lprrev_hf"/hold="lprrevsum_hf"
+  lprrev_hf:amt
+
+across
+  charge_type/total/singletotals
+
+include "lpr_i3.cq"
+;
+run/parameterfile=lpr_1 
+
+
+/*------------------------------------------------------------------------
+ Rev mtd calculation 
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(lprrev_hf:code)
+    case "!TM" :  "NetTM"
+    default : lprrev_hf:code
+    
+  string cd1 = replace(str(charge_type)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")  
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="lprrev_hf"
+  lprrev_hf:code
+
+sorted by
+  lprrev_hf:code
+
+end of lprrev_hf:code
+
+  'number amt_'+cd_final+'_mtd = if cclasssum = "Y" then running total[rev_link:amt_'+cd_final+',lprsum_hf:locationcode]'/newline 
+   'else running total[rev_link:amt_'+cd_final+',lprsum_hf:invclass]'/newline
+;
+
+run/parameterfile
+rreplace calc_lines
+
+/*------------------------------------------------------------------------
+ Create detail lines 
+------------------------------------------------------------------------*/
+define
+  string charge_type = switch(lprrev_hf:code)
+    case "!TM" :  "NetTM"
+    default : lprrev_hf:code
+    
+  string cd1 = replace(str(charge_type)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")  
+  string cd_final = replace(str(cd28),"*","_")
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="lprrev_hf"
+  lprrev_hf:code
+
+sorted by
+  lprrev_hf:code
+
+end of lprrev_hf:code
+
+  'rev_link:amt_'+cd_final+'/name='+'"col_'+cd_final+'"'/newline
+  'amt_'+cd_final+'_mtd/name='+'"col_'+cd_final+'_mtd"';
+
+run/parameterfile
+rreplace detail_lines
+
+/*------------------------------------------------------------------------
+ Create header lines 
+------------------------------------------------------------------------*/
+
+define
+  string charge_type = switch(lprrev_hf:code)
+    case "!TM" :  "NetTM"
+    default : lprrev_hf:code
+    
+  string cd1 = replace(str(charge_type)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")  
+  string cd_final = replace(str(cd28),"*","_")
+
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="lprrev_hf"
+  lprrev_hf:code
+
+sorted by
+  lprrev_hf:code
+
+end of lprrev_hf:code
+
+  '"MTD"/align='+'col_'+cd_final+'_mtd'
+;
+run/parameterfile
+rreplace header_line1
+
+define
+  string charge_type = switch(lprrev_hf:code)
+    case "!TM" :  "NetTM"
+    default : lprrev_hf:code
+    
+  string cd1 = replace(str(charge_type)," ","_") -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")  
+  string cd_final = replace(str(cd28),"*","_")
+
+define
+   string charge_code = if lprrev_hf:code = "!TM" then "NetTM" else lprrev_hf:code
+
+list/nodetail/nobanner/nodefaults/noreporttotals/domain="lprrev_hf"
+  charge_code
+
+sorted by
+  charge_code
+
+end of charge_code
+
+  '"'+charge_code+'"/align='+'col_'+cd_final/newline
+  '"'+charge_code+'"/align='+'col_'+cd_final+'_mtd';
+
+run/parameterfile
+rreplace header_line2
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "lpr_i1.inc"
+
+define
+
+  file rev_link = access lprrevsum_hf,
+   set lprrevsum_hf:locationcode=lprsum_hf:locationcode,
+   lprrevsum_hf:invclass=lprsum_hf:invclass,
+   lprrevsum_hf:date_line=lprsum_hf:date_line,
+   one to one, zero fill on failure
+
+  number days_avail = lprsum_hf:in_fleet+lprsum_hf:o_s
+
+
+-- mtd calculations
+
+  number rev_days_combined_mtd = if cclasssum = "Y" then running total[  lprsum_hf:rev_days_combined,lprsum_hf:locationcode]
+   else running total[lprsum_hf:rev_days_combined,lprsum_hf:invclass]
+
+  number days_avail_mtd = if cclasssum = "Y" then running total[days_avail,lprsum_hf:locationcode]
+   else running total[days_avail,lprsum_hf:invclass]
+
+  number res_mtd = if cclasssum = "Y" then running total[lprsum_hf:res,lprsum_hf:locationcode]
+   else running total[lprsum_hf:res,lprsum_hf:invclass]
+
+  number rented_mtd = if cclasssum = "Y" then running total[lprsum_hf:rented,lprsum_hf:locationcode]
+   else running total[lprsum_hf:rented,lprsum_hf:invclass]
+
+  number no_show_mtd = if cclasssum = "Y" then running total[lprsum_hf:no_show,lprsum_hf:locationcode]
+   else running total[lprsum_hf:no_show,lprsum_hf:invclass]
+
+  number closed_mtd = if cclasssum = "Y" then running total[lprsum_hf:closed,lprsum_hf:locationcode] 
+   else running total[lprsum_hf:closed,lprsum_hf:invclass]
+
+  number closed_days_mtd = if cclasssum = "Y" then running total[lprsum_hf:closed_days,lprsum_hf:locationcode] 
+   else running total[lprsum_hf:closed_days,lprsum_hf:invclass]
+
+  number actual_days_mtd = if cclasssum = "Y" then running total[lprsum_hf:actual_days,lprsum_hf:locationcode] 
+   else running total[lprsum_hf:actual_days,lprsum_hf:invclass]
+
+  number on_rent_mtd = if cclasssum = "Y" then running total[lprsum_hf:on_rent,lprsum_hf:locationcode]
+   else running total[lprsum_hf:on_rent,lprsum_hf:invclass]
+
+-- ut calculations
+
+  number ut = if ccalc = "Charged Days" then if(round((lprsum_hf:rev_days_combined divide days_avail)*100,1)=null) then 0 
+     else round((lprsum_hf:rev_days_combined divide days_avail)*100,1)
+    else if(round((lprsum_hf:on_rent divide days_avail)*100,1)=null) then 0
+     else round((lprsum_hf:on_rent divide days_avail)*100,1)
+
+  number ut_mtd = if ccalc = "Charged Days" then if(round((rev_days_combined_mtd divide days_avail_mtd)*100,1)=null) then 0
+     else round((rev_days_combined_mtd divide days_avail_mtd)*100,1)
+    else if(round((on_rent_mtd divide days_avail_mtd)*100,1)=null) then 0
+     else round((on_rent_mtd divide days_avail_mtd)*100,1)
+
+
+-- misc calculations
+
+  number day_count = if cclasssum = "Y" then running count[lprsum_hf:date_line,lprsum_hf:locationcode] 
+   else running count[lprsum_hf:date_line,lprsum_hf:invclass]
+ 
+  number avg_days = round(days_avail_mtd divide day_count,1)
+
+  number ns_pct = if(round((lprsum_hf:no_show divide lprsum_hf:res)*100,1)=null) then 0
+    else round((lprsum_hf:no_show divide lprsum_hf:res)*100,1)
+  number ns_pct_mtd = if(round((no_show_mtd divide res_mtd)*100,1)=null) then 0
+    else round((no_show_mtd divide res_mtd)*100,1)
+
+
+-- revenue calculations
+  include "calc_lines.cq"
+  number amt_Total_mtd = if cclasssum = "Y" then running total[rev_link:amt_Total,lprsum_hf:locationcode]
+   else running total[rev_link:amt_Total,lprsum_hf:invclass]
+
+  number dly_avg = if ccalc = "Charged Days" then if (round(rev_link:amt_total divide lprsum_hf:closed_days,2)=null) then 0 
+     else round(rev_link:amt_total divide lprsum_hf:closed_days,2)
+   else if (round(rev_link:amt_total divide lprsum_hf:actual_days,2)=null) then 0
+     else round(rev_link:amt_total divide lprsum_hf:actual_days,2)
+
+  number dly_avg_mtd = if ccalc = "Charged Days" then if(round(amt_total_mtd divide closed_days_mtd,2)=null) then 0 
+     else round(amt_total_mtd divide closed_days_mtd,2)
+    else if(round(amt_total_mtd divide actual_days_mtd,2)=null) then 0 
+     else round(amt_total_mtd divide actual_days_mtd,2)
+
+  number rev_unit = if(round(rev_link:amt_total divide days_avail,2)=null) then 0
+     else round(rev_link:amt_total divide days_avail,2)
+
+  number rev_unit_mtd = if(round(amt_total_mtd divide avg_days,2)=null) then 0
+     else round(amt_total_mtd divide avg_days,2)
+
+  
+where 
+  lprsum_hf:date_line >= dtSDate and lprsum_hf:date_line <= dtEdate
+
+list/domain="lprsum_hf"/noheadings/noreporttotals/nobanner/pageof/title="Location Performance Report"/pagelength=0
+
+  lprsum_hf:date_line/name="col1_a"/displaywidth=10 
+  day(lprsum_hf:date_line)/name="col1_b"/displaywidth=4
+  str(dayname(lprsum_hf:date_line),2)/name="col1_c"/displaywidth=3
+
+  lprsum_hf:rev_days_combined/name="col1_d"/displaywidth=4 
+  rev_days_combined_mtd/name="col1_e"/displaywidth=4
+  lprsum_hf:in_fleet/name="col1_f"/displaywidth=4 
+  lprsum_hf:on_rent/name="col1_g"/displaywidth=4
+  lprsum_hf:o_s/name="col1_h"/displaywidth=4
+  lprsum_hf:unavailable/name="col1_i"/displaywidth=4 
+  days_avail/name="col1_j"/displaywidth=4 
+  days_avail_mtd/name="col1_k"/displaywidth=4 
+  ut/mask="zz9.9%"/name="col1_l"/displaywidth=6  
+  ut_mtd/mask="zz9.9%"/name="col1_m"/displaywidth=6
+  avg_days/name="col1_n"/displaywidth=4
+
+--next page
+  lprsum_hf:res/name="col2_a"/displaywidth=4 
+  res_mtd/name="col2_b"/displaywidth=4 
+  lprsum_hf:res_avg/name="col2_c"/displaywidth=4
+  lprsum_hf:rented/name="col2_d"/displaywidth=4 
+  rented_mtd/name="col2_e"/displaywidth=4 
+  lprsum_hf:rent_avg/name="col2_f"/displaywidth=6
+  lprsum_hf:no_show/name="col2_g"/displaywidth=4
+  ns_pct/mask="zz9.9%"/name="col2_h"/displaywidth=6
+  no_show_mtd/name="col2_i"/displaywidth=4
+  ns_pct_mtd/mask="zz9.9%"/name="col2_j"/displaywidth=6
+  lprsum_hf:closed/name="col2_k"/displaywidth=4 
+  closed_mtd/name="col2_l"/displaywidth=4
+  lprsum_hf:closed_days/name="col2_m"/displaywidth=4
+  closed_days_mtd/name="col2_n"/displaywidth=4
+  lprsum_hf:actual_days/name="col2_o"/displaywidth=4 
+  actual_days_mtd/name="col2_p"/displaywidth=4 
+
+  include "detail_lines.cq"
+  rev_link:amt_total/name="col_total"
+  amt_total_mtd/name="col_total_mtd"
+  dly_avg/name="col_dly_avg"
+  dly_avg_mtd/name="col_dly_avg_mtd"
+  rev_unit/name="col_rev_unit"
+  rev_unit_mtd/name="col_rev_unit_mtd"
+
+
+sorted by
+  lprsum_hf:locationcode/page
+  lprsum_hf:invclass/page
+  lprsum_hf:date_line
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+  "Location: " + str(lprsum_hf:locationcode)/newline
+  "Product: " + trun(str(cProduct)) + "   Car Class: " + str(lprsum_hf:invclass)/newline
+  "UT Calculated by: " + str(ccalc)
+  end box/newline=4
+
+
+-- first line
+  "Rev"/align=col1_d
+  "Rev Days"/align=col1_e
+  "Days"/align=col1_j
+  "Days"/align=col1_k
+  "Util"/align=col1_l
+  "Util"/align=col1_m
+  "Avg"/align=col1_n
+  "Resvd"/align=col2_a
+  "Resvd"/align=col2_b
+  "Resvd"/align=col2_c
+  "Rented"/align=col2_d
+  "Rented"/align=col2_e
+  "Rented"/align=col2_f
+  "NoShow"/align=col2_g
+  "NoShow"/align=col2_h
+  "NoShow"/align=col2_i
+  "NoShow"/align=col2_j
+  "Closd"/align=col2_k
+  "Closd"/align=col2_l
+  "Closd"/align=col2_m
+  "Closd"/align=col2_n
+  "Act"/align=col2_o
+  "Act"/align=col2_p
+
+  include "header_line1.cq"
+
+
+  "MTD"/align=col_total_mtd
+  "MTD"/align=col_dly_avg_mtd
+  "MTD"/align=col_rev_unit_mtd
+
+""/newline
+
+
+-- second line
+  "Date"/align=col1_a
+  "Day"/align=col1_b
+  "Wk"/align=col1_c
+  "Days"/align=col1_d
+  "MTD"/align=col1_e
+  "InFlt"/align=col1_f
+  "OnRent"/align=col1_g
+  "O/S"/align=col1_h
+  "Unavail"/align=col1_i
+  "Avail"/align=col1_j
+  "Avl MTD"/align=col1_k
+  "Today"/align=col1_l
+  "MTD"/align=col1_m 
+  "Days"/align=col1_n  
+  "Today"/align=col2_a
+  "MTD"/align=col2_b
+  "AvgRate"/align=col2_c
+  "Today"/align=col2_d
+  "MTD"/align=col2_e
+  "AvgRate"/align=col2_f
+  "Today"/align=col2_g
+  "Pct"/align=col2_h
+  "MTD"/align=col2_i
+  "Pct MTD"/align=col2_j
+  "Today"/align=col2_k
+  "MTD"/align=col2_l
+  "Days"/align=col2_m
+  "Days MTD"/align=col2_n
+  "Days"/align=col2_o
+  "Days MTD"/align=col2_p
+
+  include "header_line2.cq"
+
+  "Revenue"/align=col_total
+  "Revenue"/align=col_total_mtd
+  "Dly Avg"/align=col_dly_avg
+  "Dly Avg"/align=col_dly_avg_mtd
+  "Rev/Unit"/align=col_rev_unit
+  "Rev/Unit"/align=col_rev_unit_mtd
+ ""/newline
+
+;
+replace lpr.eq
+run/parameterfile=lpr_1 lpr.eq
+rrepl lpr
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view lpr
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Location Performance Report" -- Report Title
+   string rptname1    = "lpr" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "lpr_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

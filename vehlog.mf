@@ -1,0 +1,206 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Vehicle Log Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/20/2017
+Modified:
+
+Notes:
+$Workfile: vehlog.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/vehlog.mf $
+$Revision: 2 $
+$History: vehlog.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtSdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string crange = range parameter prompt "Enter Unit# Range (Start..End or ALL): " default ALL
+
+;
+replace vehlog_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RRM records - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+
+  include "vehlog_i1.inc"
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file ins_link = access ins,
+   set ins:commonid=rrm:commonid,
+   one to one,zero fill on failure
+
+  string ro_num = if ins_link:commonid <> 0 then ins_link:claimnum1 else rrm:serviceordernum
+  
+where 
+
+  (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate)
+    and (rrm:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  --#and rrm:rastatus=3
+
+list/domain="rrm"/hold="rrm_hf"
+  rrm:commonid/keyelement=1.1
+  rrm:product 
+  rrm:rptdate 
+  rrm:customerfirstname 
+  rrm:customerlastname 
+  rrm:ranumber
+  ro_num
+
+;
+replace vehlog_1.eq
+run/setparameter vehlog_1.eq
+
+run/parameterfile=vehlog_1 vehlog_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+  include "vehlog_i1.inc"
+define
+
+  file invtrx_link = access invtrx,
+   set invtrx:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+
+where invtrx_link:commonid<>0
+      and (invtrx_link:unitnumber = crange or crange = "ALL")
+      and (invtrx_link:invclass = cclass or cclass = "ALL") 
+
+
+list/domain="rrm_hf"/title="Vehicle Log Report"/pageof/noreporttotals/noheadings/nobanner
+
+  trim(rrm_hf:customerfirstname + " " + rrm_hf:customerlastname)/displaywidth=30/name="a"
+  rrm_hf:ro_num/displaywidth=10/name="b"
+  rrm_hf:ranumber/displaywidth=10/name="c"
+  invtrx_link:dateout/displaywidth=8/name="d"
+  invtrx_link:datein/displaywidth=8/name="e"
+  invtrx_link:odometerout/displaywidth=8/name="f"
+  invtrx_link:odometerin/displaywidth=8/name="g"
+  rrm_hf:rptdate/displaywidth=8/name="h"
+
+
+sorted by invtrx_link:unitnumber
+
+top of invtrx_link:unitnumber/noheading
+
+  "Product"/column=1
+  "Unit#"/column=10
+  "Make"/column=20
+  "Model"/column=30
+  "VIN#"/column=40
+  "Class"/column=60/newline
+  rrm_hf:product/displaywidth=10/column=1
+  invtrx_link:unitnumber/displaywidth=10/column=10
+  invtrx_link:make/displaywidth=8/column=20
+  invtrx_link:model/displaywidth=8/column=30
+  invtrx_link:serialnumber/displaywidth=20/column=40
+  invtrx_link:invclass/displaywidth=8/column=60/newline
+
+
+end of invtrx_link:unitnumber
+  ""/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Classes: "+str(cclass)/newline
+  "Unit Range: "+str(crange)
+  end box/newline=4
+
+  "Customer Name"/align=a
+  "Repair Order #"/align=b
+  "RA Number"/align=c
+  "Date Out"/align=d
+  "Date In"/align=e
+  "Mileage Out"/align=f
+  "Mileage In"/align=g
+  "Report Date"/align=h/newline
+
+;
+replace vehlog.eq
+run/parameterfile=vehlog_1 vehlog.eq
+rrepl vehlog
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view vehlog
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Vehicle Log Report" -- Report Title
+   string rptname1    = "vehlog" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "vehlog_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,342 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Misc Charges/Taxes List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/25/2018
+Modified:
+
+Notes:
+$Workfile: mratelist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/mratelist.mf $
+$Revision: 2 $
+$History: mratelist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccodes[8192] = multivalue parameter prompt "Select Charge Codes:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_codes"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+  include "param_codes.cq"
+  string csummary = parameter prompt "Summary or Detail?" valid "Summary","Detail" default "Summary"
+
+;
+replace mratelist_i1.inc
+
+/*------------------------------------------------------------------------
+ Create list of charges/taxes
+------------------------------------------------------------------------*/
+list/domain="rtmift"/nobanner/nodefaults
+  "case "+str(rtmift:accountid )+" : '"+rtmift:code+",'"
+
+sorted by
+rtmift:accountid
+;
+run/parameterfile=mratelist_1
+rrepl mratelist_i2
+
+/*------------------------------------------------------------------------
+ Summary output layout - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "mratelist_i1.inc"
+
+define
+
+   string ctype = switch(rtmift:type)
+     case 1  : "Misc Charge"
+     case 2  : "CDW"
+     case 3  : "PAC"
+     case 4  : "PEC"
+     case 5  : "SLI"
+     case 6  : "Addl Driver"
+     case 7  : "Underage Driver"
+     case 8  : "Upgrade"
+     case 9  : "Drop Charge"
+     case 10 : "Fuel"
+     case 11 : "Prepaid Fuel"
+     case 13 : "FF Recovery Fee"
+     case 14 : "Equipment Charge"
+     case 15 : "Delivery Fee"
+     case 50 : "Misc. Fee"
+     case 51 : "Sales Tax"
+     case 52 : "Federal Tax"
+     case 53 : "Other Tax"
+     default : "N/A"
+
+where rtmift:code = ccodes or ccodes = "ALL"
+
+list/domain="rtmift"/nobanner/pageof/title="Misc Charges/Taxes List"/duplicates/noreporttotals/noheadings
+rtmift:code/displaywidth=10
+rtmift:description/displaywidth=20
+ctype/displaywidth=15
+rtmift:product/displaywidth=10
+rtmift:invclass/displaywidth=10
+rtmift:locationcode/displaywidth=10
+rtmift:ratepct/displaywidth=12
+rtmift:rateunit/displaywidth=12
+rtmift:ratehour/displaywidth=12
+rtmift:rateday/displaywidth=12
+rtmift:rateweek/displaywidth=12
+rtmift:ratemonth/displaywidth=12
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Code Range: " + str(ccodes)/displaywidth=100/newline
+   csummary/newline
+ end box /newline= 4
+
+
+"Code"/align=rtmift:code
+"Description"/align=rtmift:description
+"Type"/align=ctype
+"Product"/align=rtmift:product
+"Class"/align=rtmift:invclass
+"Location"/align=rtmift:locationcode
+"% rate"/align=rtmift:ratepct
+"Unit Rate"/align=rtmift:rateunit
+"Hourly Rate"/align=rtmift:ratehour
+"Daily Rate"/align=rtmift:rateday
+"Weekly Rate"/align=rtmift:rateweek
+"Monthly Rate"/align=rtmift:ratemonth/newline
+
+end of report
+""/newline
+"Total records: "+str(count[rtmift:code,report])
+
+;
+replace mratelist_1.eq
+run/setparameter mratelist_1.eq
+
+
+/*------------------------------------------------------------------------
+ Detailed output layout
+------------------------------------------------------------------------*/
+viewpoint native;
+include "mratelist_i1.inc"
+
+define
+
+   string inputstr = "999999,"+rtmift:appchgs
+ 
+   number field_count = if len(inputstr) = 0 then 0 else countfields(inputstr,",")
+
+   file counter_i = access counter,
+    set min=1,max=field_count
+
+   string outputstr = switch(val(subfield(inputstr,",",counter_i:position)))
+     case 1  : "Time,"
+     case 2  : "Mileage,"
+     case 3  : "Discount,"
+     case 5  : "No-Show,"
+     include "mratelist_i2.cq"
+     case 999999 : "Applicable Charges: "
+
+
+   string ctype = switch(rtmift:type)
+     case 1  : "Misc Charge"
+     case 2  : "CDW"
+     case 3  : "PAC"
+     case 4  : "PEC"
+     case 5  : "SLI"
+     case 6  : "Addl Driver"
+     case 7  : "Underage Driver"
+     case 8  : "Upgrade"
+     case 9  : "Drop Charge"
+     case 10 : "Fuel"
+     case 11 : "Prepaid Fuel"
+     case 13 : "FF Recovery Fee"
+     case 14 : "Equipment Charge"
+     case 15 : "Delivery Fee"
+     case 50 : "Misc. Fee"
+     case 51 : "Sales Tax"
+     case 52 : "Federal Tax"
+     case 53 : "Other Tax"
+     default : "N/A"
+
+   string ccalcmeth = switch(rtmift:calcmeth)
+     case 1  : "Flat"
+     case 2  : "24-Hour Time"
+     case 3  : "Calendar Day Time"
+     case 4  : "Modified 24-Hour Time"
+     case 5  : "Per Unit"
+     case 10 : "Percentage"
+     case 11 : "Vehicle Licensing Fee"
+     default : "N/A"
+
+   string cclassexempt = if rtmift:calcmeth <> 10 then "N/A" else rtmift:classexemptions
+   string cclassexemptout = if cclassexempt = "" then "None" else cclassexempt
+    
+
+  string comm_flag = if rtmift:comm = 1 then "Yes" else "No"
+  string crounding = if rtmift:calcmeth <> 10 then "N/A" else
+     if rtmift:rounding = 1 then "None" else
+      if rtmift:rounding = 2 then "Up 1/2 cent" else
+       if rtmift:rounding = 3 then "Up any fraction" else "N/A"
+
+
+where rtmift:code = ccodes or ccodes = "ALL"
+
+list/domain="rtmift"/nobanner/pageof/title="Misc Charges/Taxes List"/duplicates/noreporttotals/noheadings/pagelength=80
+
+box/column=1/inline/width=50
+  rtmift:code/heading="Code"/newline
+end box/newlines
+
+box/column=3/inline/width=35
+  rtmift:description/displaywidth=20/heading=" Description"/newline
+  ctype/displaywidth=15/heading="        Type"/newline
+  rtmift:locationcode/displaywidth=10/heading="    Location"/newline
+  rtmift:product/displaywidth=10/heading="     Product"/newline
+  rtmift:invclass/displaywidth=10/heading="       Class"/newline
+  rtmift:startdate/displaywidth=12/heading="  Start Date"/newline
+  rtmift:enddate/displaywidth=12/heading="    End Date"/newline
+  rtmift:calcord/displaywidth=5/heading=" Calc. Order"/newline
+  ccalcmeth/displaywidth=10/heading="Calc. Method"/newline
+  comm_flag/displaywidth=4/heading="  Commission"/newline
+end box
+
+box/column=45/inline/width=35
+  rtmift:ratepct/displaywidth=12/heading="    % Rate"/newline
+  rtmift:rateunit/displaywidth=12/heading="      Unit"/newline
+  rtmift:ratehour/displaywidth=12/heading="      Hour"/newline
+  rtmift:rateday/displaywidth=12/heading="       Day"/newline
+  rtmift:rateweek/displaywidth=12/heading="      Week"/newline
+  rtmift:ratemonth/displaywidth=12/heading="     Month"/newline
+  rtmift:covlimit/displaywidth=12/heading="Cov. Limit"/newline
+  rtmift:covded/displaywidth=12/heading="Deductible"/newline
+end box
+
+box/column=70/inline/width=35
+  rtmift:minexempt/displaywidth=4/heading="Min. Exempt"/newline
+  rtmift:maxexempt/displaywidth=4/heading="Max  Exempt"/newline=3
+  crounding/displaywidth=15/heading="   Rounding"/newline
+end box/newlines=2
+followed by
+box/column=3/inline/width=70/fill/noblanklines
+  "Class Exemption: "+cclassexemptout/newline
+end box/newlines=2
+
+followed by
+box/column=3/inline/width=70/fill/noblanklines
+  outputstr/concatenate 
+end box/newlines=2
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Code Range: " + str(ccodes)/displaywidth=100/newline
+   csummary/newline
+ end box /newline= 4
+
+
+end of report
+""/newline
+"Total records: "+str(count[rtmift:code,report])
+
+;
+replace mratelist_2.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "mratelist_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then {
+"cli copy /y mratelist_1.eq mratelist.eq"/newline
+} else {
+"cli copy /y mratelist_2.eq mratelist.eq"/newline
+}
+;
+run/parameterfile=mratelist_1
+rrepl mrateoutput
+cli copy /y mrateoutput.cq mrateoutput.mf
+run/parameterfile mrateoutput.mf
+
+run/parameterfile=mratelist_1 mratelist.eq
+rrepl mratelist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view mratelist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Misc Charges/Taxes List" -- Report Title
+   string rptname1    = "mratelist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "mratelist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

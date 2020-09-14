@@ -1,0 +1,268 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Reasons Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/21/2017
+Modified:
+
+Notes:
+$Workfile: reason.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/reason.mf $
+$Revision: 2 $
+$History: reason.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+viewpoint native
+
+define 
+   string reason_type = switch(reason:type)
+    case "D" : "Discount"
+    case "R" : "Rental"
+    default  : "N/A"
+
+where reason:type <> "V"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="reason"
+   ',"'+reason:code+'"'
+
+sorted by
+   reason_type
+   reason:code
+
+top of report
+'string creasons[8192] = multivalue parameter prompt "Reason Types: "'
+'Valid "None"'
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_types"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string crares = parameter prompt "Include:" valid "Contracts","Reservations","Both" Default "Contracts"
+  string ctype = parameter prompt "Reason Type:" valid "Rental","Discount","Both" Default "Rental"
+  include "param_types.cq"
+
+;
+replace reason_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve rrm records in range and create hold file - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native
+ 
+include "reason_i1.inc"     
+
+define file rental_link = access RentalDB,
+       set RentalDB:CommonID = RRM:CommonID,
+       one to one, exact, zero fill on failure 
+
+define file res_link = access ResDB, 
+       set ResDB:CommonID = RRM:CommonID,
+       one to one, exact, zero fill on failure
+
+define number iDays =  if rental_link:ActDays > 0 then rental_link:ActDays else 
+         if res_link:ActDays > 0 and RRM:RAStatus = 0 then res_link:ActDays else 1;
+define string RARes = if RRM:ResNumber <> "" then RRM:ResNumber+"/"+RRM:RANumber else RRM:RANumber
+define number DiscPct = if RRM:RAStatus <> 0 then rental_link:RentalDiscountPct else res_link:RentalDiscountPct
+define number DiscAmt = if RRM:RAStatus <> 0 then rental_link:RentalDiscountAmt else res_link:RentalDiscountAmt
+define number NetTime = if RRM:RAStatus <> 0 then rental_link:TotalTime - rental_link:RentalDiscountAmt else res_link:TotalTime - res_link:RentalDiscountAmt
+define string Empout = if rental_link:EmployeeNumberOut <> "" then rental_link:EmployeeNumberOut else "-"
+define string Empin = if rental_link:EmployeeNumberIn <> "" then rental_link:EmployeeNumberIn else "-"
+
+define string Reasondisc = if RRM:reasondisc="" then "None" else RRM:reasondisc
+define string reasonrent = if RRM:reasonrent="" then "None" else RRM:reasonrent
+define string disc_flag = if (discpct = 0 and discamt = 0) then "N" else "Y"
+
+
+where  
+    ((crares = "Contracts" and RRM:RAStatus <> 0) or (crares = "Reservations" and RRM:ResStatus <> 0) or crares = "Both")
+    and RRM:DateOut >= dtSDate and RRM:DateOut <= dtEDate
+    and (cLoc = "ALL" or RRM:LocationCodeOut = cLoc)
+    and (cProduct = "ALL" or RRM:Product = cProduct)
+
+List/domain="RRM"/hold="rrm_hf"                        
+   RARes/width=14
+   RRM:CUSTOMERLASTNAME+", "+customerfirstname/name="Name"/width=60 
+   RRM:Dateout/width=10
+   Empout/width=10
+   RRM:Datein/width=10
+   Empin/width=10
+   iDays/width=10
+   DiscPct/width=12/decimalplaces=2
+   DiscAmt/width=12/decimalplaces=2
+   NetTime/width=12/decimalplaces=2
+   RRM:totalcharges/width=12/decimalplaces=2
+   reasondisc/width=40
+   reasonrent/width=40
+   disc_flag/width=1
+;
+replace reason_1.eq
+run/setparameter reason_1.eq
+
+run/parameterfile=reason_1 reason_1.eq
+
+/*------------------------------------------------------------------------
+ Breakout reason types
+------------------------------------------------------------------------*/
+
+viewpoint native
+
+List/domain="rrm_hf"/hold="reason_hf"                       
+   RARes/width=14
+   rrm_hf:name/width=60 
+   rrm_hf:Dateout/width=10
+   Empout/width=10
+   rrm_hf:Datein/width=10
+   Empin/width=10
+   iDays/width=10
+   DiscPct/width=12/decimalplaces=2
+   DiscAmt/width=12/decimalplaces=2
+   NetTime/width=12/decimalplaces=2
+   rrm_hf:totalcharges/width=12/decimalplaces=2
+   reasonrent/name="reason"/width=40
+   "Rental"/name="reasontype"/width=10
+followed by
+  if disc_flag = "Y" then {
+   RARes/width=14
+   rrm_hf:name/width=60 
+   rrm_hf:Dateout/width=10
+   Empout/width=10
+   rrm_hf:Datein/width=10
+   Empin/width=10
+   iDays/width=10
+   DiscPct/width=12/decimalplaces=2
+   DiscAmt/width=12/decimalplaces=2
+   NetTime/width=12/decimalplaces=2
+   rrm_hf:totalcharges/width=12/decimalplaces=2
+   reasondisc/width=40
+   "Discount"/width=10}
+;
+run/parameterfile=reason_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native
+ 
+include "reason_i1.inc"     
+
+
+define string cReasonType=switch(reason_hf:reasontype)
+   case "Discount" :  "Discount Reason: "
+   case "Rental"   :  "Rental Reason: "
+
+where (reason_hf:reasontype = ctype or ctype = "Both") and
+      (reason_hf:reason = creasons or creasons = "ALL")
+
+List/count/nobanner/domain="reason_hf"/duplicates/pageof/noreporttotals/title="Reasons Report"                         
+   reason_hf:RARes/displaywidth=14/heading="Res/RA #"
+   reason_hf:name/heading="Name"/displaywidth=25 
+   reason_hf:Dateout/displaywidth=10/heading="Date-Out"
+   reason_hf:Empout/heading="Employee-Out"
+   reason_hf:Datein/displaywidth=10/heading="Date-In"
+   reason_hf:Empin/heading="Employee-In"
+   reason_hf:iDays/heading="Days"
+   reason_hf:DiscPct/heading="Disc %"/nototal
+   reason_hf:DiscAmt/heading="Disc Amt"
+   reason_hf:NetTime/heading="Net Time"
+   reason_hf:totalcharges/heading="Total Charges" 
+
+sorted by
+   reason_hf:reasontype/total/count/heading="@"/page    
+   reason_hf:reason/total/count/heading="@"  
+   reason_hf:name
+
+top of reason_hf:reason
+   creasontype+reason_hf:reason/noheading/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+"   Included: "+str(ctype)
+  end box/newline=4
+
+end of report 
+ ""/newline
+ "* Please note: When Rental Reason AND Discount Reason selected then the same reservation / contract can show twice."/newline
+ "*              Net Time = (estimated) time charge minus any discount amount."/newline
+;
+replace reason.eq
+run/parameterfile=reason_1 reason.eq
+rrepl reason
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view reason
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Reasons Report" -- Report Title
+   string rptname1    = "reason" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "reason_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

@@ -1,0 +1,265 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Rebate Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/1/2019
+Modified:
+
+Notes:
+$Workfile: rebate.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rebate.mf $
+$Revision: 2 $
+$History: rebate.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="banks"
+if itemnumber=1 then '"'+banks:bankid+'"' else
+   ',"'+banks:bankid+'"'
+
+sorted by
+   banks:bankid
+top of report
+'string cbanks[8192] = multivalue parameter prompt "Banks: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_banks"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="inv"
+if itemnumber=1 then '"'+inv:description+'"' else
+   ',"'+inv:description+'"'
+
+sorted by
+   inv:description
+top of report
+'string cdescrip[8192] = multivalue parameter prompt "Descriptions: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_descriptions"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="inv"
+if itemnumber=1 then '"'+inv:model+'"' else
+   ',"'+inv:model+'"'
+
+sorted by
+   inv:model
+top of report
+'string cmodels[8192] = multivalue parameter prompt "Models: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_models"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1  
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+
+  include "param_loc.cq" 
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string crange = range parameter prompt "Enter Fleet Range (Start..End or ALL): " default ALL
+  include "param_banks.cq"
+  include "param_models.cq"
+  include "param_descriptions.cq"
+
+  string crebate = parameter prompt "Rebate Type: " valid "All Rebates","Rebates Due","Rebates Paid" default "All Rebates"
+  string csort = parameter prompt "Sort by Unit, Class, Model, Bank ID, Description: " valid "Unit","Class","Model","Bank ID","Description" default "Unit"
+
+;
+replace rebate_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve inventory records - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "rebate_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+ where 
+ (inv:Product = cProduct or cProduct = "ALL")
+  and (inv:ownedlocationcode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (inv:invclass = cclass or cclass = "ALL")
+  and (inv:bankid = cbanks or cbanks = "ALL")
+
+      
+list/domain="inv"/hold="inv_hf"
+   inv:product
+   inv:unitnumber
+   inv:invclass
+   inv:model
+   inv:description
+   inv:bankid
+   "Rebate 1"/name="rebatetype"
+   inv:rebateduedate
+   inv:rebatedatepaid
+   inv:rebateamount
+
+followed by
+   inv:product
+   inv:unitnumber
+   inv:invclass
+   inv:model
+   inv:description
+   inv:bankid
+   "Rebate 2"
+   inv:rebateduedate2
+   date("")
+   inv:rebateamount2
+
+;
+replace rebate_1.eq
+run/setparameter rebate_1.eq
+
+run/parameterfile=rebate_1 rebate_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "rebate_i1.inc"
+
+
+Where   (inv_hf:RebateDueDate >= dtSDate AND inv_hf:RebateDueDate <= dtEDate) AND
+        (inv_hf:UnitNumber = crange or crange = "ALL") AND
+        (inv_hf:Model = cmodels or cmodels = "ALL") AND
+        (inv_hf:BankID = cbanks or cbanks = "ALL") AND
+        (inv_hf:Description = cdescrip or cdescrip = "ALL") AND
+        (inv_hf:InvClass = cclass or cclass = "ALL") AND
+        ((crebate = "Rebates Due" AND inv_hf:RebateDatePaid = null) OR (crebate = "Rebates Paid" AND inv_hf:RebateDatePaid <> null) or crebate = "All Rebates") 
+
+list/domain="inv_hf"/nobanner/pageof/title="Rebate Report"/duplicates/noheadings/count
+  inv_hf:product /displaywidth=10
+  inv_hf:unitnumber/displaywidth=15
+  inv_hf:invclass /displaywidth=10
+  inv_hf:model/displaywidth=10
+  inv_hf:description /displaywidth=20
+  inv_hf:bankid /displaywidth=10
+  inv_hf:rebatetype/displaywidth=10
+  inv_hf:rebateduedate /displaywidth=10
+  inv_hf:rebatedatepaid /displaywidth=10
+  inv_hf:rebateamount/displaywidth=12/total
+
+sorted by
+   switch(csort)
+   case "Unit"         : inv_hf:unitnumber
+   case "Class"        : inv_hf:invclass
+   case "Model"        : inv_hf:model
+   case "Bank ID"      : inv_hf:bankid
+   case "Description"  : inv_hf:description
+   default : ""
+  
+   inv_hf:unitnumber
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Unit Range: "+str(crange)/newline
+  "Rebate Date Due from "+str(dtsdate)+" to "+str(dtedate)/newline
+  crebate/newline
+  end box /newline=4
+
+
+  "Product"/align=inv_hf:product 
+  "Unit Number"/align=inv_hf:unitnumber 
+  "Class"/align=inv_hf:invclass 
+  "Model"/align=inv_hf:model 
+  "Description"/align=inv_hf:description 
+  "Bank Id"/align=inv_hf:bankid 
+  "Rebate Type"/align=inv_hf:rebatetype
+  "Rebate Due"/align=inv_hf:rebateduedate 
+  "Rebate Paid"/align=inv_hf:rebatedatepaid
+  "Rebate Amount"/align=inv_hf:rebateamount/newline
+
+;
+replace rebate.eq
+run/parameterfile=rebate_1 rebate.eq
+rrepl rebate
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rebate
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Rebate Report" -- Report Title
+   string rptname1    = "rebate" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rebate_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

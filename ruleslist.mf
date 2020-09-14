@@ -1,0 +1,228 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Rate Rules List
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: ruleslist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ruleslist.mf $
+$Revision: 1 $
+$History: ruleslist.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 10/23/19   Time: 1:32p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Renamed executable to ruleslist from rulelist
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="raterule"
+if itemnumber=1 then '"'+raterule:name+'"' else
+   ',"'+raterule:name+'"'
+
+sorted by
+   raterule:name
+top of report
+'string crule[8192] = multivalue parameter prompt "Rate Rules: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_rule"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define 
+   include "param_rule.cq"
+;
+replace rulelist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "rulelist_i1.inc"
+define
+ 
+   string ccalc = switch(raterule:calcmeth)
+     case 1 : "T&M"
+     case 2 : "Calendar"
+     case 3 : "Slot Time"
+     default : "N/A"
+
+   string cmlg = if raterule:mlgcalc = 1 then "Actual Time" else "Charged Time"
+   string cminkeep = if (raterule:minkeep mod 1440) = 0 then str(raterule:minkeep div 1440)+" days" else
+                         if (raterule:minkeep mod 60) = 0 then str(raterule:minkeep div 60)+" hours" else
+                           str(raterule:minkeep)+" mins"
+   string cmaxkeep = if (raterule:maxkeep mod 1440) = 0 then str(raterule:maxkeep div 1440)+" days" else
+                         if (raterule:maxkeep mod 60) = 0 then str(raterule:maxkeep div 60)+" hours" else
+                           str(raterule:maxkeep)+" mins"
+
+   string caction = if raterule:rvact = 1 then "Fallback" else "Cascade"
+   string cstartday = if raterule:startday = 0 then "" else dayname(raterule:startday)+" "+str(raterule:starttime,"Z9.99")
+   string cendday = if raterule:endday = 0 then "" else dayname(raterule:endday)+" "+str(raterule:endtime,"Z9.99")
+   string cshop = if raterule:shop = 1 then "Yes" else "No"
+   string cassoc = if raterule:assdrtreq = 1 then "Yes" else "No"
+   string cccreq = if raterule:crcard = 1 then "Yes" else "No"
+   string cinsure = if raterule:insure = 1 then "Yes" else "No"
+   string cprepay = if raterule:prepay = 1 then "Yes" else "No"
+   string ctrip = if raterule:trip = 1 then "Yes" else "No"
+
+   string pudate  = str(raterule:startdow1)+","+str(raterule:startdow2)+","+str(raterule:startdow3)+","+str(raterule:startdow4)
+         +","+str(raterule:startdow5)+","+str(raterule:startdow6)+","+str(raterule:startdow7)
+
+   string staydate  = str(raterule:reqnight1)+","+str(raterule:reqnight2)+","+str(raterule:reqnight3)+","+str(raterule:reqnight4)
+         +","+str(raterule:reqnight5)+","+str(raterule:reqnight6)+","+str(raterule:reqnight7)
+
+   string returndate  = str(raterule:enddow1)+","+str(raterule:enddow2)+","+str(raterule:enddow3)+","+str(raterule:enddow4)
+         +","+str(raterule:enddow5)+","+str(raterule:enddow6)+","+str(raterule:enddow7)
+   file counter_i = access counter,
+     set min=1,max=7
+
+   string cpickup = if (val(subfield(pudate,",",counter_i:position))*counter_i:position) <> 0 then str(dayname(counter_i:position),3)+" " else ""
+   string cstay = if (val(subfield(staydate,",",counter_i:position))*counter_i:position) <> 0 then str(dayname(counter_i:position),3)+" " else ""
+   string cretday = if (val(subfield(returndate,",",counter_i:position))*counter_i:position) <> 0 then str(dayname(counter_i:position),3)+" " else ""
+
+
+where raterule:name = crule or crule = "ALL"
+
+list/domain="raterule"/nobanner/pageof/title="Rate Rules List"/noreporttotals/noheadings/pagelength=80
+
+box/column=1/inline/width=100
+  raterule:name/heading="Name"
+  raterule:description/displaywidth=30/heading="Description"
+  cshop/displaywidth=20/heading="Shoppable"/newline
+end box/newlines
+
+box/column=3/inline/width=45
+  ccalc/displaywidth=10/heading=" Calc. Method"/newline
+  raterule:bkstdt/displaywidth=12/heading="Booking Start"/newline
+  raterule:bkendt/displaywidth=12/heading="  Booking End"/newline
+  raterule:advbk/displaywidth=12/heading="    Adv. Book"/newline
+  cminkeep/displaywidth=12/heading="    Min. Keep"/newline
+  cmaxkeep/displaywidth=12/heading="     Max Keep"/newline
+  raterule:slotstart/displaywidth=12/heading="   Slot Start"/newline
+  "    Valid Pickup:"
+  cpickup/concatenate/displaywidth=30/newline
+  "      Req'd Stay:"
+  cstay/concatenate/displaywidth=30/newline
+  "    Valid Return:"
+  cretday/concatenate/displaywidth=30/newline
+
+end box
+
+box/column=50/inline/width=35
+  cmlg/displaywidth=12/heading=" Calc. Mileage By"/newline
+  raterule:depstdt/displaywidth=12/heading="  Departure Start"/newline
+  raterule:dependt/displaywidth=12/heading="    Departure End"/newline
+  raterule:retbydt/displaywidth=12/heading="        Return By"/newline
+  cstartday/displaywidth=20/heading="   Start Day/Time"/newline
+  cendday/displaywidth=20/heading="     End Day/Time"/newline
+  caction/displaywidth=12/heading="Rule Viol. Action"/newline
+end box
+
+box/column=75/inline/width=35
+  cassoc/displaywidth=5/heading="Assoc. Rate Req."/newline
+  cccreq/displaywidth=5/heading="Credit Card Req."/newline
+  cinsure/displaywidth=5/heading="  Insurance Req."/newline
+  cprepay/displaywidth=5/heading="     Prepay Req."/newline
+  ctrip/displaywidth=5/heading="         Trip OK"/newline
+  raterule:free/displaywidth=5/heading="      Free Mins."/newline
+  raterule:grace/displaywidth=5/heading="     Grace Mins."/newline
+  raterule:dz/displaywidth=5/heading="       Drop Zone"/newline
+end box/newlines=2
+followed by
+  "Disclosure:"
+box/column=12/width=70/fill/noblanklines
+  raterule:disc
+end box
+""/newlines=2
+
+sorted by raterule:name
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Rate Rule(s): " + str(crule)/displaywidth=100/newline
+ end box /newline= 4
+
+
+end of report
+""/newline
+"Total records: "+str(count[raterule:name,report])
+
+;
+replace rulelist_1.eq
+replace rulelist.eq
+run/setparameter rulelist_1.eq
+
+run/parameterfile=rulelist_1 rulelist_1.eq
+
+run/parameterfile=rulelist_1 rulelist.eq
+rrepl rulelist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rulelist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Rate Rules List" -- Report Title
+   string rptname1    = "rulelist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rulelist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

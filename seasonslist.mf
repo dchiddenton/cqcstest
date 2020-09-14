@@ -1,0 +1,146 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Rate Seasons List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/18/2017
+Modified:
+
+Notes:
+$Workfile: seasonslist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/seasonslist.mf $
+$Revision: 2 $
+$History: seasonslist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rateseason"
+if itemnumber=1 then '"'+rateseason:code+'"' else
+   ',"'+rateseason:code+'"'
+
+sorted by
+   rateseason:code
+top of report
+'string cseason[8192] = multivalue parameter prompt "Rate Seasons: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_seasons"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+   include "param_seasons.cq"
+;
+replace seasonslist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+
+include "seasonslist_i1.inc"
+
+where
+  (rateseason:code = cSeason or cSeason = "ALL")
+  
+list/noduplicates/noendofreport/noheadings/nobanner/nototals/title="Rate Seasons List"/pageof/domain="rateseason"
+  rateseason:code/heading="Code" 
+  rateseason:description/heading="Description"
+  monthname(rateseason:startmonth)/heading="Month"/duplicates/name="a" 
+  rateseason:startday/left/duplicates/heading="Day"
+  switch (rateseason:startyear)
+    case 0 : "Every Year"
+    default : str(rateseason:startyear)/left/displaywidth=15/duplicates/heading="Year"
+  monthname(rateseason:endmonth)/duplicates/heading="Month"/name="b" 
+  rateseason:endday/duplicates/heading="Day" 
+  switch (rateseason:endyear)
+    case 0 : "Every Year"
+    default : str(rateseason:endyear)/left/displaywidth=15/duplicates/heading="Year"
+  
+sorted by
+  rateseason:code/total
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Season(s): "+str(cSeason)/displaywidth=100/newline
+  end box/newlines=4
+  "-  -  -  -  -  Starting  -  -  -  -  - "/align=a
+  "-  -  -  -  -   Ending   -  -  -  -  - "/align=b
+
+end of report 
+  "Total Records: "  +str(count[rateseason:startyear])
+
+;
+replace seasonslist_1.eq
+replace seasonslist.eq
+run/setparameter seasonslist_1.eq
+
+run/parameterfile=seasonslist_1 seasonslist_1.eq
+
+run/parameterfile=seasonslist_1 seasonslist.eq
+rrepl seasonslist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view seasonslist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Rate Seasons List" -- Report Title
+   string rptname1    = "seasonslist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "seasonslist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

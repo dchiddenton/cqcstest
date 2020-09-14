@@ -1,0 +1,373 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Fleet Transaction Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/11/2017
+Modified:
+
+Notes:
+$Workfile: flttrx.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/flttrx.mf $
+$Revision: 2 $
+$History: flttrx.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1  
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_product.cq"
+  string crange = range parameter prompt "Enter Fleet Range (Start..End or ALL): " default ALL
+  string corigin[1024] = multivalue parameter prompt "Origin/Types: " valid "Created","Rental","Deleted","Exchange","Foreign","Maintenance","Modify","NonRevenue","Problem","Repair","Sale" default "ALL"
+  string coverlap = parameter/uppercase prompt "Overlapping Transactions Only?" valid "Y","N" default "N"
+  string clistid = parameter/uppercase prompt "List Transaction IDs?" valid "Y","N" default "N"
+
+;
+replace flttrx_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve and and identify inv transactions
+------------------------------------------------------------------------*/
+viewpoint native;
+include "flttrx_i1.inc"
+
+      string trx_type = switch(InvTrx:TrxOrigin)
+                case  "ADD"      : "Created"
+                case  "CHECKOUT" : "Rental"
+                case  "DELETE"   : "Deleted"
+                case  "EXCHANGE" : "Exchange"
+                case  "FOREIGN"  : "Foreign"
+                case  "IMA"      : "Maintenance"
+                case  "MODIFY"   : "Modify"
+                case  "Non-Rev"  : "NonRevenue"
+                case  "PROBLEMS" : "Problem"
+                case  "RO"       : "Repair"
+                case  "SOLD"     : "Sale"
+                Default          : "Rental"
+
+   string trx_num = if invtrx:ronumber <> 0 then str(invtrx:ronumber) else
+                    if invtrx:ticketnumber <> "" then invtrx:ticketnumber else
+                    if invtrx:ranumber <> "" then invtrx:ranumber 
+
+where
+      (InvTrx:UnitNumber = crange) and
+      ((InvTrx:DateOut >= dtsdate and 
+      InvTrx:DateOut <= dtEDate or InvTrx:DateOut = null) or 
+      (InvTrx:DateIn >= dtsdate and InvTrx:DateIn <= dtEDate)) 
+      and invtrx:invid <> 0
+      and (trx_type = corigin or corigin = "ALL")
+
+list/domain="invtrx"/hold="invtrx_hf"
+
+invtrx:unitnumber
+invtrx:invid/keyelement=1.1
+invtrx:recordnumber
+invtrx:invtrxid
+invtrx:licensenumber
+invtrx:licensest
+invtrx:year
+invtrx:make
+invtrx:model
+trx_type
+invtrx:dateout
+invtrx:timeout
+invtrx:odometerout
+invtrx:locationcodeout
+invtrx:datein
+invtrx:timein
+invtrx:odometerin
+invtrx:locationcodein
+trx_num
+
+
+sorted by
+invtrx:invid
+
+;
+replace flttrx_1.eq
+run/setparameter flttrx_1.eq
+
+run/parameterfile=flttrx_1 flttrx_1.eq
+
+/*------------------------------------------------------------------------
+ Diagnose transaction issues
+------------------------------------------------------------------------*/
+viewpoint native;
+include "flttrx_i1.inc"
+
+   file invtrx_link = access invtrx,
+    set invtrx:invid=invtrx_hf:invid,
+    one to many
+
+   number print_this = if invtrx_hf:dateout = null then 1
+   else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein = null) AND
+                        (invtrx_hf:DateOut > invtrx_link:DateOut OR (invtrx_hf:DateOut  = invtrx_link:DateOut AND invtrx_hf:TimeOut > invtrx_link:TimeOut)) AND
+                        (invtrx_hf:DateOut  < invtrx_link:DateIn OR (invtrx_hf:DateOut  = invtrx_link:DateIn AND invtrx_hf:TimeOut  < invtrx_link:TimeIn)) then 2
+   else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein = null) AND
+                        (invtrx_hf:DateOut  < invtrx_link:DateOut OR (invtrx_hf:DateOut  = invtrx_link:DateOut AND invtrx_hf:TimeOut  < invtrx_link:TimeOut) OR
+                        invtrx_hf:DateOut  < invtrx_link:DateIn OR (invtrx_hf:DateOut  = invtrx_link:DateIn AND invtrx_hf:TimeOut  < invtrx_link:TimeIn)) then 3
+   else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND invtrx_hf:DateIn = null AND (invtrx_link:datein = null) AND
+                    (invtrx_hf:DateOut > invtrx_link:DateOut OR (invtrx_hf:DateOut  = invtrx_link:DateOut AND invtrx_hf:TimeOut > invtrx_link:TimeOut)) then 4
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein <> null) AND
+                    (invtrx_hf:DateOut  < invtrx_link:DateOut OR (invtrx_hf:DateOut  = invtrx_link:DateOut AND invtrx_hf:TimeOut  < invtrx_link:TimeOut)) AND
+                    (invtrx_hf:DateIn > invtrx_link:DateOut OR (invtrx_hf:DateIn  = invtrx_link:DateOut AND invtrx_hf:TimeIn > invtrx_link:TimeOut)) then 5
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein <> null) AND
+                    (invtrx_hf:DateIn  < invtrx_link:DateIn OR (invtrx_hf:DateIn  = invtrx_link:DateIn AND invtrx_hf:TimeIn  < invtrx_link:TimeIn)) AND 
+                    (invtrx_hf:DateOut > invtrx_link:DateIn OR (invtrx_hf:DateOut  = invtrx_link:DateIn AND invtrx_hf:TimeOut > invtrx_link:TimeIn)) then 6
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein <> null) AND
+                    (invtrx_hf:DateOut > invtrx_link:DateOut OR (invtrx_hf:DateOut  = invtrx_link:DateOut AND invtrx_hf:TimeOut > invtrx_link:TimeOut)) AND
+                    (invtrx_hf:DateIn  < invtrx_link:DateOut OR (invtrx_hf:DateIn  = invtrx_link:DateOut AND invtrx_hf:TimeIn  < invtrx_link:TimeOut)) then 7
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND (invtrx_hf:datein <> null) AND
+                    (invtrx_hf:DateIn > invtrx_link:DateIn OR (invtrx_hf:DateIn  = invtrx_link:DateIn AND invtrx_hf:TimeIn > invtrx_link:TimeIn)) AND 
+                    (invtrx_hf:DateOut  < invtrx_link:DateIn OR (invtrx_hf:DateOut  = invtrx_link:DateIn AND invtrx_hf:TimeOut  < invtrx_link:TimeIn)) then 8
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND invtrx_link:DateIn <> null AND 
+                        (invtrx_hf:dateout <> invtrx_hf:datein or invtrx_hf:timeout <> invtrx_hf:timein) AND
+                        (invtrx_link:DateOut  < invtrx_hf:DateOut OR (invtrx_link:DateOut  = invtrx_hf:DateOut AND invtrx_link:TimeOut  < invtrx_hf:TimeOut)) AND
+                        (invtrx_link:DateIn > invtrx_hf:DateOut OR (invtrx_link:DateIn  = invtrx_hf:DateOut AND invtrx_link:TimeIn > invtrx_hf:TimeOut)) then 9
+  else if invtrx_link:invtrxid <> invtrx_hf:invtrxid AND invtrx_link:DateIn <> null AND
+                        (invtrx_hf:dateout <> invtrx_hf:datein or invtrx_hf:timeout <> invtrx_hf:timein) AND
+                        (invtrx_link:DateOut > invtrx_hf:DateOut OR (invtrx_link:DateOut  = invtrx_hf:DateOut AND invtrx_link:TimeOut > invtrx_hf:TimeOut)) AND
+                        (invtrx_link:DateIn  < invtrx_hf:DateOut OR (invtrx_link:DateIn  = invtrx_hf:DateOut AND invtrx_link:TimeIn  < invtrx_hf:TimeOut)) then 10
+  else 0
+
+  string diagmsg = switch(print_this)
+      case 1 : "No OUT date"
+      case 2 : "open trx within other trx"
+      case 3 : "trx after start of open trx"
+      case 4 : "open trx before current"
+      case 5 : "later overlap DateOut"
+      case 6 : "later overlap DateIn"
+      case 7 : "previous overlap DateOut"
+      case 8 : "previous overlap DateIn"
+      case 9 : "current nested in buffer DateOut"
+      case 10 : "buffer nested in current DateOut"
+      default : "N/A"
+
+
+
+      string trx_type2 = switch(InvTrx_link:Trxorigin)
+                case  "ADD"      : "Created"
+                case  "CHECKOUT" : "Rental"
+                case  "DELETE"   : "Deleted"
+                case  "EXCHANGE" : "Exchange"
+                case  "FOREIGN"  : "Foreign"
+                case  "IMA"      : "Maintenance"
+                case  "MODIFY"   : "Modify"
+                case  "Non-Rev"  : "NonRevenue"
+                case  "PROBLEMS" : "Problem"
+                case  "RO"       : "Repair"
+                case  "SOLD"     : "Sale"
+                Default          : "Rental"
+
+   string trx_num2 = if invtrx_link:ronumber <> 0 then str(invtrx_link:ronumber) else
+                    if invtrx_link:ticketnumber <> "" then invtrx_link:ticketnumber else
+                    if invtrx_link:ranumber <> "" then invtrx_link:ranumber
+
+
+
+list/domain="invtrx_hf"/noheadings/hold="invtrx2_hf"
+if (print_this > 0 and coverlap = "Y") or (coverlap = "N") then {
+invtrx_hf:unitnumber
+invtrx_hf:invid
+invtrx_hf:licensenumber
+invtrx_hf:licensest
+invtrx_hf:year
+invtrx_hf:make
+invtrx_hf:model
+invtrx_hf:trx_type/name="trx_type"
+invtrx_hf:dateout
+invtrx_hf:timeout
+invtrx_hf:odometerout
+invtrx_hf:locationcodeout
+invtrx_hf:datein
+invtrx_hf:timein
+invtrx_hf:odometerin
+invtrx_hf:locationcodein
+invtrx_hf:invtrxid/name="trx_id"
+invtrx_hf:trx_num/name="trx_num"
+print_this
+diagmsg/name="msg"
+}
+followed by
+if (print_this > 1 and coverlap = "Y") then {
+invtrx_hf:unitnumber
+invtrx_hf:invid
+invtrx_hf:licensenumber
+invtrx_hf:licensest
+invtrx_hf:year
+invtrx_hf:make
+invtrx_hf:model
+trx_type2
+invtrx_link:dateout
+invtrx_link:timeout
+invtrx_link:odometerout
+invtrx_link:locationcodeout
+invtrx_link:datein
+invtrx_link:timein
+invtrx_link:odometerin
+invtrx_link:locationcodein
+invtrx_link:invtrxid
+trx_num2
+print_this
+diagmsg
+}
+
+sorted by
+invtrx_hf:unitnumber
+invtrx_hf:invid
+invtrx_hf:invtrxid
+
+;
+run/parameterfile=flttrx_1 
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "flttrx_i1.inc"
+
+list/domain="invtrx2_hf"/nodetail/nobanner/noheadings/noreporttotals/pageof/pagelength=75/title="Fleet Transaction Report"
+  invtrx2_hf:trx_num/name="a"
+  invtrx2_hf:trx_type/name="b"
+  invtrx2_hf:locationcodeout/displaywidth=10/name="c"
+  invtrx2_hf:dateout/name="d"
+  invtrx2_hf:timeout/name="e"
+  invtrx2_hf:odometerout /name="f"
+  invtrx2_hf:locationcodein/displaywidth=10 /name="g"
+  invtrx2_hf:datein /name="h"
+  invtrx2_hf:timein/name="i"
+  invtrx2_hf:odometerin/name="j"
+  if clistid = "Y" then invtrx2_hf:trx_id /name="k"
+  if coverlap = "Y" then invtrx2_hf:msg/displaywidth=20/name="l"
+
+sorted by
+  invtrx2_hf:unitnumber
+  invtrx2_hf:trx_id
+
+end of invtrx2_hf:trx_id
+  invtrx2_hf:trx_num/align=a
+  invtrx2_hf:trx_type/align=b
+  invtrx2_hf:locationcodeout/displaywidth=10/align=c
+  invtrx2_hf:dateout/align=d
+  invtrx2_hf:timeout/align=e
+  invtrx2_hf:odometerout /align=f
+  invtrx2_hf:locationcodein/displaywidth=10/align=g
+  invtrx2_hf:datein /align=h
+  invtrx2_hf:timein/align=i
+  invtrx2_hf:odometerin/align=j
+  if clistid = "Y" then invtrx2_hf:trx_id /align=k
+  if coverlap = "Y" then invtrx2_hf:msg/displaywidth=20/align=l
+
+top of invtrx2_hf:unitnumber
+  invtrx2_hf:unitnumber/heading="Unit" /align=a
+  invtrx2_hf:licensenumber
+  invtrx2_hf:licensest
+  invtrx2_hf:year
+  invtrx2_hf:make
+  invtrx2_hf:model
+  invtrx2_hf:invid/heading="Unit ID" /newline
+
+end of invtrx2_hf:unitnumber
+  ""/newline
+
+
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if coverlap = "Y" then "Date Range: "+str(dtSdate)+" to "+str(dtEdate) + "   Overlapping transactions" else
+  "Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+  "Product(s): " + str(cProduct) + "  " + "Unit Range: " + str(crange)/displaywidth=100
+   end box/newline=4
+   
+  
+
+  "Transaction Out"/width=45/centre/align=c
+  "Transaction In"/width=45/centre/align=g/newline
+
+  "RA/RO/NR#"/align=a
+  "Trx Type"/align=b
+  "Location"/align=c
+  "Date"/align=d
+  "Time"/align=e
+  "Odom"/align=f
+  "Location"/align=g
+  "Date"/align=h
+  "Time"/align=i
+  "Odom"/align=j
+  if clistid = "Y" then "TrxID"/align=k
+  if coverlap = "Y" then "Overlap"/align=l
+  ""/newline
+
+;
+replace flttrx.eq
+run/parameterfile=flttrx_1 flttrx.eq
+rrepl flttrx
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view flttrx
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet Transaction Report" -- Report Title
+   string rptname1    = "flttrx" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "flttrx_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

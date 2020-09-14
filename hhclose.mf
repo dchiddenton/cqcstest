@@ -1,0 +1,196 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Handheld Close Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/9/2018
+Modified:
+
+Notes:
+$Workfile: hhclose.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/hhclose.mf $
+$Revision: 2 $
+$History: hhclose.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate 
+  time dtstime = parameter prompt "Start Time: " default 0:00 
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  time dtetime = parameter prompt "End Time: " default 23:59
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string csort = parameter prompt "Sort by: " valid "Date In","Employee#","RA#" default "Date In"
+
+;
+replace hhclose_i1.inc
+
+/*------------------------------------------------------------------------
+ first procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "hhclose_i1.inc"
+
+
+list/domain="dummy"/nobanner/nodefaults
+""
+;
+replace hhclose_1.eq
+run/setparameter hhclose_1.eq
+
+/*------------------------------------------------------------------------
+ Setup sort criteria
+------------------------------------------------------------------------*/
+include "hhclose_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if csort = "Employee#" then {
+"sorted by emp_in"
+"end of emp_in ""/newline=2 str(running count[rrm:ranumber,emp_in])+' Contracts for Employee '+str(emp_in)/newline=2" } else 
+if csort = "RA#" then {
+"sorted by rrm:ranumber" } else 
+if csort = "Date In" then {
+"sorted by ra_time" } else {""}
+;
+
+run/parameterfile=hhclose_1
+rreplace hhclose_i2
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "hhclose_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodein,
+    null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   file employee_link = access employee,
+    set employee:employeenumber=rental_link:employeenumberin,
+    one to one, null fill on failure
+
+   file inv_link = access invtrx,
+    set invtrx:invid=rrm:invid,
+    one to one,generic, null fill on failure
+  
+   timestamp time_st = timestamp(dtSdate,time(str(dtSTime,"HH.MM")))
+   timestamp time_en = timestamp(dtEdate,time(str(dtETime,"HH.MM")))
+
+   timestamp ra_time = timestamp(rrm:datein,time(replace(str(rrm:timein,"99.99"),".",":")))
+
+   string emp_in = str(employee_link:employeelastname)+", "+employee_link:employeefirstname
+
+
+where 
+  (rrm:datein >= dtsdate and rrm:datein <= dtedate)
+  and (rrm:locationcodein = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:handheldclose=1 and (ra_time >= time_st and ra_time <= time_en)
+
+
+list/domain="rrm"/nobanner/pageof/noreporttotals/duplicates/title="Handheld Check-in Report"
+rrm:datein/displaywidth=10/heading="Date"
+rrm:timein/displaywidth=8/heading="Time"
+rrm:locationcodein/displaywidth=10/heading="Location"
+rrm:ranumber/displaywidth=10/heading="RA#"
+str(rrm:customerlastname)+", "+str(rrm:customerfirstname)/displaywidth=30/heading="Renter"
+inv_link:unitnumber/displaywidth=10/heading="Unit#"
+emp_in/displaywidth=30/heading="Employee"
+
+include "hhclose_i2.cq"
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date/Time Range: "+str(time_st)+" to "+str(time_en)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Sorted by: "+str(csort)
+  end box /newline=4
+
+
+end of report
+  ""/newline
+  str(count[rrm:ranumber,report])+" Total Contracts"
+
+;
+replace hhclose
+run/parameterfile=hhclose_1 hhclose.eq
+rrepl hhclose
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view hhclose
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Handheld Close Report" -- Report Title
+   string rptname1    = "hhclose" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "hhclose_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,237 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Contract Discrepany Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/26/2017
+Modified:
+
+Notes:
+$Workfile: condiscr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/condiscr.mf $
+$Revision: 2 $
+$History: condiscr.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1 
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string crange = range parameter prompt "Enter Contract Range (Start..End or ALL): " default ALL
+  string cnonum = parameter/uppercase prompt "Show Missing RA Numbers: " valid "Y","N" default "Y"
+  string cnodate = parameter/uppercase prompt "Show Missing Dates (Out/In/Due): " valid "Y","N" default "Y"
+  string cnocar = parameter/uppercase prompt "Show Missing Vehicles: " valid "Y","N" default "Y"
+  string cnorate = parameter/uppercase prompt "Show Missing Rates: " valid "Y","N" default "Y"
+  string cvoid = parameter/uppercase prompt "Show Voided RAs: " valid "Y","N" default "Y"
+;
+replace condiscr_i1.inc
+
+/*------------------------------------------------------------------------
+ Contracts - check Location, Product, RA# and Date ranges 
+------------------------------------------------------------------------*/
+viewpoint native;
+ 
+include "condiscr_i1.inc"    
+
+
+  file alt_locgroupOut = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = RRM:LocationCodeOut,
+    null fill on failure
+  file alt_locgroupDue = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = RRM:LocationCodedue,
+    null fill on failure
+  file alt_locgroupIn = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = RRM:LocationCodein,
+    null fill on failure
+
+define string cProblemRA = if RRM:RAStatus > 0 and (RRM:RANumber = "" or RRM:RANumber = null) then "No RA-Number, " else ""
+define string cProblemRate = if RentalDB:RateNumber = 0 or RentalDB:RateNumber = null then "No Rate, " else ""
+define string cProblemVoid = if RRM:RAStatus = 4 then "Voided RA, " else ""
+define string cProblemLoc = if RRM:LocationCodeOut = "" or RRM:LocationCodeOut = null or RRM:LocationCodeDue = "" or RRM:LocationCodeDue = null then "No Location, " else ""
+define string cProblemCar = if RRM:InvTrxID = 0 or RRM:InvTrxID = null then "No Vehicle, " else ""
+define string cProblemDateout = if RRM:DateOut = null  then "Bad Date Out, " else ""
+define string cProblemDatedue = if RRM:DateDue = null  then "Bad Date Due, " else ""
+define string cProblemDatein = if (RRM:rastatus=3 and RRM:DateIN = null) then "Bad Date In, " else ""
+
+define string cProblemName = if RRM:CustomerLastName+RRM:CustomerFirstName = "" then "No Name, " else ""
+define string cProblemZero = if RRM:TotalCharges = 0 then "Nothing Charged" else ""
+
+define string cProblemList = cProblemRA+cProblemRate+cProblemVoid+cproblemloc+cProblemCar+cProblemDateout+cProblemDatedue+cProblemDatein+cProblemName
+define string cProblem = switch (len(cProblemList+"")) 
+                         case 0 : cProblemZero 
+                         default : str(cProblemList, len(cProblemList+"") - 2)/heading="Problem"
+
+
+
+where  
+    
+     (((rrm:dateout >= dtsdate and rrm:dateout <= dtedate) or rrm:dateout = null) or
+      ((rrm:datedue >= dtsdate and rrm:datedue <= dtedate) or rrm:datedue = null) or
+      ((rrm:datein >= dtsdate and rrm:datein <= dtedate) or (rrm:rastatus=3 and rrm:datein = null))) and
+     ((RRM:RAStatus > 0 and cvoid = "Y")  or (cvoid = "N" and RRM:RAStatus <> 4 and rrm:rastatus > 0)) and   -- exclude reservations
+     (RRM:LocationCodeOut = cLoc or RRM:LocationCodeDue = cLoc or rrm:locationcodein = cloc or cloc = "ALL") and
+     (cLocGroup = "" or cLocGroup = alt_locgroupOut:groupname or
+      cLocGroup = alt_locgroupDue:groupname or
+      cLocGroup = alt_locgroupIn:groupname) and
+     (RRM:RANumber = "" or RRM:RANumber = null or RRM:RANumber = crange or crange = "ALL") and
+     (RRM:Product = cProduct or cProduct = "ALL")
+                               
+
+sum/domain="RRM"/hold="condiscr_hf"
+  RRM:TotalCharges/heading="Total Charges" -- sum reports require 1 numeric field which can get hidden
+  RRM:CommonID  -- just to get holdfile to RRM relationship
+  RRM:InvTrxID  -- just to get holdfile to InvTrx relationship
+  RRM:InvID     -- just to get holdfile to Inv relationship
+  RRM:RenterID  -- just to get holdfile to RenterRA relationship
+
+by 
+  RRM:LocationCodeOut
+  RRM:Product
+  RentalDB:RateCode
+  InvTrx:UnitNumber
+  RRM:CustomerLastName+", "+RRM:CustomerFirstName/heading="Renter"
+  RRM:RANumber
+  rrm:resnumber
+  cProblem
+
+;
+replace condiscr_1.eq
+run/setparameter condiscr_1.eq
+
+run/parameterfile=condiscr_1 condiscr_1.eq
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+viewpoint native
+ 
+include "condiscr_i1.inc"  
+
+define
+   file rrm_link = access rrm,
+    set rrm:commonid=condiscr_hf:commonid,
+    one to one, null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=condiscr_hf:commonid,
+    one to one, null fill on failure
+
+where  
+   condiscr_hf:cProblem <> "" and 
+     ((rrm_link:CustomerLastName+rrm_link:CustomerFirstName = "" and rrm_link:RAStatus <> 4) or
+     (cnonum = "Y" and (rrm_link:RANumber = "" or rrm_link:RANumber = null)) or
+     (cvoid = "Y" and rrm_link:RAStatus = 4) or
+     (cnorate = "Y" and rental_link:RateNumber = null) or 
+     (cnorate = "Y" and rrm_link:TotalCharges = 0 and rrm_link:RAStatus <> 4) or 
+     (cnocar = "Y" and rrm_link:RAStatus > 1 and (rrm_link:InvTrxID = 0 or rrm_link:InvTrxID = null)) or
+     (cnodate = "Y" and (rrm_link:DateOut = null or rrm_link:DateDue = null or ((rrm:rastatus=3 or rrm:rastatus<>0) and rrm_link:DateIn = null))))
+
+
+list/nobanner/domain="condiscr_hf"/duplicates/nototals/title="Contract Discrepancy Report"/pagelength=70
+  if condiscr_hf:RANumber = "" then "RES-"+str(condiscr_hf:resnumber) else condiscr_hf:ranumber/heading="RA Number"/Displaywidth=10
+  condiscr_hf:Product
+  condiscr_hf:UnitNumber
+  condiscr_hf:Renter/Displaywidth=20
+  rrm_link:DateOut/Displaywidth=10
+  rrm_link:DateDue/Displaywidth=10
+  rrm_link:DateIn/Displaywidth=10
+  condiscr_hf:LocationCodeOut/Displaywidth=10
+  rental_link:RateCode
+  condiscr_hf:cProblem/Displaywidth=50
+
+sorted by 
+condiscr_hf:ranumber
+condiscr_hf:resnumber
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+    "Product: " + str(cProduct)+"   Contract Range: " + str(crange)/newline
+  "Include Contracts With: " +str(cproblem)
+  end box/newline=4
+
+end of report
+ count[condiscr_hf:commonid,report]/heading="Total Records"
+
+;
+replace condiscr.eq
+run/parameterfile=condiscr_1 condiscr.eq
+rrepl condiscr
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view condiscr
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Contract Discrepany Report" -- Report Title
+   string rptname1    = "condiscr" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "condiscr_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

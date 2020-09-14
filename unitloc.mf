@@ -1,0 +1,310 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Unit Location Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/11/2018
+Modified:
+
+Notes:
+$Workfile: unitloc.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/unitloc.mf $
+$Revision: 2 $
+$History: unitloc.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_invstatus.cq"
+  string inc_foreign = parameter/uppercase prompt "Include Foriegn Vehicles? " valid "Y","N" default "N"
+  string page_break = parameter/uppercase prompt "Page Break after each Status? " valid "Y","N" default "N"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+  string csort = parameter prompt "Sort by Status, Company, Unit, Class: " valid "Status","Company","Unit","Class" default "Status"
+
+;
+replace unitloc_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+
+include "unitloc_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+end of report
+
+str(cLoc) /newline
+cLocGroup /newline
+str(cProduct) /newline
+str(cClass)/newline
+str(cstatus) /newline
+inc_foreign /newline
+page_break /newline
+notes_detail /newline
+csort /newline
+
+;
+replace unitloc_1.eq
+run/setparameter unitloc_1.eq
+
+/*------------------------------------------------------------------------
+ Dynamically create sort section
+------------------------------------------------------------------------*/
+include "unitloc_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if csort = "Status" then {
+    if page_break = "Y" then {
+    "stat_desc:description/page/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+    }
+   else {
+    "stat_desc:description/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+    } 
+  }
+ if csort = "Class" then {
+    if page_break = "Y" then {
+    "inv:product/total/count/heading='@'"/newline
+    "inv:invclass/page/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline 
+   }
+  else {
+    "inv:product/total/count/heading='@'"/newline
+    "inv:invclass/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+   }
+  }
+  if (csort = "Company") then {
+    "comp_name/total"/newline
+    "inv:unitnumber"/newline
+  }
+  if (csort = "Unit") then {
+    "inv:product/total/count/heading='@'"/newline
+    "inv:unitnumber"/newline
+  }
+;
+run/parameterfile=unitloc_1
+rrepl "unitloc_i2"
+
+/*------------------------------------------------------------------------
+ Dynamically create Top of section
+------------------------------------------------------------------------*/
+include "unitloc_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Status" then {
+  "Top of stat_desc:description"/newline
+  "'Status: '+str(stat_desc:description)/newline"/newline
+} else if csort = "Class" then {
+  "Top of inv:invclass"/newline
+  "'Class: '+str(inv:product)+'  '+str(inv:invclass)/newline"/newline
+} else if csort = "Unit" then  {
+  "Top of inv:product"/newline
+  "'Unit: '+str(inv:product)/newline"/newline
+}
+;
+run/parameterfile=unitloc_1 
+rrepl "unitloc_i3"
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+include "unitloc_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+   file invtrx_link = access invtrx,
+    set invtrx:invtrxid=inv:invtrxid,
+    one to one,exact,reverse, null fill on failure
+
+   file rrm_link = access rrm,
+    set rrm:ranumber=inv:ranumber,
+    with inv:vehiclestatusowned=2,
+    one to one, generic, null fill on failure
+
+   file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+  string key_str = str(inv:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+  string comp_name = if rrm_link:company <> "" then rrm_link:company else 
+    if rrm_link:customerlastname <> "" then rrm_link:customerlastname+", "+rrm_link:customerfirstname else rrm_link:customerfirstname
+  date outdate = if rrm_link:dateout <> null then rrm_link:dateout else inv:lastmovementdate
+  number outtime = if rrm_link:timeout <> null then rrm_link:timeout else inv:lastmovementtime
+  date duedate = if rrm_link:datedue <> null then rrm_link:datedue else inv:datedue
+  number duetime = if rrm_link:timedue <> null then rrm_link:timedue else if inv:datedue <> null then inv:timedue
+  string dueloc = if rrm_link:locationcodedue <> "" then rrm_link:locationcodedue else inv:locationcodedue
+
+  string ranum = if invtrx_link:ticketnumber <> "" then invtrx_link:ticketnumber 
+                         else if invtrx_link:ronumber <> 0 then str(invtrx_link:ronumber) else rrm_link:ranumber
+      
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (str(inv:vehiclestatusowned) = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+
+list/domain="inv"/nobanner/pageof/title="Unit Location Report"/duplicates/noreporttotals/noheadings/pagelength=80
+  inv:unitnumber/displaywidth=15 
+  inv:year/displaywidth=4 /nocommas
+  inv:make/displaywidth=12
+  inv:model/displaywidth=12 
+  inv:invclass/displaywidth=10 
+  inv:licensenumber/displaywidth=10 
+  inv:licensest/displaywidth=4 
+  inv:serialnumber/displaywidth=20 
+  stat_desc:description/displaywidth=10/name="desc"
+  outdate/displaywidth=12
+  outtime/displaywidth=5/mask="z9.99"/nototal
+  duedate/displaywidth=12 
+  duetime/displaywidth=5/mask="z9.99"/nototal
+  comp_name/displaywidth=20
+  ranum/displaywidth=10 
+  inv:odometer/displaywidth=10 
+  inv:locationcode/displaywidth=10 
+  dueloc/displaywidth=10
+
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+sorted by
+
+include "unitloc_i2.cq"
+include "unitloc_i3.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Include Foreign Vehicles: " + str(inc_foreign)/newline
+  "Sorted by: "+str(csort)/newline
+  end box /newline=4
+
+  "Unit"/align=inv:unitnumber
+  "Year"/align=inv:year
+  "Make"/align=inv:make
+  "Model"/align=inv:model
+  "Class"/align=inv:invclass
+  "License #"/align=inv:licensenumber
+  "Lic State"/align=inv:licensest
+  "VIN"/align=inv:serialnumber
+  "Status"/align=desc
+  "Date Out"/align=outdate
+  "Time Out"/align=outtime
+  "Date Due"/align=duedate
+  "Time Due"/align=duetime
+  "Company/Renter"/align=comp_name
+  "RA#/NR/RO#"/align=ranum
+  "Odom"/align=inv:odometer 
+  "Current Loc"/align=inv:locationcode
+  "Loc Due"/align=dueloc/newline
+
+
+end of report
+  ""/newline=2
+  count[inv:unitnumber,report]/right
+  " Total Units"/newline
+;
+
+replace unitloc.eq
+run/parameterfile=unitloc_1 unitloc.eq
+rrepl unitloc
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view unitloc
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Unit Location Report" -- Report Title
+   string rptname1    = "unitloc" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "unitloc_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+ run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

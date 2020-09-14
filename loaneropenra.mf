@@ -1,0 +1,272 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Loaner Open Contracts Report
+  Author: David Chiddenton;
+  
+/*------------------------------------------------------------------------
+Created: 11/13/2019
+Modified:
+
+Notes:
+$Workfile: loaneropenra.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/loaneropenra.mf $
+$Revision: 1 $
+$History: loaneropenra.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 11/13/19   Time: 5:08p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtSdate = parameter prompt "Start Date: " default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "End Date: " default todaysdate error "Error: End date < Start date" if dtedate < dtsdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string crarange = range parameter prompt "Enter RA# Range (Start..End or ALL): " default ALL
+  number clenrange = range parameter prompt "Enter Rental Length #Days (Start..End or ALL): " default ALL
+  string cadvrange = range parameter prompt "Enter Advisor Range (Start..End or ALL): " default ALL
+  string csort = parameter prompt "Sort by:" valid "RA#","Rental Length","Advisor" default "RA#"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace loaneropenra_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve rrm records - setup parameters
+------------------------------------------------------------------------*/
+
+include "loaneropenra_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file renter_link = access renterra,
+    set renterra:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+  file system_link = access systemsettings,
+    set systemsettings:dbid="",
+    approximate
+
+   
+where 
+  ( rrm:dateout >= dtSdate and rrm:dateout <= dtEdate )
+  and (rrm:rastatus=2)
+  and (rrm:locationcodeout = cLoc or cloc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:product=cproduct or cproduct = "ALL")
+  and (rrm:ranumber = crarange) 
+ 
+
+list/domain="rrm"/hold="rrm_hf"
+if (rrm:sourcecode = system_link:dftloanersource) then {
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber
+  rrm:customerlastname
+  rrm:customerfirstname
+  renter_link:homephonenumber
+  renter_link:workphonenumber
+  renter_link:mobilephonenumber
+  renter_link:email
+  rrm:company
+  rrm:locationcodeout
+  rrm:locationcodedue
+  rrm:dateout
+  rrm:timeout 
+  rrm:datein
+  rrm:timein 
+  rrm:agentid
+  rrm:sourcecode
+  rrm:referralcode
+  rrm:referencenum
+  rrm:agentid
+  rrm:ponumber
+  rrm:serviceordernum
+  rrm:resnumber
+}
+;
+replace loaneropenra_1.eq
+run/setparameter loaneropenra_1.eq
+
+run/parameterfile=loaneropenra_1 loaneropenra_1.eq
+
+/*------------------------------------------------------------------------
+ Summary or Detail
+------------------------------------------------------------------------*/
+include "loaneropenra_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+run/parameterfile=loaneropenra_1
+rrepl "loaneropenra_i2"
+
+/*------------------------------------------------------------------------
+ Retrieve rrm records - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "loaneropenra_i1.inc"
+
+define
+
+  number work_days = working_days_between(dtSdate,dtEdate)
+
+  file inv_to_rrm = access invtrx,
+    set invtrx:ranumber=rrm_hf:ranumber,
+    one to one,generic,
+    null fill on failure
+  
+  number now_time = val(str(systemtime,"hh.mm"))
+  
+  number ra_time_in = (now_time div 1) + ((now_time - (now_time div 1)) divide 0.6) 
+  
+  number ra_time_out = (rrm_hf:timeout div 1) + ((rrm_hf:timeout - (rrm_hf:timeout div 1) ) divide 0.6)
+  
+  number ra_hours_bal = ra_time_in - ra_time_out
+  
+  number ra_days = round(((todaysdate - rrm_hf:dateout) + (ra_hours_bal divide 24)),1) 
+  
+  number ra_hours = round(((todaysdate-rrm_hf:dateout)*24) + ra_hours_bal,1) 
+  
+where (ra_days = clenrange) and (rrm_hf:agentid = cadvrange)
+
+list/title="Open Loaner Contracts Report"/noheadings/noendofreport/noreporttotals/nobanner/domain="rrm_hf"/pageof/pagelength=100 include "loaneropenra_i2.cq"
+  rrm_hf:ranumber/displaywidth=10
+  rrm_hf:customerlastname  + ", " + rrm_hf:customerfirstname/displaywidth=20/name="a" 
+  rrm_hf:homephonenumber/mask=include "phone_mask.cq"
+  rrm_hf:workphonenumber/mask=include "phone_mask.cq"
+  rrm_hf:mobilephonenumber/mask=include "phone_mask.cq"
+  inv_to_rrm:unitnumber/displaywidth=15
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:locationcodeout/displaywidth=10
+  rrm_hf:locationcodedue/displaywidth=10
+  rrm_hf:company/displaywidth=20
+  ra_hours/displaywidth=8
+  ra_days/displaywidth=5 
+  rrm_hf:agentid/displaywidth=10
+  rrm_hf:serviceordernum/displaywidth=10
+  rrm_hf:ponumber/displaywidth=10
+  rrm_hf:referencenum/displaywidth=10
+
+sorted by
+  if csort = "Rental Length" then ra_hours
+  if csort = "Advisor" then rrm_hf:agentid
+  rrm_hf:ranumber
+
+end of report 
+  ""/newline
+  "Grand Total:"
+  count[rrm_hf:ranumber]/heading="RA count "
+  total[ra_hours]/align=ra_hours
+  total[ra_days]/align=ra_days/newline
+
+box
+  ""/newpage
+  ""/newline=2
+  "Working Days in Period"/column=10
+  work_days/noheading/column=50/width=12/right/newline
+  "Days on Contract"/column=10
+  total[ra_days]/noheading/column=50/width=12/right/newline
+  "Total Contracts in Period"/column=10
+  count[rrm_hf:ranumber]/noheading/column=50/width=12/right/newline
+  "Average Days per Contract"/column=10
+  round(total[ra_days] divide count[rrm_hf:ranumber],1)/noheading/column=50/width=12/right/newline
+  "Total Contract Hours"/column=10
+  total[ra_hours]/noheading/column=50/width=12/right/newline
+  "Average Hours per Contract"/column=10
+  round(total[ra_hours] divide count[rrm_hf:ranumber],1)/noheading/column=50/width=12/right/newline
+end box
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+  box/center/column=1
+  "Date Range: "+str(dtSdate)+" to "+str(dtEdate)/newline
+  "Product(s): " + str(cProduct)+"  "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "RA# Range: " + str(crarange)/displaywidth=100
+end box/newlines=4
+
+  "RA#"/align=rrm_hf:ranumber
+  "Renter's Name"/align=a 
+  "Home Phone"/align=rrm_hf:homephonenumber
+  "Work Phone"/align=rrm_hf:workphonenumber
+  "Mobile Phone"/align=rrm_hf:mobilephonenumber
+  "Unit#"/align=inv_to_rrm:unitnumber
+  "Date Out"/align=rrm_hf:dateout
+  "Time Out"/align=rrm_hf:timeout
+  "Loc Out"/align=rrm_hf:locationcodeout
+  "Loc Due"/align=rrm_hf:locationcodedue
+  "Company"/align=rrm_hf:company
+  "Hours"/align=ra_hours
+  "Days"/align=ra_days
+  "Advisor"/align=rrm_hf:agentid
+  "R/O#"/align=rrm_hf:serviceordernum
+  "P/O#"/align=rrm_hf:ponumber
+  "Ref#"/align=rrm_hf:referencenum/newline
+
+;
+
+replace loaneropenra.eq
+run/parameterfile=loaneropenra_1 loaneropenra.eq
+rrepl loaneropenra
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view loaneropenra
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Loaner Open Contracts Report" -- Report Title
+   string rptname1    = "loaneropenra" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "loaneropenra_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

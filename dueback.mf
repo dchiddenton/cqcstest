@@ -1,0 +1,368 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Due Back Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/31/2016 
+Modified:
+
+Notes:
+$Workfile: dueback.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/dueback.mf $
+$Revision: 2 $
+$History: dueback.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  date dtsdate = parameter prompt "Start Date: " default 01.01.1980
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cphone = parameter prompt "Phone # to Print:" valid "Mobile","Home","Local","Work" default "Mobile"
+  string overdue = parameter/uppercase prompt "Overdue Only? " valid "Y","N" default "N"
+  string inc_pickup = parameter/uppercase prompt "Pickups/Collections Only? " valid "Y","N" default "N"
+  string inc_or = parameter/uppercase prompt "Include On-Rent? " valid "Y","N" default "Y"
+  string inc_ro = parameter/uppercase prompt "Include Repair Orders? " valid "Y","N" default "Y"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+  string pmt_detail = parameter/uppercase prompt "Print Payment Details? " valid "Y","N" default "N"
+  string inc_foreign = parameter/uppercase prompt "Include Foreign Vehicles? " valid "Y","N" default "N"
+;
+replace dueback_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve contract records
+------------------------------------------------------------------------*/
+
+include "dueback_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file renter_link = access renterra,
+    set renterra:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+  string prt_phone[40] = switch(cphone)
+    case "Home"   : renter_link:homephonenumber
+    case "Mobile" : renter_link:mobilephonenumber
+    case "Local"  : renter_link:localphonenumber
+    case "Work"   : renter_link:workphonenumber
+    default       : ""
+
+where 
+  ((rrm:datedue >= dtSdate and rrm:datedue <= dtEdate) or (overdue = "Y" and rrm:datedue < todaysdate))
+  and (rrm:Product  = cProduct or cProduct = "ALL" )
+  and (rrm:invclass = CClass or cClass = "ALL")
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus =  2
+  and inc_or = "Y"
+  and ((inc_pickup = "Y" and rrm:pickup <> "") or inc_pickup = "N")
+
+list/domain="rrm"/hold="dueback_hf"
+  rrm:locationcodedue 
+  rrm:locationcodeout 
+  rrm:dateout 
+  rrm:timeout 
+  rrm:datedue 
+  rrm:timedue 
+  rrm:ranumber/keyelement=1.1 
+  rrm:invclass 
+  rrm:invid/keyelement=2.1
+  rrm:customerlastname + ", " +rrm:customerfirstname/width=50/name="customer"
+  rrm:company 
+  rrm:pickup 
+  rrm:foreign
+  prt_phone
+
+;
+replace dueback_1.eq
+run/setparameter dueback_1.eq
+
+run/parameterfile=dueback_1 dueback_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve repair orders
+------------------------------------------------------------------------*/
+
+define
+
+  file system_link = access systemsettings,
+    set systemsettings:franchise = 0,
+    approximate
+  
+  file repair_link = access invro,
+    set invro:invid = inv:invid,
+    one to many,
+    generic,
+    null fill on failure
+
+  file comp_link = access company,
+    set company:company = repair_link:company,
+    one to one, null fill on failure
+
+   string ranumber = str(repair_link:roid)
+
+include "dueback_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = repair_link:locationcodeout,
+    null fill on failure
+
+where 
+  ((repair_link:datedue >= dtSdate and repair_link:datedue <= dtEdate) or (repair_link:datedue < todaysdate and overdue = "Y"))
+  and (repair_link:Product = cProduct )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (repair_link:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+  and inc_ro = "Y"
+
+
+list/domain="inv"/hold="dueback_hf"/append
+  if   (inv:vehiclestatusowned=system_link:repairos
+  and repair_link:datein = null)  then {
+  repair_link:locationcodeout/name="locationcodedue"
+  repair_link:locationcodeout
+  repair_link:dateout
+  repair_link:timeout
+  repair_link:datedue
+  repair_link:timedue
+  ranumber/width=20/keyelement=1.1
+  inv:invclass
+  inv:invid/keyelement=2.1
+  "**REPAIR** - "+str(repair_link:company)/width=50/name="customer"
+  repair_link:company
+  "RO"/width=2/name="pickup"
+  0/width=4/name="foreign"
+  comp_link:phonenumber/width=40/name="prt_phone"
+  }
+
+;
+run/parameterfile=dueback_1 
+
+/*------------------------------------------------------------------------
+ Accumulate contract deposits
+------------------------------------------------------------------------*/
+
+define
+
+    file ra_deposit = access payments,
+     set payments:commonid=rrm:commonid,
+     one to many,generic, zero fill on failure
+
+include "dueback_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+where 
+ (rrm:datedue >= dtSdate and rrm:datedue <= dtEdate)
+  and (rrm:Product = cProduct )
+  and (rrm:invclass = CClass or cClass = "ALL")
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus =  2
+  and inc_or = "Y"
+
+sum/domain="rrm"/hold="dueback_dep_hf"
+
+if (ra_deposit:paiddeposit=1) then ra_deposit:paymentamount/name="paid_dep"
+if (ra_deposit:paiddeposit=0) then ra_deposit:paymentamount/name="auth_dep"
+
+by
+  rrm:ranumber/keyelement=1.1
+;
+run/parameterfile=dueback_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "dueback_i1.inc"
+
+define
+
+  file rrm_link = access rrm,
+   set rrm:ranumber=dueback_hf:ranumber,
+   one to one, null fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_link:commonid,
+    one to one, null fill on failure
+
+  file ra_deposit = access payments,
+    set payments:commonid = rrm_link:commonid,
+    one to many,
+    generic,
+    zero fill on failure
+
+  file tot_dep = access dueback_dep_hf,
+    set dueback_dep_hf:ranumber=dueback_hf:ranumber,
+    one to one, zero fill on failure
+
+  string commonid_str = str(rrm_link:commonid)
+
+  file rrm_to_notes = access dialogue,
+   set type = 1,dialogue:key = commonid_str,
+   one to one, null fill on failure 
+
+  file inv_link = access inv,
+    set inv:invid = dueback_hf:invid,
+    one to one,
+    null fill on failure
+
+  file invloc_link = access location,
+   set location:locationcode=inv_link:ownedlocationcode,
+   one to one, null fill on failure
+
+
+  number line_deposit = if (ra_deposit:deposit=1) then
+     ra_deposit:paymentamount
+  
+  string line_deposit_type = if (ra_deposit:deposit=1) then
+     ra_deposit:paymenttype
+  
+  date line_deposit_date = if (ra_deposit:deposit=1) then
+     ra_deposit:datereceived
+  
+  string line_deposit_paid = if (ra_deposit:paiddeposit=1) then "Y" else "N"
+
+  string phone_str = str(cphone)+" Phone" 
+
+where (inc_foreign = "Y" or (inc_foreign = "N" and invloc_link:owned = 1))
+
+list/domain="dueback_hf"/noreporttotals/nobanner/duplicates/title="Fleet Dueback/Overdue Report"/pagewidth=250/pageof
+
+  dueback_hf:locationcodeout 
+  dueback_hf:datedue 
+  dueback_hf:timedue 
+  dueback_hf:ranumber /heading="RA/RO Number"
+  dueback_hf:invclass /heading="Class"
+  inv_link:unitnumber 
+  dueback_hf:customer/displaywidth=30 /heading="Renter's Name"
+  dueback_hf:prt_phone/heading=phone_str include "phone_mask.cq"
+  rental_link:totaltpm /heading="Est T&M"/name="a"
+  tot_dep:auth_dep/heading="Auth Dep"/name="b"
+  tot_dep:paid_dep/heading="Paid Dep"/name="c"
+  if (dueback_hf:datedue <> null) then todaysdate-dueback_hf:datedue else 0/heading="Days Overdue"
+
+  followed by if (pmt_detail = "Y" and dueback_hf:pickup <> "RO") then {
+  line_deposit_type/width=5/noheading/align=a
+  line_deposit_date/noheading/align=b
+  line_deposit/noheading/align=c
+  line_deposit_paid/noheading
+  }
+
+  followed by if (notes_detail = "Summary" and dueback_hf:pickup <> "RO") then {
+  "Summary: " + rrm_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail" and dueback_hf:pickup <> "RO") then {
+  "Summary: " + rrm_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + rrm_to_notes:notes
+  end box/newline
+  }
+
+sorted by
+  dueback_hf:locationcodedue/count/heading="@ Location Due"
+  dueback_hf:datedue
+  dueback_hf:timedue
+  
+top of dueback_hf:locationcodedue
+"Due at location: " + dueback_hf:locationcodedue/newline
+
+end of dueback_hf:locationcodedue
+ ""/newline
+
+end of report
+  ""/newline
+  "Total RAs: "+str(count[dueback_dep_hf:ranumber,report])/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if overdue = "Y" then "Overdues Only" else "Date Due Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  --  if cLoc <> "" then "Location : " + cLoc else "Location Group: " + cLocGroup
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct)+ "   Classes: " + str(cClass)
+  end box/newlines=4
+
+;
+replace dueback.eq
+run/parameterfile=dueback_1 dueback.eq
+rrepl dueback
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view dueback
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Due Back Report" -- Report Title
+   string rptname1    = "dueback" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "dueback_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

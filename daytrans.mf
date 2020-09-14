@@ -1,0 +1,539 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Daily Transaction Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/15/2019 
+Modified:
+
+Notes:
+$Workfile: daytrans.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/daytrans.mf $
+$Revision: 2 $
+$History: daytrans.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 10/23/19   Time: 4:13p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Summary/Detail logic
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 10/23/19   Time: 4:02p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+where rtmift:type not one of 2,3,4,5
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Charges to Include in Other: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_code"
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cempby = parameter prompt "Select employee by: " valid "Renting","Reserving","Added-by" default "Renting"
+  include "param_emps.cq"
+  include "param_code.cq"
+  string cvip = parameter valid "Include","Exclude" prompt "VIP customers?" default "Include"
+  string crentdays = parameter prompt "Rental Days: " valid "Actual","Charged" default "Charged"
+  string csummary = parameter/uppercase prompt "Detail?: " valid "Y","N" default "Y"
+;
+replace daytrans_i1.inc
+
+/*------------------------------------------------------------------------
+ VIP customer identification
+------------------------------------------------------------------------*/
+ include "daytrans_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file renterlink = access renterra,
+   set renterra:commonid=rrm:commonid,
+   one to many, null fill on failure   
+
+  string renter_name = renterlink:customerlastname+", "+renterlink:customerfirstname
+
+define
+  number vip_flag =  if renterlink:systemid <> "" then 1 else 0
+  
+where 
+  (rrm:dateout >= dtSdate and rrm:dateout <= dtEdate)
+    and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+    
+list/domain="rrm"/hold = "daytransVIP_hf"
+if count[rrm:commonid,rrm:commonid] = 0 then {
+  rrm:commonid /keyelement=1.1
+  rrm:ranumber
+  renterlink:systemid
+  renterlink:renter
+  vip_flag
+  renter_name
+}
+
+sorted by
+  rrm:commonid
+  renterlink:renter /descending  -- renter will be used to check VIP first, failing that next driver will be used.
+;
+replace daytrans_1.eq
+run/setparameter daytrans_1.eq
+
+run/parameterfile=daytrans_1 daytrans_1.eq
+
+/*------------------------------------------------------------------------
+ RA selection and revenue day calculation
+------------------------------------------------------------------------*/
+
+
+  include "daytrans_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm:commonid,
+    one to many,generic,
+    null fill on failure
+
+  file renterlink = access daytransVIP_hf,
+   set daytransVIP_hf:commonid=rrm:commonid,
+   one to one, null fill on failure
+
+  file res_link = access resdb,
+   set resdb:commonid=rrm:commonid,
+   one to one, zero fill on failure
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one, zero fill on failure
+
+  
+  number res_flag  = if res_link:commonid <> 0 then 1 else 0
+
+  number sub_flag = if (((res_link:ratecode <> rental_link:ratecode) or (rrm:reservedclass <> rrm:rentedasclass))
+      and res_link:commonid <>0) then 1 else 0
+
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number tot_revdays_res = if (revdays_link:res = 1 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number tot_actdays = if (rrm:datein - rrm:dateout) = 0 then 1 else (rrm:datein - rrm:dateout)
+
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+
+  number calc_days =   if crentdays = "Actual" then tot_actdays  else tot_revdays
+  number calc_days_res =   if crentdays = "Actual" then tot_actdays  else tot_revdays_res
+  
+where 
+
+  (rrm:dateout >= dtSdate and rrm:dateout <= dtEdate)
+    and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and ((renterlink:vip_flag = 0 and cvip = "Exclude") or (cvip = "Include"))
+  and rrm:rastatus one of 2,3
+
+    
+sum/domain="rrm"/hold = "rrm_hf"
+  mileage/heading="mileage"
+  rental_link:totaltime/name="totaltime"
+  res_link:totaltime/name="totaltimeres"
+  rental_link:rentaldiscountpct/heading="discount"
+  calc_days
+  calc_days_res
+ 
+by
+  rrm:commonid/keyelement=1.1
+  rental_link:ranumber/name="ra_number"/keyelement=2.1
+  rrm:dateout/name="date_out"
+
+end of rrm:commonid
+  rrm:locationcodeout
+  res_link:addedbyemployeenumber/name="empres"
+  rental_link:addedbyemployeenumber/name="empadd"
+  rental_link:employeenumberout/name="emprent"
+  rrm:reservedclass
+  rrm:rentedasclass
+  res_flag
+  sub_flag
+;
+run/parameterfile=daytrans_1 
+
+
+/*------------------------------------------------------------------------
+ Retrieve rcmift records for all rrm records
+------------------------------------------------------------------------*/
+
+include "daytrans_i1.inc"
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+  number upsell = if rcmift_link:type = 8 then 1 else 0
+
+list/domain="rrm_hf"/hold="rcmift_hf"
+if  rcmift_link:rev = 1 and ((rcmift_link:type one of 2,3,4,5) or
+       (rcmift_link:code = ccode)) then {
+  rrm_hf:commonid/width=11/keyelement=1.1
+  rcmift_link:type/width=11
+  rcmift_link:code/width=16
+  rcmift_link:total/width=14/decimalplaces=2/name="tot_amt"
+  rcmift_link:rev/width=4
+  rcmift_link:tmpack/width=4
+  upsell/width=4
+}
+;
+run/parameterfile=daytrans_1
+
+/*------------------------------------------------------------------------
+ Create dummy record for missing rcmift records
+------------------------------------------------------------------------*/
+list/domain="dummy"/maxrecords=1/hold="rcmift_hf"/append
+  0/width=11/name="commonid"/keyelement=1.1
+  2/width=11/name="type"
+  ""/width=16/name="code"
+  0/width=14/decimalplaces=2/name="tot_amt"
+  0/width=4/name="rev"
+  0/width=4/name="tmpack"
+  0/width=4/name="upsell"
+followed by
+  0/width=11
+  3/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  4/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  5/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  10/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  51/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  9999/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+  0/width=4
+;
+run/parameterfile=daytrans_1 
+
+/*------------------------------------------------------------------------
+ Consolidate misc charges by commonid
+------------------------------------------------------------------------*/
+define
+
+string Charge_Type = switch(rcmift_hf:type)
+  case 2          : "CDW"
+  case 3          : "PAC"
+  case 4          : "PEC"
+  case 5          : "SLI"
+  default         : "Other"
+
+
+where rcmift_hf:tmpack = 0 
+
+sum/domain="rcmift_hf"/hold="rcmift2_hf"
+  rcmift_hf:tot_amt
+across
+  charge_type/showall/total
+by
+  rcmift_hf:commonid/keyelement=1.1
+end of rcmift_hf:commonid
+  upsell
+;
+run/parameterfile=daytrans_1 
+
+/*-----------------------------------------------------------------------
+ Detail level
+------------------------------------------------------------------------*/
+include "daytrans_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+  if csummary = "Y" then "" else "/nodetail"
+;
+run/parameterfile=daytrans_1  
+rreplace daytrans_i3
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "daytrans_i1.inc"
+define
+  file chg_link = access rcmift2_hf,
+   set rcmift2_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file vip_link = access daytransvip_hf,
+   set daytransvip_hf:commonid=rrm_hf:commonid,
+   one to one, null fill on failure
+
+  number category_type = if (rrm_hf:res_flag=1 and chg_link:upsell=1) then 1 else   --Upsell
+                            if (rrm_hf:res_flag=0) then 2 else                      --Walkup
+                            if (rrm_hf:sub_flag=1) then 3 else                      --Substition
+                            4                                                       --Honoured res
+  string emp_num = if cempby = "Renting" then rrm_hf:emprent else
+                     if cempby = "Reserving" then rrm_hf:empres else
+                      rrm_hf:empadd
+
+  file emp_link = access employee,
+    set employee:employeenumber=emp_num,
+    one to one, null fill on failure
+
+   string emp_name =  str(emp_link:employeelastname)+", "+str(emp_link:employeefirstname)
+
+  string cat_name = switch(category_type)
+    case 1 : "Upsell"
+    case 2 : "Walkup"
+    case 3 : "Substitution"
+    case 4 : "Honored Res"
+    default : "N/A"
+
+  number idivide = if rrm_hf:calc_days > 5 then rrm_hf:calc_days divide 7 else rrm_hf:calc_days
+  number idivide_res = if rrm_hf:calc_days_res > 5 then rrm_hf:calc_days_res divide 7 else rrm_hf:calc_days_res
+  string iunits = if rrm_hf:calc_days > 5 then "Week" else "Day"
+
+
+list/domain="rrm_hf"/noreporttotals/noheadings/nobanner/pageof/pagelength=70/title="Daily Transaction Report" include "daytrans_i3.cq"
+
+  rrm_hf:ra_number/displaywidth=10
+  vip_link:renter_name/displaywidth=40
+  rrm_hf:rentaldiscountpct/displaywidth=5
+  rrm_hf:calc_days /displaywidth=5
+  round(chg_link:tot_amt_cdw divide idivide,2)/name="a"/displaywidth=12
+  round(chg_link:tot_amt_pac divide idivide,2)/name="b"/displaywidth=12
+  round(chg_link:tot_amt_pec divide idivide,2)/name="c"/displaywidth=12
+  round(chg_link:tot_amt_sli divide idivide,2)/name="d"/displaywidth=12
+  round(chg_link:tot_amt_other,2)/name="e"/displaywidth=12
+  round(rrm_hf:totaltimeres divide idivide_res,2)/name="ee"/displaywidth=12
+  round(rrm_hf:totaltime divide idivide,2)/name="f"/displaywidth=12
+  iunits/name="g"
+  rrm_hf:reservedclass/displaywidth=8
+  rrm_hf:rentedasclass/displaywidth=8
+
+sorted by
+  rrm_hf:locationcodeout
+  category_type
+  emp_num
+  rrm_hf:ra_number
+
+top of rrm_hf:locationcodeout
+  "Location: "+str(rrm_hf:locationcodeout)
+
+top of category_type
+  "Category: "+str(cat_name)
+
+top of emp_num
+  "Employee #: "+str(emp_num)+"  "+str(emp_name)/newline
+
+end of emp_num
+  "Employee #: "+str(emp_num)
+  "#RAs: "+str(count[rrm_hf:ra_number,emp_num])/align=rrm_hf:rentaldiscountpct
+  total[rrm_hf:calc_days,emp_num]/align=rrm_hf:calc_days
+  round(total[chg_link:tot_amt_cdw,emp_num] divide total[rrm_hf:calc_days,emp_num],2)/align=a/displaywidth=12
+  round(total[chg_link:tot_amt_pac,emp_num] divide total[rrm_hf:calc_days,emp_num],2)/align=b/displaywidth=12
+  round(total[chg_link:tot_amt_pec,emp_num] divide total[rrm_hf:calc_days,emp_num],2)/align=c/displaywidth=12
+  round(total[chg_link:tot_amt_sli,emp_num] divide total[rrm_hf:calc_days,emp_num],2)/align=d/displaywidth=12
+  round(total[chg_link:tot_amt_other,emp_num],2)/align=e/displaywidth=12/newline
+
+end of category_type
+  "Category: "+str(cat_name)
+  "#RAs: "+str(count[rrm_hf:ra_number,category_type])/align=rrm_hf:rentaldiscountpct
+  total[rrm_hf:calc_days,category_type]/align=rrm_hf:calc_days
+  round(total[chg_link:tot_amt_cdw,category_type] divide total[rrm_hf:calc_days,category_type],2)/align=a/displaywidth=12
+  round(total[chg_link:tot_amt_pac,category_type] divide total[rrm_hf:calc_days,category_type],2)/align=b/displaywidth=12
+  round(total[chg_link:tot_amt_pec,category_type] divide total[rrm_hf:calc_days,category_type],2)/align=c/displaywidth=12
+  round(total[chg_link:tot_amt_sli,category_type] divide total[rrm_hf:calc_days,category_type],2)/align=d/displaywidth=12
+  round(total[chg_link:tot_amt_other,category_type],2)/align=e/displaywidth=12/newline
+
+end of rrm_hf:locationcodeout
+  "Location: "+str(rrm_hf:locationcodeout)
+  "#RAs: "+str(count[rrm_hf:ra_number,rrm_hf:locationcodeout])/align=rrm_hf:rentaldiscountpct
+  total[rrm_hf:calc_days,rrm_hf:locationcodeout]/align=rrm_hf:calc_days
+  round(total[chg_link:tot_amt_cdw,rrm_hf:locationcodeout] divide total[rrm_hf:calc_days,rrm_hf:locationcodeout],2)/align=a/displaywidth=12
+  round(total[chg_link:tot_amt_pac,rrm_hf:locationcodeout] divide total[rrm_hf:calc_days,rrm_hf:locationcodeout],2)/align=b/displaywidth=12
+  round(total[chg_link:tot_amt_pec,rrm_hf:locationcodeout] divide total[rrm_hf:calc_days,rrm_hf:locationcodeout],2)/align=c/displaywidth=12
+  round(total[chg_link:tot_amt_sli,rrm_hf:locationcodeout] divide total[rrm_hf:calc_days,rrm_hf:locationcodeout],2)/align=d/displaywidth=12
+  round(total[chg_link:tot_amt_other,rrm_hf:locationcodeout],2)/align=e/displaywidth=12/newline
+
+end of report
+  "Report Totals "
+  "#RAs: "+str(count[rrm_hf:ra_number,report])/align=rrm_hf:rentaldiscountpct
+  total[rrm_hf:calc_days,report]/align=rrm_hf:calc_days
+  round(total[chg_link:tot_amt_cdw,report] divide total[rrm_hf:calc_days,report],2)/align=a/displaywidth=12
+  round(total[chg_link:tot_amt_pac,report] divide total[rrm_hf:calc_days,report],2)/align=b/displaywidth=12
+  round(total[chg_link:tot_amt_pec,report] divide total[rrm_hf:calc_days,report],2)/align=c/displaywidth=12
+  round(total[chg_link:tot_amt_sli,report] divide total[rrm_hf:calc_days,report],2)/align=d/displaywidth=12
+  round(total[chg_link:tot_amt_other,report],2)/align=e/displaywidth=12/newline
+  "* Other Chg: "+str(ccode)/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  "Employees: "+str(cemps)
+  "Product: " + str(cProduct)/displaywidth=100/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "By "+str(cempby)+", "+"Use "+str(crentdays)+" days for average calculations"/displaywidth=100
+  end box/newline=4
+ 
+
+  "Charged"/align=rrm_hf:calc_days 
+  "Average"/align=a
+  "Average"/align=b
+  "Average"/align=c
+  "Average"/align=d
+  "Total"/align=e
+  "Res"/align=ee
+  "Rental"/align=f/newline
+
+
+  "RA#"/align=rrm_hf:ra_number 
+  "Renter"/align=vip_link:renter_name
+  "Disc%"/align=rrm_hf:rentaldiscountpct
+  "Days"/align=rrm_hf:calc_days 
+  "CDW Rate"/align=a
+  "PAC Rate"/align=b
+  "PEC Rate"/align=c
+  "SLI Rate"/align=d
+  "Other"/align=e
+  "Rate Per"/align=ee
+  "Rate Per"/align=f
+  "Unit"/align=g
+  "Res Class"/align=rrm_hf:reservedclass
+  "Rent Class"/align=rrm_hf:rentedasclass/newline
+
+
+;
+replace daytrans.eq
+run/parameterfile=daytrans_1 daytrans.eq
+rrepl daytrans
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view daytrans
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Daily Transaction Report" -- Report Title
+   string rptname1    = "daytrans" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "daytrans_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

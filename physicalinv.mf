@@ -1,0 +1,618 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Physical Inventory Report
+  Author: David Chiddenton
+  $Revision: 4 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/13/2018
+Modified:
+
+Notes:
+$Workfile: physicalinv.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/physicalinv.mf $
+$Revision: 4 $
+$History: physicalinv.mf $
+ * 
+ * *****************  Version 4  *****************
+ * User: Dchidden     Date: 7/01/20    Time: 11:24a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed invclass selection issue
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 6/30/20    Time: 1:02p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel formatting and improved flttrx record selection
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invstatus.cq"
+  string ctype = parameter prompt "Report Type: " valid "Listing","Exception" default "Listing"
+  string inc_foreign = parameter/uppercase prompt "Include Foriegn Vehicles? " valid "Y","N" default "N"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+  string clistby = parameter prompt "List By: " valid "Unit Number","License Number" default "Unit Number"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace physicalinv_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve physical inv records - setup parameters
+------------------------------------------------------------------------*/
+
+include "physicalinv_i1.inc"
+
+define
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file invtrx_link = access invtrx,
+    set invtrx:invid=physinv:invid,
+    sorted by invtrx:dateout/descending,
+    one to one,generic, null fill on failure
+
+  date last_date = if (invtrx_link:datein <> null and (invtrx_link:datein < physinv:dateadded) or 
+      (invtrx_link:datein = physinv:dateadded and invtrx_link:timein <= physinv:timeadded)) then invtrx_link:datein else invtrx_link:dateout
+  number last_time = if (invtrx_link:datein <> null and (invtrx_link:datein < physinv:dateadded) or 
+      (invtrx_link:datein = physinv:dateadded and invtrx_link:timein <= physinv:timeadded)) then invtrx_link:timein else invtrx_link:timeout
+  number last_stat = if (invtrx_link:datein <> null and (invtrx_link:datein < physinv:dateadded) or 
+      (invtrx_link:datein = physinv:dateadded and invtrx_link:timein <= physinv:timeadded)) then invtrx_link:invstatin else invtrx_link:invstatout
+  string last_loc = if (invtrx_link:datein <> null and (invtrx_link:datein < physinv:dateadded) or 
+      (invtrx_link:datein = physinv:dateadded and invtrx_link:timein <= physinv:timeadded)) then invtrx_link:locationcodein else invtrx_link:locationcodeout
+      
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+
+list/domain="physinv"/hold="physicalinv_hf"
+  physinv:invid /keyelement=1.1
+  physinv:product 
+  physinv:unitnumber 
+  physinv:licensenumber 
+  physinv:licensest 
+  physinv:locationcode 
+  physinv:employeenumber 
+  physinv:dateadded 
+  physinv:timeadded 
+  physinv:scanned
+  last_date
+  last_time
+  last_stat
+  last_loc
+
+;
+replace physicalinv_1.eq
+run/setparameter physicalinv_1.eq
+
+run/parameterfile=physicalinv_1 physicalinv_1.eq
+
+/*------------------------------------------------------------------------
+ Create exception report
+------------------------------------------------------------------------*/
+include "physicalinv_i1.inc"
+
+define
+
+  file physical_link = access physicalinv_hf,
+   set physicalinv_hf:invid=inv:invid,
+   one to one, zero fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+  string key_str = str(inv:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+  string unitdesc = ltrim(str(inv:year,9999))+" "+rtrim(str(inv:make))+" "+rtrim(str(inv:model))+" "+rtrim(str(inv:unitcolor))
+ 
+  number veh_stat = if physical_link:invid = 0 then inv:vehiclestatusowned else physical_link:last_stat
+  date as_of_date = if physical_link:invid=0 then inv:lastmovementdate else physical_link:last_date
+  string as_of_time = if physical_link:invid=0 then str(inv:lastmovementtime,"z9.99") else str(physical_link:last_time,"z9.99")
+  string inv_loc = if physical_link:invid=0 then inv:locationcode else physical_link:last_loc
+  string phys_loc = if physical_link:invid=0 then inv:locationcode else physicalinv_hf:locationcode
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = veh_stat,
+    null fill on failure
+
+  string discrepancy_flag = if physical_link:invid <> 0 and (stat_desc:statustype one of 3,6) then "On Lot" else
+                            if physical_link:invid <> 0 and (stat_desc:statustype not one of 3,6) then "None" else 
+                            if physical_link:invid = 0  and (stat_desc:statustype one of 3,6) then "None" else 
+                            if physical_link:invid = 0 and (stat_desc:statustype not one of 3,6) then "Not on Lot"  
+
+
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+  and discrepancy_flag <> "None"
+
+
+list/domain="inv"/nobanner/pageof/title="Physical Inventory Report"/duplicates/noheadings/noreporttotals/pagelength=80/count
+
+  inv:product/displaywidth=10
+  inv:unitnumber/displaywidth=10
+  inv:licensenumber/displaywidth=8
+  inv:licensest/displaywidth=4
+  unitdesc/displaywidth=30
+  as_of_date/displaywidth=12
+  as_of_time/displaywidth=6
+  inv_loc/displaywidth=10
+  stat_desc:description/displaywidth=15
+  phys_loc/displaywidth=10
+  discrepancy_flag/displaywidth=10
+
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+sorted by
+  phys_loc/count/page/heading="@"
+  if clistby = "Unit Number" then inv:unitnumber else inv:licensenumber
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Exception Report"/newline  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: "+str(cproduct)/newline
+  "Include Foreign Vehicles: " + str(inc_foreign)
+  "   Sorted by: "+str(clistby)/newline
+  end box /newline=4
+
+  "------ As of ------"/align=as_of_date
+  "------ Inv Status ------"/align=inv_loc
+  "------ Phys Status ------"/align=phys_loc/newline
+
+  "Product"/align=inv:product
+  "Unit#"/align=inv:unitnumber
+  "License"/align=inv:licensenumber
+  "St"/align=inv:licensest
+  "Year/Make/Model/Color"/align=unitdesc
+  "Date"/align=as_of_date
+  "Time"/align=as_of_time
+  "Location"/align=inv_loc
+  "Status"/align=stat_desc:description
+  "Location"/align=phys_loc
+  "Exception"/align=discrepancy_flag/newline
+
+;
+replace physicalinv_exp.eq
+
+/*------------------------------------------------------------------------
+ Create exception report -Excel
+------------------------------------------------------------------------*/
+
+include "physicalinv_i1.inc"
+
+define
+
+  file physical_link = access physicalinv_hf,
+   set physicalinv_hf:invid=inv:invid,
+   one to one, zero fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+
+  string unitdesc = ltrim(str(inv:year,9999))+" "+rtrim(str(inv:make))+" "+rtrim(str(inv:model))+" "+rtrim(str(inv:unitcolor))
+ 
+  number veh_stat = if physical_link:invid = 0 then inv:vehiclestatusowned else physical_link:last_stat
+  date as_of_date = if physical_link:invid=0 then inv:lastmovementdate else physical_link:last_date
+  string as_of_time = if physical_link:invid=0 then str(inv:lastmovementtime,"z9.99") else str(physical_link:last_time,"z9.99")
+  string inv_loc = if physical_link:invid=0 then inv:locationcode else physical_link:last_loc
+  string phys_loc = if physical_link:invid=0 then inv:locationcode else physicalinv_hf:locationcode
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = veh_stat,
+    null fill on failure
+
+  string discrepancy_flag = if physical_link:invid <> 0 and (stat_desc:statustype one of 3,6) then "On Lot" else
+                            if physical_link:invid <> 0 and (stat_desc:statustype not one of 3,6) then "None" else 
+                            if physical_link:invid = 0  and (stat_desc:statustype one of 3,6) then "None" else 
+                            if physical_link:invid = 0 and (stat_desc:statustype not one of 3,6) then "Not on Lot"  
+
+
+ where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+  and discrepancy_flag <> "None"
+
+
+list/domain="inv"/nobanner/pageof/title="Physical Inventory Report"/duplicates/noheadings/noreporttotals/pagelength=0
+
+  inv:product/displaywidth=10
+  inv:unitnumber/displaywidth=10
+  inv:licensenumber/displaywidth=8
+  inv:licensest/displaywidth=4
+  unitdesc/displaywidth=30
+  as_of_date/displaywidth=12
+  as_of_time/displaywidth=6
+  inv_loc/displaywidth=10
+  stat_desc:description/displaywidth=15
+  phys_loc/displaywidth=10
+  discrepancy_flag/displaywidth=10
+
+
+sorted by
+  phys_loc
+  if clistby = "Unit Number" then inv:unitnumber else inv:licensenumber
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Exception Report"/newline  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: "+str(cproduct)/newline
+  "Include Foreign Vehicles: " + str(inc_foreign)
+  "   Sorted by: "+str(clistby)/newline
+  end box /newline=4
+
+  "------ As of ------"/align=as_of_date
+  "------ Inv Status ------"/align=inv_loc
+  "------ Phys Status ------"/align=phys_loc/newline
+
+  "Product"/align=inv:product
+  "Unit#"/align=inv:unitnumber
+  "License"/align=inv:licensenumber
+  "St"/align=inv:licensest
+  "Year/Make/Model/Color"/align=unitdesc
+  "Date"/align=as_of_date
+  "Time"/align=as_of_time
+  "Location"/align=inv_loc
+  "Status"/align=stat_desc:description
+  "Location"/align=phys_loc
+  "Exception"/align=discrepancy_flag
+;
+replace physicalinvxl_exp.eq
+
+/*------------------------------------------------------------------------
+ Create physical count list
+------------------------------------------------------------------------*/
+
+include "physicalinv_i1.inc"
+
+define
+  
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = physicalinv_hf:locationcode,
+    null fill on failure
+
+  file inv_link = access inv, 
+   set inv:invid=physicalinv_hf:invid,
+   one to one, null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv_link:vehiclestatusowned,
+    null fill on failure
+
+  file invsold_link = access invsold, 
+   set invsold:invid=physicalinv_hf:invid,
+   one to one, null fill on failure
+
+  file stat_desc_sold = access invstatus,
+    set invstatus:invstatus = invsold_link:vehiclestatusowned,
+    null fill on failure
+
+  string key_str = if invsold_link:invid <> 0 then str(invsold_link:invid) else str(inv_link:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+  string lic_num = if inv_link:invid <> 0 then inv_link:licensenumber else invsold_link:licensenumber
+  string lic_st = if inv_link:invid <> 0 then inv_link:licensest else invsold_link:licensest
+  string unitdesc = if inv_link:invid <> 0 then ltrim(str(inv_link:year,9999))+" "+rtrim(str(inv_link:make))+" "+rtrim(str(inv_link:model))+" "+rtrim(str(inv_link:unitcolor))
+     else ltrim(str(invsold_link:year,9999))+" "+rtrim(str(invsold_link:make))+" "+rtrim(str(invsold_link:model))+" "+rtrim(str(invsold_link:unitcolor))
+  string scanflag = if physicalinv_hf:scanned = 1 then "Yes" else ""
+  string loc_code = if inv_link:invid <> 0 then inv_link:locationcode else invsold_link:locationcode
+  number dayslast = if inv_link:invid <> 0 then todaysdate - inv_link:lastmovementdate else todaysdate - invsold_link:lastmovementdate
+  string inv_status = if inv_link:invid <> 0 then stat_desc:description else stat_desc_sold:description
+
+  
+ where 
+ (physicalinv_hf:Product  = cProduct or cProduct = "ALL" )
+  and (physicalinv_hf:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")    
+
+list/domain="physicalinv_hf"/nobanner/pageof/title="Physical Inventory Report"/duplicates/noreporttotals/noheadings/pagelength=80
+  physicalinv_hf:product/displaywidth=10
+  physicalinv_hf:unitnumber/displaywidth=10
+  lic_num/displaywidth=10
+  lic_st/displaywidth=5
+  unitdesc/displaywidth=30
+  physicalinv_hf:dateadded/displaywidth=12
+  physicalinv_hf:timeadded/displaywidth=8
+  physicalinv_hf:employeenumber/displaywidth=10
+  scanflag/displaywidth=4
+  loc_code/displaywidth=10
+  dayslast/displaywidth=6
+  inv_status/displaywidth=15
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+sorted by
+physicalinv_hf:locationcode/count/heading="@"
+if clistby = "Unit Number" then physicalinv_hf:unitnumber else lic_num
+
+top of physicalinv_hf:locationcode
+"Counted at location: "+str(physicalinv_hf:locationcode)/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Physical Count List"/newline  
+  "Product: " + str(cProduct)/newline
+  end box /newline=4
+
+  "Product"/align=physicalinv_hf:product
+  "Unit#"/align=physicalinv_hf:unitnumber
+  "License"/align=lic_num
+  "St"/align=lic_st
+  "Year/Make/Model/Color"/align=unitdesc/displaywidth=30
+  "Date"/align=physicalinv_hf:dateadded
+  "Time"/align=physicalinv_hf:timeadded
+  "Emp"/align=physicalinv_hf:employeenumber
+  "Scan"/align=scanflag
+  "Loc"/align=loc_code
+  "Days"/align=dayslast
+  "Status"/align=inv_status/newline
+
+;
+replace physicalinv_lst.eq 
+
+/*------------------------------------------------------------------------
+ Create physical count list - Excel
+------------------------------------------------------------------------*/
+
+include "physicalinv_i1.inc"
+
+define
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = physicalinv_hf:locationcode,
+    null fill on failure
+  
+  file inv_link = access inv, 
+   set inv:invid=physicalinv_hf:invid,
+   one to one, null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv_link:vehiclestatusowned,
+    null fill on failure
+
+  file invsold_link = access invsold, 
+   set invsold:invid=physicalinv_hf:invid,
+   one to one, null fill on failure
+
+  file stat_desc_sold = access invstatus,
+    set invstatus:invstatus = invsold_link:vehiclestatusowned,
+    null fill on failure
+
+
+  string lic_num = if inv_link:invid <> 0 then inv_link:licensenumber else invsold_link:licensenumber
+  string lic_st = if inv_link:invid <> 0 then inv_link:licensest else invsold_link:licensest
+  string unitdesc = if inv_link:invid <> 0 then ltrim(str(inv_link:year,9999))+" "+rtrim(str(inv_link:make))+" "+rtrim(str(inv_link:model))+" "+rtrim(str(inv_link:unitcolor))
+     else ltrim(str(invsold_link:year,9999))+" "+rtrim(str(invsold_link:make))+" "+rtrim(str(invsold_link:model))+" "+rtrim(str(invsold_link:unitcolor))
+  string scanflag = if physicalinv_hf:scanned = 1 then "Yes" else ""
+  string loc_code = if inv_link:invid <> 0 then inv_link:locationcode else invsold_link:locationcode
+  number dayslast = if inv_link:invid <> 0 then todaysdate - inv_link:lastmovementdate else todaysdate - invsold_link:lastmovementdate
+  string inv_status = if inv_link:invid <> 0 then stat_desc:description else stat_desc_sold:description
+
+ 
+ where 
+ (physicalinv_hf:Product  = cProduct or cProduct = "ALL" )
+  and (physicalinv_hf:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (stat_desc:description = cstatus or cstatus = "ALL")    
+
+list/domain="physicalinv_hf"/nobanner/pageof/title="Physical Inventory Report"/duplicates/noreporttotals/noheadings/pagelength=0
+  physicalinv_hf:locationcode/displaywidth=15
+  physicalinv_hf:product/displaywidth=10
+  physicalinv_hf:unitnumber/displaywidth=10
+  lic_num/displaywidth=10
+  lic_st/displaywidth=5
+  unitdesc/displaywidth=30
+  physicalinv_hf:dateadded/displaywidth=12
+  physicalinv_hf:timeadded/displaywidth=8
+  physicalinv_hf:employeenumber/displaywidth=10
+  scanflag/displaywidth=4
+  loc_code/displaywidth=10
+  dayslast/displaywidth=6
+  inv_status/displaywidth=15
+
+sorted by
+physicalinv_hf:locationcode
+if clistby = "Unit Number" then physicalinv_hf:unitnumber else lic_num
+
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Physical Count List"/newline  
+  "Product: " + str(cProduct)/newline
+  end box /newline=4
+
+  "Physical Loc"/align=physicalinv_hf:locationcode
+  "Product"/align=physicalinv_hf:product
+  "Unit#"/align=physicalinv_hf:unitnumber
+  "License"/align=lic_num
+  "St"/align=lic_st
+  "Year/Make/Model/Color"/align=unitdesc/displaywidth=30
+  "Date"/align=physicalinv_hf:dateadded
+  "Time"/align=physicalinv_hf:timeadded
+  "Emp"/align=physicalinv_hf:employeenumber
+  "Scan"/align=scanflag
+  "Loc"/align=loc_code
+  "Days"/align=dayslast
+  "Status"/align=inv_status
+;
+replace physicalinvxl_lst.eq 
+
+/*------------------------------------------------------------------------
+ Select Report
+------------------------------------------------------------------------*/
+include "physicalinv_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if ctype = "Listing" then {
+"cli copy /y physicalinv_lst.eq physicalinv.eq"/newline
+} else {
+"cli copy /y physicalinv_exp.eq physicalinv.eq"/newline
+}
+;
+run/parameterfile=physicalinv_1
+rrepl physicalinvoutput
+cli copy /y physicalinvoutput.cq physicalinvoutput.mf
+run/parameterfile physicalinvoutput.mf
+
+run/parameterfile=physicalinv_1 physicalinv.eq
+rrepl physicalinv
+
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "physicalinv_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+  if ctype = "Listing" then {
+    "cli copy /y physicalinv_lst.eq physicalinv.eq"/newline
+  } else {
+    "cli copy /y physicalinv_exp.eq physicalinv.eq"/newline
+  }
+"run/parameterfile=physicalinv_1 physicalinv.eq"/newline
+} else {
+  if ctype = "Listing" then {
+    "cli copy /y physicalinvxl_lst.eq physicalinvxl.eq"/newline
+  } else {
+    "cli copy /y physicalinvxl_exp.eq physicalinvxl.eq"/newline
+  }
+"run/xls/parameterfile=physicalinv_1 physicalinvxl.eq"/newline
+}
+"rrepl physicalinv"/newline
+"view"/newline 
+;
+run/parameterfile=physicalinv_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Physical Inventory Report" -- Report Title
+   string rptname1    = "physicalinv" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "physicalinv_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

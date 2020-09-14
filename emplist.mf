@@ -1,0 +1,330 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Employee List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/15/2017
+Modified:
+
+Notes:
+$Workfile: emplist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/emplist.mf $
+$Revision: 2 $
+$History: emplist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"ALL"'
+   ',"'+employee:employeelastname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_emps.cq"
+  string dlinfo = parameter/uppercase prompt "Include D/L Info? " valid "Y","N" default "N"
+  string prinfo = parameter/uppercase prompt "Include Payroll Info? " valid "Y","N" default "N"
+  string workhours = parameter/uppercase prompt "Include Working Hours? " valid "Y","N" default "N"
+  string secureinfo = parameter/uppercase prompt "Include Security Access Info? " valid "Y","N" default "N"
+  string inactiveemp = parameter/uppercase prompt "Include Inactive Employees? " valid "Y","N" default "N"
+  string cpage = parameter/uppercase prompt "One Page per Employee? " valid "Y","N" default "N"
+;
+replace emplist_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve employee privileges
+------------------------------------------------------------------------*/
+viewpoint native;
+include "emplist_i1.inc"
+
+define
+  file i_counter = access counter,
+    set min=1,max=100
+
+list/domain="privilege"/hold="priv_hf"
+if i_counter:position < max then {
+  if subfield(privilege:groups,",",i_counter:position) <> "" then{
+  privilege:code 
+  subfield(privilege:groups,",",i_counter:position)/name="group"/width=62/keyelement=1.1
+}
+}
+;
+replace emplist_1.eq
+run/setparameter emplist_1.eq
+
+run/parameterfile=emplist_1 emplist_1.eq
+
+/*------------------------------------------------------------------------
+ One page per employee?
+------------------------------------------------------------------------*/
+include "emplist_i1.inc"
+ 
+list/nodefaults/domain="dummy"
+if cPage = "N" then "" else "/page"
+;
+
+run/parameterfile=emplist_1
+rreplace detail
+
+/*------------------------------------------------------------------------
+ Employee access groups
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  file i_counter = access counter,
+    set min=1,max=100
+
+list/domain="employee"/hold="group_hf"
+if i_counter:position < max then {
+  if subfield(employee:groups,",",i_counter:position) <> "" then{
+  employee:employeenumber/keyelement=1.1 
+  subfield(employee:groups,",",i_counter:position)/name="group"/width=62
+}
+}
+
+;
+run/parameterfile=emplist_1 
+
+/*------------------------------------------------------------------------
+ Allocate priveleges to employee groups
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define 
+   file priv_link = access priv_hf,
+    set priv_hf:group = group_hf:group,
+    one to many
+
+where priv_hf:code <> ""
+
+list/domain="group_hf"/nodetail/hold="grouppriv_hf"
+  group_hf:employeenumber 
+  group_hf:group
+  priv_link:code
+
+sorted by 
+  priv_link:code
+  group_hf:employeenumber
+
+end of group_hf:employeenumber
+  
+  priv_link:code
+  group_hf:employeenumber/keyelement=1.1
+
+;
+run/parameterfile=emplist_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "emplist_i1.inc"
+
+define
+   file grouppriv_link = access grouppriv_hf,
+    set grouppriv_hf:employeenumber=employee:employeenumber,
+    one to many
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = employee:locationcode,
+    null fill on failure
+
+where ((employee:dateinactive = null and inactiveemp = "N") or  inactiveemp = "Y")
+     and (employee:locationcode = cLoc or cLoc = "ALL" ) 
+    and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+     and (employee:employeelastname = cEmpS or cEmpS = "ALL")
+
+
+list/domain="employee"/nobanner/columnspacing=2/title="Employee List"/noheadings/pageof/pagelength=70/noreporttotals
+
+  employee:employeenumber/width=10/name="a"
+  employee:employeelastname + ", " + employee:employeefirstname/width=20/name="b"
+  employee:employeelogin /name="c"
+  employee:jobtitle /name="d"
+  employee:address1 + " " + employee:address2 /width=50/name="e"
+  employee:city /width=20/name="f"
+  employee:state /name="g"
+  employee:zipcode/width=8/newline /name="h"
+
+
+if dlinfo = "Y" then {
+  ""/newline
+  "D/L Num"/noheading/name="a2"/column=10
+  "D/L State"/noheading/name="b2"
+  "D/L Exp"/noheading/name="c2"/newline
+  employee:dlnum/noheading/align=a2
+  employee:dlstate/noheading/align=b2
+  employee:dlexpdate/noheading/align=c2/newline
+}
+
+
+if prinfo = "Y" then {
+  ""/newline
+  "Review Date"/noheading/name="a3"/column=10
+  "Job Title"/noheading/name="b3"
+  "Rate of Pay"/noheading/name="c3"/newline
+  employee:reviewdate/noheading/align=a3
+  employee:jobtitle/noheading/align=b3
+  employee:ratepay/noheading/align=c3/newline
+}
+
+
+if workhours = "Y" then {
+  ""/newline
+  "Working Hours:"/newline/column=10
+  "Sun"/noheading/name="a4"/column=10
+  "Mon"/noheading/name="b4"
+  "Tue"/noheading/name="c4"
+  "Wed"/noheading/name="d4"
+  "Thu"/noheading/name="e4"
+  "Fri"/noheading/name="f4"
+  "Sat"/noheading/name="g4"/newline
+  employee:starttime1/noheading/align=a4
+  employee:starttime2/noheading/align=b4
+  employee:starttime3/noheading/align=c4
+  employee:starttime4/noheading/align=d4
+  employee:starttime5/noheading/align=e4
+  employee:starttime6/noheading/align=f4
+  employee:starttime7/noheading/align=g4/newline
+  employee:endtime1/noheading/align=a4
+  employee:endtime2/noheading/align=b4
+  employee:endtime3/noheading/align=c4
+  employee:endtime4/noheading/align=d4
+  employee:endtime5/noheading/align=e4
+  employee:endtime6/noheading/align=f4
+  employee:endtime7/noheading/align=g4/newline
+}
+
+
+if secureinfo = "Y" then {
+  ""/newline
+  "Group Access:"/column=10/newline
+  box/width=100/fill/column=10
+  employee:groups/newline
+  end box/newlines
+}
+
+if secureinfo = "Y" then {
+  ""/newline
+  "User Privileges:"/column=10/newline
+  box/width=100/fill/column=10
+  employee:emppriv
+  end box/newlines
+}
+
+if secureinfo = "Y" then {
+  ""/newline
+  "Inherited Privileges:"/column=10/newline
+  box/width=100/fill/column=10
+  grouppriv_link:code 
+  end box/newlines
+}
+sorted by employee:employeenumber
+include "detail.cq"
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Include Inactive Employees? " + str(inactiveemp)/newline
+  end box/newlines=4
+
+  "Employee Number"/align=a
+  "Employee Name"/align=b
+  "Login"/align=c
+  "Title"/align=d
+  "Address"/align=e
+  "City"/align=f
+  "St."/align=g
+  "Zip"/align=h/newline
+
+end of report
+   ""/newline=2
+   count[employee:employeenumber]/heading="Total Employees"
+;
+
+replace emplist.eq
+run/parameterfile=emplist_1 emplist.eq
+rrepl emplist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view emplist
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Employee List" -- Report Title
+   string rptname1    = "emplist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "emplist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

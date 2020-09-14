@@ -1,0 +1,193 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Equipment Transaction Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/20/2017 Chris Wroblewski
+Modified:
+
+Notes:
+$Workfile: equiptrx.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/equiptrx.mf $
+$Revision: 2 $
+$History: equiptrx.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="equiptype"
+if itemnumber=1 then '"'+equiptype:equiptype+'"' else
+   ',"'+equiptype:equiptype+'"'
+
+sorted by
+   equiptype:equiptype
+top of report
+'string cequiptypes[8192] = multivalue parameter prompt "Equipment Type: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_equiptypes"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+date dtstart = parameter prompt "Enter Starting Date" default todaysdate-day(todaysdate)+1
+date dtend = parameter prompt "Enter Ending Date" default todaysdate
+include "param_equiptypes.cq"
+string cequiprange[1024] = range parameter prompt "Equipment # range (Start..End) or ALL:" default ALL
+;
+replace equiptrx_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "equiptrx_i1.inc"
+
+define
+   string ctypes=parameter 
+     prompt "Origin/Types: " 
+     valid "All","Created","Rental","Deleted","Maintenance"
+     default "All"
+   
+   string cTrxOrigin = switch(equiptrx:trxorigin)
+     case "Add" : "Created"
+     case "Maint" : "Maintenance"
+     case "Checkout" : "Rental"
+     case "Delete" : "Deleted"
+
+   string cTrxTypeOut = switch(equiptrx:trxtypeout)
+     case 1 : "On Rent"
+     case 3 : "Exch. Checkout"
+     case 5 : "Grounded"
+     case 7 : "Modified"
+
+   string cTrxTypeIn = switch(equiptrx:trxtypein)
+     case 2 : "Available"
+     case 4 : "Exch. Return"
+     case 6 : "Ungrounded"
+     case 8 : "Modified"
+     case 10 : "Void RA"
+
+where 
+  ((equiptrx:dateout >= dtstart and equiptrx:dateout <= dtend or equiptrx:dateout = null)
+  or (equiptrx:datein >= dtstart and equiptrx:datein <= dtend))
+  and (equip:Equiptype = cequiptypes or cequiptypes ="All")
+  and (equip:assetid = cequiprange or cequiprange = "ALL")
+  and ((ctrxorigin = ctypes) or ctypes = "All")
+ 
+list/duplicates/noheadings/nobanner/pageof/title="Equipment Transactions Report"/domain="equiptrx"
+  equiptrx:assetid/hidden 
+  rrm:ranumber/displaywidth=15/left 
+  ctrxorigin/displaywidth=10 
+  equiptrx:locationcodeout/displaywidth=10 
+  equiptrx:dateout 
+  equiptrx:timeout/displaywidth=4/left/nototal/mask="9(2).9(2)" 
+  equiptrx:counterout/displaywidth=8/center/nototal/decimalplaces=0 
+  ctrxtypeout/displaywidth=15  
+  equiptrx:locationcodein/displaywidth=10 
+  equiptrx:datein 
+  equiptrx:timein/displaywidth=4/left/nototal/mask="9(2).9(2)" 
+  equiptrx:counterin/displaywidth=8/center/nototal/decimalplaces=0 
+  ctrxtypein/displaywidth=15 
+
+sorted by
+  equiptrx:assetid/columnheadings
+  equiptrx:dateout
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtstart) +" to " + str(dtend)/displaywidth=100/newline
+  "Equipment Range: "+str(cequiprange)/displaywidth=100/newline
+  "Equipment Type(s): " + str(cequiptypes)/newline
+  "Origin/Types: " +str(ctypes)
+  end box/newlines=4
+  "- - - - - - - - - - - - - - - - - - - - - -    Rental    - - - - - - - - - - - - - - - - - - - - - -"/align=equiptrx:locationcodeout
+  "- - - - - - - - - - - - - - - - - - - - - -    Return    - - - - - - - - - - - - - - - - - - - - - -"/align=equiptrx:locationcodein/newline
+  {"RA#"/align=rrm:ranumber}
+  {"Type"/align=ctrxorigin}
+  {"Location"/align=equiptrx:locationcodeout}
+  {"Date"/align=equiptrx:dateout}
+  {"Time"/align=equiptrx:timeout}
+  {"Counter"/displaywidth=8/align=equiptrx:counterout}
+  {"Status"/align=ctrxtypeout}
+  {"Location"/align=equiptrx:locationcodein}
+  {"Date"/align=equiptrx:datein}
+  {"Time"/align=equiptrx:timein}
+  {"Counter"/align=equiptrx:counterin}
+  {"Status"/align=ctrxtypein/newline}
+
+top of equiptrx:assetid 
+  {{equiptrx:equiptype} {" "+equiptrx:assetid+" "/column=10} {" "+equiptrx:make+" "/column=20} {" "+equiptrx:model+" "/column=30} {" "+equiptrx:serialnumber+" "/displaywidth=20/column=40}}
+
+;
+replace equiptrx_1.eq
+replace equiptrx.eq
+run/setparameter equiptrx_1.eq
+
+run/parameterfile=equiptrx_1 equiptrx_1.eq
+
+run/parameterfile=equiptrx_1 equiptrx.eq
+rrepl equiptrx
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view equiptrx
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Equipment Transaction Report" -- Report Title
+   string rptname1    = "equiptrx" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "equiptrx_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

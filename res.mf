@@ -1,0 +1,459 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Reservation Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/8/2017
+Modified:
+
+Notes:
+$Workfile: res.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/res.mf $
+$Revision: 3 $
+$History: res.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 3/13/20    Time: 2:11p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel formatting output.
+ * Fixed record selection for faster performance with large DBs
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  date dtsdate = parameter prompt "Start Date: " default todaysdate
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate + 5;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string rec_select = parameter prompt "Select records:" valid "ALL","Pickups/Deliveries","VIP" Default "ALL"
+  string sort_by = parameter prompt "Select by Date:" valid "Out","Added" default "Out"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+  string pickup_notes = parameter/uppercase prompt "Print Pickups/Collections? " valid "Y","N" default "N"
+  string rate_detail = parameter/uppercase prompt "Print Rate Details? " valid "Y","N" default "N"
+  string flt_info = parameter/uppercase prompt "Include Flight Info? " valid "Y","N" default "N"
+  string cnoshow = parameter/uppercase prompt "Print No-Shows Only? " valid "Y","N" default "N"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace res_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters - create dynamic where clause based on selection
+------------------------------------------------------------------------*/
+viewpoint native;
+
+  include "res_i1.inc"
+define
+
+  string date_line = if sort_by = "Out" then "and (rrm:dateout >= dtSDate and rrm:dateout <= dtEdate )" else
+   "and (resdb_link:dateadded >= dtSDate and resdb_link:dateadded <= dtEdate )"
+ 
+  string select_line = if rec_select = "Pickups/Deliveries" then "and rrm:pickup <> ''" else 
+   if rec_select = "VIP" then "and renter_link:systemid <> ''" else
+   ""
+  
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+"where"/newline
+  if cnoshow = "N" then "(rrm:resstatus = 20 or rrm:resstatus = 60)" else "(rrm:resstatus = 60)" /newline
+  date_line/newline
+  "and (rrm:Product  = cProduct or cProduct = 'ALL' )"/newline
+  "and (rrm:locationcodeout = cLoc or cLoc = 'ALL' )"/newline
+  'and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)'/newline
+  "and (rrm:reservedclass = cClass or cClass = 'ALL')"/newline
+  select_line/newline
+
+;
+replace res_1.eq
+run/setparameter res_1.eq
+
+run/parameterfile=res_1 res_1.eq
+rreplace res_1
+
+
+/*------------------------------------------------------------------------
+ Retrieve rrm records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+ include "res_i1.inc"
+
+define
+    file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+ include "res_1.cq"
+
+list/domain="rrm"/hold="rrm_hf"
+
+  rrm:commonid/keyelement=1.1
+  rrm:locationcodedue
+  rrm:locationcodeout
+  rrm:renterid
+  rrm:tour
+  rrm:arrivalairline
+  rrm:arrivalflight
+  rrm:arrivaldate
+  rrm:arrivaltime
+  rrm:ffcarrier
+  rrm:ffaccount
+  rrm:dateout
+  rrm:timeout
+  rrm:datedue
+  rrm:timedue
+  rrm:product
+  rrm:reservedclass
+  rrm:customerlastname
+  rrm:customerfirstname
+  rrm:company
+  rrm:sourcecode
+  rrm:referralcode
+  rrm:pickup
+  rrm:resnumber
+  rrm:resstatus
+
+;
+
+run/parameterfile=res_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "res_i1.inc"
+
+define
+
+  file resdb_link = access resdb,
+   set resdb:commonid=rrm_hf:commonid,
+   one to one, null fill on failure
+
+  file renter_link = access renterra,
+   set renterra:renterid=rrm_hf:renterid,
+   one to one, null fill on failure
+
+  file rate_to_ra = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   one to many,null fill on failure
+
+  file pickup_link = access address,
+   set address:commonid=rrm_hf:commonid,
+   one to one, null fill on failure
+
+  file inv_link = access inv,
+   set inv:invid=resdb_link:invid,
+   one to one,generic,null fill on failure
+
+  string commonid_str = str(rrm_hf:commonid)
+
+  file rrm_to_notes = access dialogue,
+   set type = 1,dialogue:key = commonid_str,
+   one to one, null fill on failure
+
+  string tour_flag = if rrm_hf:tour = 1 then "Yes" else "No"
+
+  string flight_info = "Airline: " + str(rrm_hf:arrivalairline) + " Flt#: " + str(rrm_hf:arrivalflight) + " Date/Time: " + str(rrm_hf:arrivaldate) + " " + str(rrm_hf:arrivaltime)
+  + " Frequent Flyer: " + str(rrm_hf:ffcarrier) + " " + str(rrm_hf:ffaccount)
+
+
+list/title="Reservation Report"/pageof/nototals/noheadings/pagelength=80/pagewidth=200/nobanner/domain="rrm_hf"
+  rrm_hf:dateout/width=12 /name="a"
+  rrm_hf:timeout/width=5 /name="b"
+  rrm_hf:reservedclass /name="c"
+  rrm_hf:datedue/width=12 /name="d"
+  rrm_hf:timedue/width=5 /name="e"
+  rrm_hf:customerlastname + ", " + rrm_hf:customerfirstname/displaywidth=40 /name="f"
+  renter_link:homephonenumber/mask="(999) 999-9999" /name="g"
+  resdb_link:ratecode /name="h"
+  resdb_link:resnumber /name="i"
+  renter_link:systemid /name="j"/newline 
+  resdb_link:dateadded/width=12 /align=a
+  resdb_link:timeadded /align=b
+  inv_link:unitnumber /align=c
+  rrm_hf:locationcodedue /align=d
+  tour_flag /align=e
+  rrm_hf:company/displaywidth=30 /align=f
+  resdb_link:requestedequipment/align=g
+  rrm_hf:sourcecode /align=h
+  rrm_hf:referralcode /align=i
+  resdb_link:addedbyemployeenumber /align=j/newline
+  if flt_info = "Y" then flight_info/align=a/newline
+
+ if ((count[rate_to_ra:lineno,rate_to_ra:lineno] = 1) and rate_detail = "Y") then 
+{
+  rate_to_ra:rateper/heading="Rate"
+  rate_to_ra:freemi/heading="Miles"
+  rate_to_ra:description/heading="Desc"
+}
+
+  followed by if (notes_detail = "Summary") then {
+  "Summary: " + rrm_to_notes:summary/newline
+  }
+
+  followed by if (notes_detail = "Detail") then {
+  "Summary: " + rrm_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + rrm_to_notes:notes
+  end box/newline
+  }
+
+  followed by if (pickup_notes = "Y") then {
+  if rrm_hf:pickup = "P" then "Pickup Info: " else "Delivery Info: "/newline
+  trun(pickup_link:siteaddr1) + " " + trun(pickup_link:siteaddr2) + " " + trun(pickup_link:sitecity) + " " 
+  + trun(pickup_link:sitest) + " " + trun(pickup_link:sitezip) + "    " + str(pickup_link:sitephone,"(999) 999-9999")/newline
+  str(pickup_link:actiondate) + " " +str(pickup_link:actiontime,"99.99")/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + pickup_link:notes
+  end box/newline
+  }
+
+
+sorted by
+  rrm_hf:locationcodeout/page
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:resnumber
+  rate_to_ra:lineno
+
+end of rrm_hf:resnumber
+  ""/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup,100) + " for dates: " + str(dtSDate) + " to " + str(dtEdate)
+  else "Locations: " + str(cLoc) + " for dates: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "Selected by Date " + str(sort_by)+"   Records: " + str(rec_select)/newline
+  if cnoshow = "Y" then "No-Shows Only"/newline
+  end box/newlines=4
+
+  "Location: " + str(rrm_hf:locationcodeout)/newline=2
+
+  "-- Pick Up --"/align=a
+  "---- Due ----"/align=d/newline
+
+  "Date"/align=a
+  "Time" /align=b
+  "Class" /align=c
+  "Date" /align=d
+  "Time"/align=e
+  "Name"/align=f
+  "Phone" /align=g
+  "Rate" /align=h
+  "Res#" /align=i
+  "VIP" /align=j/newline
+
+  "-- Added ---"/align=a
+  "Unit #" /align=c
+  "Location" /align=d
+  "Tour" /align=e
+  "Company" /align=f
+  "Equipment" /align=g
+  "Source" /align=h
+  "Referral" /align=i
+  "Added by" /align=j/newline
+
+;
+replace res.eq
+
+/*------------------------------------------------------------------------
+ Output Report -Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "res_i1.inc"
+
+define
+
+  file resdb_link = access resdb,
+   set resdb:commonid=rrm_hf:commonid,
+   one to one, null fill on failure
+
+  file renter_link = access renterra,
+   set renterra:renterid=rrm_hf:renterid,
+   one to one, null fill on failure
+
+  file pickup_link = access address,
+   set address:commonid=rrm_hf:commonid,
+   one to one, null fill on failure
+
+  file inv_link = access inv,
+   set inv:invid=resdb_link:invid,
+   one to one,generic,null fill on failure
+
+  string commonid_str = str(rrm_hf:commonid)
+
+  file rrm_to_notes = access dialogue,
+   set type = 1,dialogue:key = commonid_str,
+   one to one, null fill on failure
+
+  string tour_flag = if rrm_hf:tour = 1 then "Yes" else "No"
+
+  string flight_info = "Airline: " + str(rrm_hf:arrivalairline) + " Flt#: " + str(rrm_hf:arrivalflight) + " Date/Time: " + str(rrm_hf:arrivaldate) + " " + str(rrm_hf:arrivaltime)
+  + " Frequent Flyer: " + str(rrm_hf:ffcarrier) + " " + str(rrm_hf:ffaccount)
+
+
+list/title="Reservation Report"/nototals/noheadings/pagelength=0/nobanner/domain="rrm_hf"
+  rrm_hf:locationcodeout/displaywidth=20/name="a1"
+  rrm_hf:dateout/width=12 /name="a"
+  rrm_hf:timeout/width=5 /name="b"
+  rrm_hf:reservedclass /name="c"
+  rrm_hf:datedue/width=12 /name="d"
+  rrm_hf:timedue/width=5 /name="e"
+  rrm_hf:customerlastname + ", " + rrm_hf:customerfirstname/displaywidth=40 /name="f"
+  renter_link:homephonenumber/mask="(999) 999-9999" /name="g"
+  resdb_link:ratecode /name="h"
+  resdb_link:resnumber /name="i"
+  renter_link:systemid /name="j"
+  resdb_link:dateadded/width=12 /name="aa"
+  resdb_link:timeadded /name="bb"
+  inv_link:unitnumber /name="cc"
+  rrm_hf:locationcodedue /name="dd"
+  tour_flag /name="ee"
+  rrm_hf:company/displaywidth=30 /name="ff"
+  resdb_link:requestedequipment/name="gg"
+  rrm_hf:sourcecode /name="hh"
+  rrm_hf:referralcode /name="ii"
+  resdb_link:addedbyemployeenumber /name="jj"
+
+  if flt_info = "Y" then flight_info/name="kk"
+
+  if (pickup_notes = "Y") then {
+  trun(pickup_link:siteaddr1) + " " + trun(pickup_link:siteaddr2) + " " + trun(pickup_link:sitecity) + " " 
+  + trun(pickup_link:sitest) + " " + trun(pickup_link:sitezip) + "    " + str(pickup_link:sitephone,"(999) 999-9999")+" "+
+  str(pickup_link:actiondate) + " " +str(pickup_link:actiontime,"99.99")+" " + pickup_link:notes/width=250/name="ll"
+  }
+
+  if (notes_detail = "Summary") then {
+    rrm_to_notes:summary
+  } else  if (notes_detail = "Detail") then {
+    rrm_to_notes:notes
+  }
+
+sorted by
+  rrm_hf:locationcodeout
+  rrm_hf:dateout
+  rrm_hf:timeout
+  rrm_hf:resnumber
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup,100) + " for dates: " + str(dtSDate) + " to " + str(dtEdate)
+  else "Locations: " + str(cLoc) + " for dates: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "Selected by Date " + str(sort_by)+"   Records: " + str(rec_select)/newline
+  if cnoshow = "Y" then "No-Shows Only"/newline
+  end box/newlines=4
+
+  "Location: "/align=a1
+  "Date"/align=a
+  "Time" /align=b
+  "Class" /align=c
+  "Date" /align=d
+  "Time"/align=e
+  "Name"/align=f
+  "Phone" /align=g
+  "Rate" /align=h
+  "Res#" /align=i
+  "VIP" /align=j
+
+  "Date Added"/align=aa
+  "Time Added"/align=bb
+  "Unit #" /align=cc
+  "Location" /align=dd
+  "Tour" /align=ee
+  "Company" /align=ff
+  "Equipment" /align=gg
+  "Source" /align=hh
+  "Referral" /align=ii
+  "Added by" /align=jj
+  if flt_info = "Y" then "Flight Info"/align=kk
+  if (pickup_notes = "Y") then if rrm_hf:pickup = "P" then "Pickup Info: " else "Delivery Info: "/align=ll
+
+;
+replace res_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "res_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=res_1 res.eq"/newline
+} else {
+"run/xls/parameterfile=res_1 res_xl.eq"/newline
+}
+"rrepl res"/newline
+"view"/newline 
+;
+run/parameterfile=res_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Reservation Report" -- Report Title
+   string rptname1    = "res" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "res_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

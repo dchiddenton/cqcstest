@@ -1,0 +1,308 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Equipment Status Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/6/2019
+Modified:
+
+Notes:
+$Workfile: equipst.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/equipst.mf $
+$Revision: 2 $
+$History: equipst.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 12/10/19   Time: 10:06a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed equip type selection
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 12/06/19   Time: 3:12p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="equiptype"
+if itemnumber=1 then '"'+equiptype:equiptype+'"' else
+   ',"'+equiptype:equiptype+'"'
+
+sorted by
+   equiptype:equiptype
+top of report
+'string cequiptype[8192] = multivalue parameter prompt "Equipment Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_equiptype"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define 
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cloctype = parameter prompt "Select Location by: " valid "Current","Owned" default "Current"
+  include "param_equiptype.cq"
+  include "param_invstatus.cq"
+  string inc_foreign = parameter/uppercase prompt "Include Foriegn Equipment? " valid "Y","N" default "N"
+  string page_break = parameter/uppercase prompt "Page Break after each Status? " valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by : " valid "Status Type","Location","Asset ID" default "Status Type"
+
+;
+replace equipst_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve equipment records
+------------------------------------------------------------------------*/
+include "equipst_i1.inc"
+
+define
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = equip:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = equip:ownedlocationcode,
+    null fill on failure
+
+  file ownedloc_link = access location,
+   set location:locationcode=equip:ownedlocationcode,
+   one to one, null fill on failure
+
+  file stat_desc = access invstatus,
+   set invstatus:invstatus=equip:equipstatus,
+   one to one, null fill on failure
+
+
+where 
+    
+  ((cloctype = "Owned" and (equip:ownedlocationcode = cLoc)) or
+       (cloctype = "Current" and (equip:locationcode = cLoc)) or cloc = "ALL")
+  and ((cloctype = "Owned" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+  and (stat_desc:description = cstatus)
+  and (equip:equiptype = cequiptype)
+  and ((ownedloc_link:owned = 1 and inc_foreign = "N" ) or inc_foreign = "Y")
+      
+list/domain="equip"/hold="equip_hf"
+   equip:assetid
+   equip:counter
+   equip:equipcolor
+   equip:equipid
+   equip:equipstatus
+   equip:equiptype
+   equip:invid
+   equip:locationcode
+   equip:make
+   equip:model
+   equip:ownedlocationcode
+   equip:serialnumber
+   stat_desc:description/name="descr"
+   stat_desc:statustype
+;
+replace equipst_1.eq
+run/setparameter equipst_1.eq
+run/parameterfile=equipst_1 equipst_1.eq
+
+
+/*------------------------------------------------------------------------
+ Set page break and sort details
+------------------------------------------------------------------------*/
+include "equipst_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if csort = "Status Type" then {
+    if page_break = "Y" then {
+    "equip_hf:descr/page/total/count/heading='@'"/newline
+    "equip:assetid"/newline
+    }
+   else {
+    "equip_hf:descr/total/count/heading='@'"/newline
+    "equip:assetid"/newline
+   } 
+  }
+ if csort = "Location" then {
+   if cloctype = "Current" then {
+     if page_break = "Y" then {
+       "equip_hf:locationcode/page/total/count/heading='@'"/newline
+       "equip_hf:descr"/newline
+       "equip_hf:equiptype"/newline
+       "equip:assetid"/newline 
+      }
+     else {
+       "equip_hf:locationcode/total/count/heading='@'"/newline
+       "equip_hf:descr"/newline
+       "equip_hf:equiptype"/newline
+       "equip_hf:assetid"/newline
+      }
+  } else {
+    if page_break = "Y" then {
+       "equip_hf:ownedlocationcode/page/total/count/heading='@'"/newline
+       "equip_hf:descr"/newline
+       "equip_hf:equiptype"/newline
+       "equip:assetid"/newline 
+      }
+    else {
+       "equip_hf:ownedlocationcode/total/count/heading='@'"/newline
+       "equip_hf:descr"/newline
+       "equip_hf:equiptype"/newline
+       "equip:assetid"/newline
+    }
+   }
+ }
+  if (csort = "Asset ID") then {
+       "equip_hf:equiptype"/newline
+       "equip_hf:assetid/total/count/heading='@'"/newline
+  }
+;
+
+run/parameterfile=equipst_1
+rrepl "equipst_i3"
+
+/*------------------------------------------------------------------------
+ Set top of sections
+------------------------------------------------------------------------*/
+
+include "equipst_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Status Type" then {
+  "Top of equip_hf:descr"/newline
+  "'Status: '+str(equip_hf:descr)/newline"/newline
+} else if csort = "Location" then {
+  if cloctype = "Current" then {
+      "Top of equip_hf:locationcode"/newline
+      "'Location: '+str(equip_hf:locationcode)/newline"/newline
+    } else {
+      "Top of equip_hf:ownedlocationcode"/newline
+      "'Owning Location: '+str(equip_hf:ownedlocationcode)/newline"/newline
+   }
+} else {
+  "Top of equip_hf:equiptype"/newline
+  "'Unit: '+str(equip_hf:equiptype)/newline"/newline
+}
+;
+run/parameterfile=equipst_1
+rrepl "equipst_i4"
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "equipst_i1.inc"
+
+define
+  file inv_link = access inv,
+    set inv:invid = equip_hf:invid,
+    one to one, null fill on failure
+
+  string ranum = if equip_hf:statustype = 3 then inv_link:ranumber else ""
+  date dbdate = if equip_hf:statustype = 3 then inv_link:datedue else null
+
+
+list/domain="equip_hf"/nobanner/pageof/title="Equipment Status Report"/duplicates/noreporttotals/noheadings   
+
+  equip_hf:equiptype/displaywidth=10
+  equip_hf:assetid/displaywidth=10
+  equip_hf:make/displaywidth=15
+  equip_hf:model/displaywidth=15
+  equip_hf:equipcolor/displaywidth=10
+  equip_hf:counter/nototal/displaywidth=10
+  equip_hf:descr/displaywidth=20
+  if cloctype = "Current" then equip_hf:locationcode else equip_hf:ownedlocationcode/name="location"/displaywidth=20
+  ranum/displaywidth=15
+  dbdate/displaywidth=10
+
+sorted by
+
+include "equipst_i3.cq"
+
+include "equipst_i4.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Equipment Type: " + str(cequiptype)/newline
+  "Sorted by: "+str(csort) + "   Include Foreign: " + str(inc_foreign)
+ end box/newlines=4
+
+  "Type"/align=equip_hf:equiptype
+  "Asset ID"/align=equip_hf:assetid
+  "Make"/align=equip_hf:make
+  "Model"/align=equip_hf:model
+  "Color"/align=equip_hf:equipcolor
+  "Counter"/align=equip_hf:counter
+  "Status"/align=equip_hf:descr
+  "Location"/align=location
+  "RA#"/align=ranum
+  "Dueback"/align=dbdate/newline
+
+
+end of report
+  ""/newline=2
+  "Total records: "+str(count[equip_hf:assetid,report])/newline
+;
+replace equipst.eq
+run/parameterfile=equipst_1 equipst.eq
+rrepl equipst
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view equipst
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Equipment Status Report" -- Report Title
+   string rptname1    = "equipst" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "equipst_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

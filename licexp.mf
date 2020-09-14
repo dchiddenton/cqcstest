@@ -1,0 +1,165 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: License Expiration Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/14/2018
+Modified:
+
+Notes:
+$Workfile: licexp.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/licexp.mf $
+$Revision: 2 $
+$History: licexp.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  string ctype = parameter prompt "Select by:" valid "License Expiration Date","Inspection Date"  default "License Expiration Date"
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string csort = parameter valid "Unit Number","Expiration Date" prompt "Sorted By:" default "Unit Number"
+;
+replace licexp_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters -  Output Report
+------------------------------------------------------------------------*/
+include "licexp_i1.inc"
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+  file stattype_link = access invstatus,
+    set invstatus:invstatus=inv:vehiclestatusowned,
+    one to one,null fill on failure
+
+  string title_name = if ctype = "License Expiration Date" then "License Expiration Report" else "Inspection Date Report"
+
+where
+      stattype_link:statustype <> 6 and
+
+      (inv:Product = cProduct or cProduct = "ALL" ) and
+      (inv:ownedlocationcode = cLoc or cLoc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+
+
+list/domain="inv"/nobanner/pageof/title=title_name
+if    ((((inv:licenseexpdate >= dtsdate and inv:licenseexpdate <= dtEdate) or inv:licenseexpdate = null)
+      and ctype = "License Expiration Date") or
+      (((inv:inspectiondate >= dtsdate and inv:inspectiondate <= dtedate) or inv:inspectiondate = null)
+      and ctype = "Inspection Date")) then {
+  inv:unitnumber 
+  inv:licensenumber 
+  inv:licensest 
+  inv:year/nocommas
+  inv:make 
+  inv:model 
+  inv:locationcode 
+  stattype_link:description/displaywidth=15/heading="Current Status"
+  inv:licenseexpdate 
+  inv:inspectiondate
+  1/name="rec_count"/hidden
+}
+
+sorted by
+  inv:ownedlocationcode
+  if csort = "Expiration Date" then if ctype = "License Expiration Date" then inv:licenseexpdate else inv:inspectiondate
+  inv:unitnumber
+
+top of inv:ownedlocationcode
+  "Owning Location: "+str(inv:ownedlocationcode)/newline
+
+end of inv:ownedlocationcode
+  str(inv:ownedlocationcode)+" Total: "+str(total[rec_count,inv:ownedlocationcode])/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)+"   by "+str(csort)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  end box /newline=4
+
+end of report
+  "Report Total: "+str(total[rec_count,report])
+
+;
+replace licexp_1.eq
+run/setparameter licexp_1.eq
+
+replace licexp.eq
+run/parameterfile=licexp_1 licexp.eq
+rrepl licexp
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view licexp
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "License Expiration Report" -- Report Title
+   string rptname1    = "licexp" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "licexp_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

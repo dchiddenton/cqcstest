@@ -1,0 +1,234 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Location List
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 10/22/2019
+Modified:
+
+Notes:
+$Workfile: loclist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/loclist.mf $
+$Revision: 1 $
+$History: loclist.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 10/23/19   Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Location opened after: " default 1.1.1980
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string csummary = parameter prompt "Detail or Summary?: " valid "Detail","Summary" default "Detail"
+;
+replace loclist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "loclist_i1.inc"
+list/domain="dummy"/nodefaults/nobanner
+if csummary = "Detail" then {
+
+'box/column=3/inline/width=45'/newline
+'  location:locationcode/displaywidth=25/heading="          Location"/newline'/newline
+'  location:description/displaywidth=25/heading="       Description"/newline '/newline
+'  location:franchise/displaywidth=25/heading="         Franchise" /newline'/newline
+'  location:name/displaywidth=25/heading="              Name" /newline'/newline
+'  location:address1/displaywidth=25/heading="           Address" /newline'/newline
+'  location:address2/displaywidth=25/heading="          Address2" /newline'/newline
+'  location:city/displaywidth=25/heading="              City" /newline'/newline
+'  location:state/displaywidth=25/heading="                St" /newline'/newline
+'  location:county /displaywidth=25/heading="            County"/newline'/newline
+'  location:country/displaywidth=25/heading="           Country" /newline'/newline
+'  location:phonenumber/displaywidth=25/mask = include "phone_mask.cq"/heading="             Phone"/newline '/newline
+'  location:faxnumber/displaywidth=25/mask = include "phone_mask.cq"/heading="               Fax"/newline '/newline
+'  location:locationtype/displaywidth=25/heading="         Loc. Type"/newline '/newline
+'  if location:corp = 1 then "Yes" else "No"/displaywidth=25/heading="    Corporate Loc."/newline '/newline
+'  location:gasper/displaywidth=25/heading="      Price of Gas" /newline'/newline
+'  if location:gallonliter = 1 then "Yes" else "No"/displaywidth=25/heading="        Per Gallon" /newline'/newline
+'  location:managerlastname/displaywidth=25/heading=" Manager Last Name"/newline '/newline
+'  location:managerfirstname/displaywidth=25/heading="Manager First Name"/newline '/newline
+'  location:arcust/displaywidth=25/heading="  A/R Customer No." /newline'/newline
+'  location:openfrom1/displaywidth=25/heading="       Sunday Open"/newline '/newline
+'  location:openfrom2 /displaywidth=25/heading="       Monday Open"/newline'/newline
+'  location:openfrom3/displaywidth=25/heading="      Tuesday Open"/newline '/newline
+'  location:openfrom4/displaywidth=25/heading="    Wednesday Open" /newline'/newline
+'  location:openfrom5/displaywidth=25/heading="     Thursday Open" /newline'/newline
+'  location:openfrom6/displaywidth=25/heading="       Friday Open" /newline'/newline
+'  location:openfrom7/displaywidth=25/heading="     Saturday Open" /newline'/newline
+'  location:longitude/displaywidth=25/heading="         Longitude" /newline'/newline
+'  location:reportingcity/displaywidth=25/heading="    Reporting City"/newline'/newline
+''/newline
+'  location:dateopened/displaywidth=25/mask = include "date_mask.cq"/heading="       Date Opened"/newline'/newline
+'  location:lotid/displaywidth=25/heading="            Lot ID"/newline'/newline
+'  location:maxdriverage/displaywidth=25/heading="    Max Age Driver"/newline'/newline
+'  location:dropzone/displaywidth=25/heading="         Drop Zone"/newline'/newline
+'  if location:carryfuellevel = 1 then "Yes" else "No"/displaywidth=25/heading="  Carry Fuel Level"/newline'/newline
+'  location:taxid/displaywidth=25/heading="            Tax ID"/newline'/newline
+'  location:lastchangedmotd/displaywidth=25/mask = include "date_mask.cq"/heading="    Date of MOTD"/newline'/newline
+'  location:erastore/displaywidth=25/heading="          EraStore"/newline'/newline
+'  location:estimateadd/displaywidth=25/heading="   Add to Estimate"/newline'/newline
+'  location:rptdeleteunit/displaywidth=25/heading="    Delete Leaving"/newline'/newline
+'  location:acctcity/displaywidth=25/heading="           City ID"/newline'/newline
+'  location:acctlocation/displaywidth=25/heading="       Location ID"/newline'/newline
+'  location:cashcommpct/displaywidth=25/heading="   Cash Commission"/newline'/newline
+'  location:dbcommpct/displaywidth=25/heading="  Direct Bill Com"/newline'/newline
+'  location:dateinactive/displaywidth=25/mask = include "date_mask.cq"/heading="     Date Inactive"/newline'/newline
+'  location:marketindicator/displaywidth=25/heading="  Market Indicator"/newline'/newline
+'  location:areanumberres/displaywidth=25/heading="         Area# Res"/newline'/newline
+'  location:corplocation/displaywidth=25/heading="     Corp Location"/newline'/newline
+'  location:citybandclass/displaywidth=25/heading="   City Band Class"/newline'/newline
+'  location:owningarea/displaywidth=25/heading="       Owning Area"/newline'/newline
+'  location:dealercode/displaywidth=25/heading="       Dealer Code"/newline'/newline
+'end box'/newline
+''/newline
+'box/column=50/inline/width=45'/newline
+'  location:tenantid/displaywidth=25/heading="      Tentant ID"/newline=6'/newline
+'  location:zipcode/displaywidth=25/heading="            Zip"/newline=4'/newline
+'  location:extension/displaywidth=25/heading="            Ext"/newline'/newline
+'  location:webphonenumber/displaywidth=25/mask = include "phone_mask.cq"/heading="      Web Phone"/newline'/newline
+'  location:owned/displaywidth=25/heading="         Owned"/newline'/newline
+'  location:trxprefix/displaywidth=25/heading="     Trx Prefix"/newline'/newline
+'  if location:gastaxable = 1 then "Yes" else "No"/displaywidth=25/heading="    Gas Taxable"/newline=2'/newline
+'  location:gasperppd/displaywidth=25/heading="Price of PP Gas"/newline'/newline
+'  location:profitcenter/displaywidth=25/heading="  Profit Center"/newline'/newline
+'  location:apvend/displaywidth=25/heading=" A/P Vendor No."/newline'/newline
+'  location:opento1/displaywidth=25/heading="   Sunday Close"/newline'/newline
+'  location:opento2/displaywidth=25/heading="   Monday Close"/newline'/newline
+'  location:opento3/displaywidth=25/heading="  Tuesday Close"/newline'/newline
+'  location:opento4/displaywidth=25/heading="Wednesday Close"/newline'/newline
+'  location:opento5/displaywidth=25/heading=" Thursday Close"/newline'/newline
+'  location:opento6/displaywidth=25/heading="   Friday Close"/newline'/newline
+'  location:opento7/displaywidth=25/heading=" Saturday Close"/newline'/newline
+'  location:latitude/displaywidth=25/heading="       Latitude"/newline'/newline
+''/newline
+'  location:locationtype/displaywidth=25/heading="           Type"/newline'/newline
+'  location:dateclosed/displaywidth=25/mask = include "date_mask.cq"/heading="    Date CLosed"/newline'/newline
+'  location:mindriverage/displaywidth=25/heading=" Min Age Driver"/newline'/newline
+'  location:underagedriver/displaywidth=25/heading=" Under Age Driv"/newline'/newline
+'  ""/displaywidth=25/heading="      RA Prefix"/newline=3'/newline
+'  if location:bce = 1 then "Yes" else "No"/displaywidth=25/heading=" BlueChip Elite"/newline=2'/newline
+'  location:estimateadd/displaywidth=25/heading="Add to Estimate"/newline'/newline
+'  location:estimatemin/displaywidth=25/heading="   Min Estimate"/newline'/newline
+'  location:acctcompany/displaywidth=25/heading="     Company ID"/newline'/newline
+'  location:acctdivision/displaywidth=25/heading="    Division ID"/newline'/newline
+'  location:acctcust/displaywidth=25/heading="          Addr#"/newline'/newline
+'  location:ccardcommpct/displaywidth=25/heading="Credit Card Com"/newline'/newline
+'  ""/displaywidth=25/heading=" Pay Manual Rat"/newline'/newline
+'  if location:locationsequence = 1 then "Yes" else "No"/displaywidth=25/heading=" Location Seque"/newline'/newline
+'  location:corparea/displaywidth=25/heading="      Corp Area"/newline'/newline
+'  location:airportcode/displaywidth=25/heading="   Airport Code"/newline=4'/newline
+'  location:rrmcurrency/displaywidth=25/heading="       Currency"/page'/newline
+'end box'/newline
+''/newline
+'followed by'/newline
+' if location:locationnotes <> "" then {'/newline
+'  "Notes:"'/newline
+'box/column=12/width=70/fill/noblanklines'/newline
+'  location:locationnotes'/newline
+'end box'/newline
+'""/page'/newline
+'}'/newline
+} else {
+'location:locationcode'/newline
+'location:name'/newline
+'location:description'/newline
+}
+;
+replace loclist_1.eq
+run/setparameter loclist_1.eq
+
+run/parameterfile=loclist_1 loclist_1.eq
+rrepl loclist_detail
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "loclist_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = location:locationcode,
+    null fill on failure
+
+where     (location:locationcode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="location"/noreporttotals/noheadings/nobanner/pageof/pagelength=70/title="Location List"
+
+include "loclist_detail.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+box/center/column=1
+  "Including closed locations ("+str(csummary)+")"/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+ end box/newline=4
+;
+replace loclist.eq
+run/parameterfile=loclist_1 loclist.eq
+rrepl loclist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view loclist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Location List" -- Report Title
+   string rptname1    = "loclist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "loclist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

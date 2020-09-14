@@ -1,0 +1,425 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Maintenance Due Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/6/2017
+Modified:
+
+Notes:
+$Workfile: maintdue.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/maintdue.mf $
+$Revision: 2 $
+$History: maintdue.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invmaint"
+if itemnumber=1 then '"'+invmaint:description+'"' else
+   ',"'+invmaint:description+'"'
+
+sorted by
+   invmaint:description
+top of report
+'string cinvmaint[8192] = multivalue parameter prompt "Maintenance procedures to include or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_invmaint"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq" 
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  date dtSdate = parameter prompt "Maintenance on or before: " default todaysdate
+  number cMiles = parameter prompt "or Miles: " default 500
+  include "param_invmaint.cq"
+  string cselect = parameter prompt "Problems to Print:" valid "ALL","Critical","Non-Critical","None" default "ALL"
+
+;
+replace maintdue_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve inv records with mtn due records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "maintdue_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file maint_link = access ima,
+    set ima:invid = inv:invid,
+    one to many,
+    zero fill on failure
+
+  file proc_link = access invmaint,
+   set invmaint:typeid=maint_link:typeid
+
+  string alert_type = switch(maint_link:schedule)
+    case 1 : "E" -- either
+    case 2 : "D" -- date
+    case 3 : "M" -- mileage
+    case 4 : "E"
+    case 5 : "D"
+    case 6 : "M"
+    default : "I" -- immediate
+
+where (inv:locationcode = cLoc or cLoc="ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+      
+list/domain="inv"/hold="inv1_hf"
+
+if (proc_link:description = cInvmaint or cInvmaint = "ALL") then {
+
+  if (maint_link:invid = inv:invid and (maint_link:nextdate <= dtSdate or (maint_link:nextodom-inv:odometer) <= cMiles)
+   and (proc_link:description = cInvmaint or cInvmaint = "ALL")) and 
+      (alert_type = "E" and (maint_link:invid = inv:invid and ((maint_link:nextdate <= dtSdate or maint_link:nextdate <> null)
+       or (maint_link:nextodom-inv:odometer) <= cMiles)and (maint_link:nextodom > 0))) or
+      (alert_type = "M" and (maint_link:invid = inv:invid and (maint_link:nextodom-inv:odometer) <= cMiles) and (maint_link:nextodom > 0)) or
+      (alert_type = "D" and (maint_link:invid = inv:invid and ((maint_link:nextdate <= dtSdate or maint_link:nextdate <> null)))) or
+      (alert_type = "I" and maint_link:lastdate = null) and maint_link:typeid <> 0
+ then {
+  inv:invid 
+}
+}
+
+;
+replace maintdue_1.eq
+run/setparameter maintdue_1.eq
+
+run/parameterfile=maintdue_1 maintdue_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve inv records with problem records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "maintdue_i1.inc"
+
+define
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+  
+  file prob_link = access invproblems,
+    set invproblems:invid = inv:invid,
+    one to many,
+    zero fill on failure
+
+where (inv:locationcode = cLoc or cLoc="ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+      and (inv:product = cProduct or cProduct="ALL")
+      
+list/domain="inv"/hold="inv1_hf"/append
+  if ((prob_link:invid = inv:invid and prob_link:repaired = 0)
+      and ((cselect = "Critical" and prob_link:critical = 1) or (cselect = "Non-Critical" and prob_link:critical=0) or cselect = "ALL")
+      and (cselect <> "None")) then {
+
+  inv:invid 
+
+}
+
+;
+run/parameterfile=maintdue_1 
+
+/*------------------------------------------------------------------------
+Sort and remove duplicates
+------------------------------------------------------------------------*/
+viewpoint native;
+
+list/domain="inv1_hf"/nodetails/hold="inv_hf"
+  inv1_hf:invid 
+
+sorted by  inv1_hf:invid
+ 
+end of inv1_hf:invid
+  inv1_hf:invid/keyelement=1.1
+
+;
+run/parameterfile=maintdue_1 
+
+/*------------------------------------------------------------------------
+ Create maint records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "maintdue_i1.inc"
+
+define
+  file maint_link = access ima,
+    set ima:invid = inv:invid,
+    one to many,
+    zero fill on failure
+
+  file maint_type = access invmaint,
+   set invmaint:typeid=maint_link:typeid
+
+  string alert_type = switch(maint_link:schedule)
+    case 1 : "E" -- either
+    case 2 : "D" -- date
+    case 3 : "M" -- mileage
+    case 4 : "E"
+    case 5 : "D"
+    case 6 : "M"
+    default : "I" -- immediate
+
+list/domain="inv"/hold="maint_hf"
+
+if (maint_type:description = cInvmaint or cInvmaint = "ALL") then {
+
+if (alert_type = "E" and (maint_link:invid = inv:invid and ((maint_link:nextdate <= dtSdate or maint_link:nextdate <> null)
+       or (maint_link:nextodom-inv:odometer) <= cMiles)and (maint_link:nextodom > 0))) or
+      (alert_type = "M" and (maint_link:invid = inv:invid and (maint_link:nextodom-inv:odometer) <= cMiles) and (maint_link:nextodom > 0)) or
+      (alert_type = "D" and (maint_link:invid = inv:invid and (maint_link:nextdate <= dtSdate or maint_link:nextdate <> null))) or
+      (alert_type = "I" and maint_link:lastdate = null) and maint_link:typeid <> 0 then {
+
+    inv:invid /keyelement=1.1
+    maint_link:typeid
+    maint_link:lastdate
+    maint_link:lastodom
+    maint_link:nextdate
+    maint_link:nextodom
+    maint_link:laborcost
+    maint_link:partscost
+    maint_link:schedule
+}
+}
+
+;
+run/parameterfile=maintdue_1 
+
+/*------------------------------------------------------------------------
+ Create problem records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "maintdue_i1.inc"
+
+define
+  file prob_link = access invproblems,
+    set invproblems:invid = inv:invid,
+    one to many,
+    null fill on failure
+  
+where (prob_link:invid = inv:invid and prob_link:repaired = 0)
+      and (cselect <> "None")
+  
+list/domain="inv"/hold="prob_hf"
+
+if ((cselect = "Critical" and prob_link:critical = 1) or (cselect = "Non-Critical" and prob_link:critical=0) or (cselect = "ALL")) then {
+    prob_link:critical
+    inv:invid /keyelement=1.1
+    prob_link:problemsummary
+    prob_link:datereported
+    prob_link:reportedbyempnum 
+    prob_link:problemnotes
+    prob_link:repaired
+}
+sorted by inv:invid
+;
+run/parameterfile=maintdue_1 
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+ viewpoint native;
+include "maintdue_i1.inc"
+
+define
+
+  file inv_link = access inv,
+   set inv:invid=inv_hf:invid,
+   one to one,null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv_link:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv_link:vehiclestatusowned,
+    null fill on failure
+  
+  file maint_link = access maint_hf,
+    set maint_hf:invid = inv_hf:invid,
+    one to many,
+    null fill on failure
+
+  file proc_link = access invmaint,
+   set invmaint:typeid=maint_link:typeid
+  
+  file prob_link = access prob_hf,
+    set prob_hf:invid = inv_hf:invid,
+    one to many,
+    null fill on failure
+
+   number days_left = switch(maint_link:schedule)
+    case 1 : maint_link:nextdate - todaysdate
+    case 2 : maint_link:nextdate - todaysdate
+    case 3 : 0
+    case 4 : maint_link:nextdate - todaysdate
+    case 5 : maint_link:nextdate - todaysdate
+    case 6 : 0 
+    default : 0
+
+  number miles_left = switch(maint_link:schedule)
+    case 1 : maint_link:nextodom - inv_link:odometer
+    case 2 : 0
+    case 3 : maint_link:nextodom - inv_link:odometer
+    case 4 : maint_link:nextodom - inv_link:odometer
+    case 5 : 0
+    case 6 : maint_link:nextodom - inv_link:odometer
+    default : 0
+
+where (inv_link:locationcode = cLoc or cLoc="ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+      and (inv_link:product = cProduct or cProduct="ALL")
+
+  
+list/domain="inv_hf"/duplicates/title="Maintenance Due Report"/pageof/nobanner/noreporttotals/pagewidth=150/pagelength=75/inline
+
+  inv_link:unitnumber /column=1
+  inv_hf:invid/heading="Inv id"/displaywidth=8/nocommas/left/column=20
+  stat_desc:description/heading="Status" /displaywidth=20 /column=45
+  inv_link:locationcode /displaywidth=20/column=70
+  inv_link:datedue /newline/column=110
+  inv_link:year/nocommas/left/column=1
+  inv_link:make /column=20
+  inv_link:model/column=45
+  inv_link:expectedoutservicedate/column=70
+  inv_link:expoutservicemiles/column=110/newline=2
+
+followed by
+  "Procedure"/column=1/name="a"/noheading
+  "Last Date"/column=30/name="b"/noheading
+  "Last Odom"/column=50/name="c"/noheading
+  "Parts"/column=70/name="d"/noheading
+  "Labor"/column=90/name="e"/noheading
+  "Due in days"/column=110/name="f"/noheading
+  "Due in mi/km"/column=130/name="g"/noheading/newline
+
+followed by
+  proc_link:description/displaywidth=20 /align=a/noheading
+  maint_link:lastdate/displaywidth=10 /align=b/noheading
+  maint_link:lastodom/displaywidth=10 /align=c/noheading
+  maint_link:partscost/displaywidth=10 /align=d/noheading
+  maint_link:laborcost/displaywidth=10/align=e/noheading
+  days_left/displaywidth=10/align=f/noheading/nototal/zerosuppress
+  miles_left/displaywidth=10/align=g/noheading/nototal
+
+  followed by
+""/newline
+
+if (prob_link:invid=inv_hf:invid) then {
+
+  "Reported Problem: "
+  prob_link:problemsummary/noheading/width=30
+  "Date Reported: "
+  prob_link:datereported/noheading 
+  "By: "
+  prob_link:reportedbyempnum/noheading/newline
+  "Detail: "
+   prob_link:problemnotes/noheading/displaywidth=150/newline
+
+}
+
+sorted by
+  inv_link:unitnumber
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Maintenance due on or before: "+str(dtSdate)+" or "+str(cMiles) + " miles/kms"/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Procedure: " + str(cinvmaint)/displaywidth=130/newline
+  "Product: " + str(cProduct)+"   Problem detail: " + str(cselect)
+  end box/newline=4
+
+end of REPORT
+  str(count[inv_link:unitnumber]) + " units requiring " + str(count[proc_link:description]) + " maintenenance procedures and " +
+  str(count[prob_link:datereported]) + " problems."/newline
+  "Total Parts Cost: " + str(total[maint_link:partscost]) + "   Total Labor Costs: " + str(total[maint_link:laborcost]) +
+  "   Total Cost:  " + str(total[maint_link:partscost]+total[maint_link:laborcost])
+
+;
+replace maintdue.eq
+run/parameterfile=maintdue_1 maintdue.eq
+rrepl maintdue
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view maintdue
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Maintenance Due Report" -- Report Title
+   string rptname1    = "maintdue" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "maintdue_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

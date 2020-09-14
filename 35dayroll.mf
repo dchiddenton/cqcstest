@@ -1,0 +1,364 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: 35 Roll Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/9/2016 
+Modified:
+
+Notes:
+$Workfile: 35dayroll.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/35dayroll.mf $
+$Revision: 2 $
+$History: 35dayroll.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:32a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters and prompts
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ 
+ define  
+  date dtedate = parameter prompt "Cutoff Date: " default todaysdate-1 error "Cannot be greater than todays date" if dtedate > todaysdate
+  number weeks_inp = parameter prompt "Weeks to Include: " valid 1,2,3,4,5 default 5
+  date excl_date1 = parameter prompt "Exclusion date 1: " default todaysdate + 1
+  date excl_date2 = parameter prompt "Exclusion date 2: " default todaysdate + 1
+  date excl_date3 = parameter prompt "Exclusion date 3: " default todaysdate + 1
+  date excl_date4 = parameter prompt "Exclusion date 4: " default todaysdate + 1
+  date excl_date5 = parameter prompt "Exclusion date 5: " default todaysdate + 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string combine_loc = parameter/uppercase prompt "Combine Locations? " valid "Y","N" default "N"
+  date dtSdate = dtEdate - 7 * weeks_inp
+
+;
+replace 35dayroll_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve RRM records
+------------------------------------------------------------------------*/
+viewpoint native;
+   
+include "35dayroll_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+   number hour_out = trunc(rrm:timeout)
+   number hour_in = trunc(rrm:timein)
+
+
+
+where 
+  (rrm:dateout >= 
+    dtSdate
+  or rrm:datein <= 
+    dtEdate)
+  and rrm:rastatus one of 2,3
+  and (rrm:Product  = cProduct or cProduct = "ALL" )
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+  
+
+list/domain="rrm"/noheadings/nototals/hold="dayroll_hf"
+if (rrm:dateout >= dtSdate and rrm:dateout <= dtEdate) and 
+ (rrm:dateout <> excl_date1 
+  and rrm:dateout <> excl_date2
+  and rrm:dateout <> excl_date3
+  and rrm:dateout <> excl_date4
+  and rrm:dateout <> excl_date5) then{
+  rrm:dateout /name="trans_date"
+  rrm:locationcodeout /name="loc_code"
+  rrm:ranumber
+  rrm:timeout 
+  hour_out/name="trans_hour"
+  1/name="open_flag"
+  0/name="close_flag"
+}
+followed by
+if (rrm:datein >= dtSdate and rrm:datein <= dtEdate) and 
+  (rrm:datein <> excl_date1 
+  and rrm:datein <> excl_date2
+  and rrm:datein <> excl_date3
+  and rrm:datein <> excl_date4
+  and rrm:datein <> excl_date2) then{
+  rrm:datein 
+  rrm:locationcodeout
+  rrm:ranumber
+  rrm:timein 
+  hour_in
+  0
+  1
+}
+
+;
+replace 35dayroll_1.eq
+run/setparameter 35dayroll_1.eq
+
+run/parameterfile=35dayroll_1 35dayroll_1.eq
+
+/*------------------------------------------------------------------------
+ Create dummy records for no records in date range
+------------------------------------------------------------------------*/
+list/domain="dummy"/noheadings/nototals/hold="dayroll_hf"/append
+
+  todaysdate/name="trans_date"
+  ""/name="loc_code"/width=20
+  ""/name="ranumber"/width=20
+  0/name="timeout"/width=7/decimalplaces=2 
+  0/name="trans_hour"/width=19
+  0/name="open_flag"/width=19
+  0/name="close_flag"/width=19
+;
+run/parameterfile=35dayroll_1 
+
+/*------------------------------------------------------------------------
+ Calculate hourly count
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "35dayroll_i1.inc"
+  
+  number days_tot = dtEdate - dtSdate
+  
+  
+sum/domain="dayroll_hf"/hold="dayroll2_hf"
+  dayroll_hf:open_flag /heading="Open"
+  dayroll_hf:close_flag /heading="Close"
+
+
+across
+  dayroll_hf:trans_date/mask="DDDDDDDDD"/showall
+
+by
+  if combine_loc = "N" then dayroll_hf:loc_code
+  dayroll_hf:trans_hour
+
+end of dayroll_hf:trans_hour
+  total[dayroll_hf:open_flag]/heading="Total_Open"/width=10
+  total[dayroll_hf:close_flag]/heading="Total_Close"/width=7
+  average[dayroll_hf:open_flag]/decimalplaces=1/heading="Average_Open"/width=7
+  average[dayroll_hf:close_flag]/decimalplaces=1/heading="Average_Close"/width=7
+
+;
+run/parameterfile=35dayroll_1 
+
+/*------------------------------------------------------------------------
+ Allocate across DOW
+------------------------------------------------------------------------*/
+viewpoint native;
+   
+include "35dayroll_i1.inc"
+
+   number num_days = dtEdate - dtSdate
+
+  file i_date = access counter,
+   set min = 0, max=num_days
+
+  number num_sunday = if dayname(dtSdate + i_date:position)= "sunday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5) then 1
+
+  number num_monday = if dayname(dtSdate + i_date:position)= "monday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+  number num_tuesday = if dayname(dtSdate + i_date:position)= "tuesday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+  number num_wednesday = if dayname(dtSdate + i_date:position)= "wednesday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+  number num_thursday = if dayname(dtSdate + i_date:position)= "thursday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+  number num_friday = if dayname(dtSdate + i_date:position)= "friday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+  number num_saturday = if dayname(dtSdate + i_date:position)= "saturday" and
+  (dtSdate + i_date:position <> excl_date1 
+  and dtSdate + i_date:position <> excl_date2
+  and dtSdate + i_date:position <> excl_date3
+  and dtSdate + i_date:position <> excl_date4
+  and dtSdate + i_date:position <> excl_date5)then 1
+
+
+
+
+list/domain="dummy"/nodetail/nobanner/nodefaults
+if (i_date:position <= num_days) then {
+  dtSdate + i_date:position
+  dayname(dtSdate + i_date:position)
+  
+}
+end of report
+  "number num_sunday = " + str(total[num_sunday])/newline
+  "number num_monday = " + str(total[num_monday])/newline
+  "number num_tuesday = " + str(total[num_tuesday])/newline
+  "number num_wednesday = " + str(total[num_wednesday])/newline
+  "number num_thursday = " + str(total[num_thursday])/newline
+  "number num_friday = " + str(total[num_friday])/newline
+  "number num_saturday = " + str(total[num_saturday])/newline
+
+;
+run/parameterfile=35dayroll_1 
+rrepl num_days
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "35dayroll_i1.inc"
+include "num_days.cq"
+
+define
+   string ex_date1 = if excl_date1 = todaysdate + 1 then "" else str(excl_date1) + ", "
+   string ex_date2 = if excl_date2 = todaysdate + 1 then "" else str(excl_date2) + ", "
+   string ex_date3 = if excl_date3 = todaysdate + 1 then "" else str(excl_date3) + ", "
+   string ex_date4 = if excl_date4 = todaysdate + 1 then "" else str(excl_date4) + ", "
+   string ex_date5 = if excl_date5 = todaysdate + 1 then "" else str(excl_date5) 
+
+where dayroll2_hf:loc_code <> ""
+
+list/domain="dayroll2_hf"/nobanner/noheadings/columnspacing=2/title="35 Day Roll Report"
+  if combine_loc = "N" then dayroll2_hf:loc_code else "All"/width=10/noduplicates/heading="Location"
+  dayroll2_hf:trans_hour/width=10 /heading="Hour"
+  dayroll2_hf:open_flag_sunday divide num_sunday/decimalplaces=1/displaywidth=5/heading="Open"
+  dayroll2_hf:close_flag_sunday divide num_sunday/decimalplaces=1/displaywidth=5 /heading="Close"/name="a"
+  dayroll2_hf:open_flag_monday divide num_monday/decimalplaces=1/displaywidth=5 /heading="Open"  
+  dayroll2_hf:close_flag_monday divide num_monday/decimalplaces=1/displaywidth=5 /heading="Close"/name="b"
+  dayroll2_hf:open_flag_tuesday divide num_tuesday/decimalplaces=1/displaywidth=5 /heading="Open" 
+  dayroll2_hf:close_flag_tuesday divide num_tuesday/decimalplaces=1/displaywidth=5 /heading="Close"/name="c"
+  dayroll2_hf:open_flag_wednesda divide num_wednesday/decimalplaces=1/displaywidth=5 /heading="Open" 
+  dayroll2_hf:close_flag_wednesda divide num_wednesday/decimalplaces=1/displaywidth=5 /heading="Close"/name="d"
+  dayroll2_hf:open_flag_thursday divide num_thursday/decimalplaces=1/displaywidth=5 /heading="Open" 
+  dayroll2_hf:close_flag_thursday divide num_thursday/decimalplaces=1/displaywidth=5 /heading="Close"/name="e"
+  dayroll2_hf:open_flag_friday divide num_friday/decimalplaces=1/displaywidth=5 /heading="Open" 
+  dayroll2_hf:close_flag_friday divide num_friday/decimalplaces=1/displaywidth=5 /heading="Close"/name="f"
+  dayroll2_hf:open_flag_saturday divide num_saturday/decimalplaces=1/displaywidth=5 /heading="Open" 
+  dayroll2_hf:close_flag_saturday divide num_saturday/decimalplaces=1/displaywidth=5 /heading="Close"/name="g" 
+  dayroll2_hf:total_open/displaywidth=5/total /heading="Open" 
+  dayroll2_hf:total_close/displaywidth=5/total /heading="Close"/name="h"
+  dayroll2_hf:total_open divide 7/decimalplaces=1/displaywidth=5/total /heading="Open" 
+  dayroll2_hf:total_close divide 7/decimalplaces=1/displaywidth=5/total /heading="Close"/name="i"
+
+sorted by
+  if combine_loc = "N" then dayroll2_hf:loc_code/total
+  dayroll2_hf:trans_hour
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct) 
+  "Excluded Dates: " + ex_date1 + ex_date2 + ex_date3 + ex_date4 + ex_date5
+  end box/newlines=4
+
+  "Sunday"/displaywidth=12/center/align=a
+  "Monday"/displaywidth=12/center/align=b
+  "Tuesday"/displaywidth=12/center/align=c
+  "Wednesday"/displaywidth=12/center/align=d
+  "Thursday"/displaywidth=12/center/align=e
+  "Friday"/displaywidth=12/center/align=f
+  "Saturday"/displaywidth=12/center/align=g
+  "Total"/displaywidth=12/center/align=h
+  "Average"/displaywidth=12/center/align=i/newline
+
+--top of report
+
+;
+replace 35dayroll.eq
+run/parameterfile=35dayroll_1 35dayroll.eq
+rrepl 35dayroll
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view 35dayroll
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "35 Roll Report" -- Report Title
+   string rptname1    = "35dayroll" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "35dayroll_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

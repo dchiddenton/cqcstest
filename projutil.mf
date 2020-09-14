@@ -1,0 +1,702 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Projected Utilization Report
+  Author: David Chiddenton
+  $Revision: 5 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/2/2019
+Modified:
+
+Notes:
+$Workfile: projutil.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/projutil.mf $
+$Revision: 5 $
+$History: projutil.mf $
+ * 
+ * *****************  Version 5  *****************
+ * User: Dchidden     Date: 3/19/20    Time: 1:26p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed issue when spaces in Inv Class
+ * 
+ * *****************  Version 4  *****************
+ * User: Dchidden     Date: 3/17/20    Time: 10:10a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed error when single car class selected only.
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 12/11/19   Time: 3:36p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed inv class labeling when inv class is missing sequence numbers
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "start_date.cq"
+  include "fleet_default.cq"
+  date last_date = start_date + 365
+  date dtsdate = parameter prompt "Starting Date: " error "Error: Start Date < today" if dtsdate < todaysdate default todaysdate 
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate  error "Date Past Available Data" if dtedate > last_date default todaysdate + 10
+  number chour = parameter prompt "As of Hour: " valid 0.00,1.00,2.00,3.00,4.00,5.00,6.00,7.00,8.00,9.00,10.00,11.00,12.00,13.00,14.00,15.00,16.00,17.00,18.00,19.00,20.00,21.00,22.00,23.00 default 23.00
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  string cfleet = parameter prompt "Calculate UT% on Current or Owned Fleet?: " valid "Current","Owned" default fleet_default
+
+;
+replace projutil_i1.inc
+
+/*------------------------------------------------------------------------
+ Determine first countdate in availcount table
+------------------------------------------------------------------------*/
+ 
+list/domain="availcount"/maxrecords=1/hold="startdate"
+  countdate
+;
+run/parameterfile
+ 
+list/domain="startdate"/nobanner/nodefaults/noreporttotals
+  "date start_date = date('"+str(startdate:countdate)+"')"
+;
+run/parameterfile
+rreplace start_date
+
+/*------------------------------------------------------------------------
+ Get default UT calculation from CF
+------------------------------------------------------------------------*/
+
+define
+   file cf_link = access customfeature,
+    set customfeature:code="R1013",
+    zero fill on failure
+
+list/domain="dummy"/nobanner/nodefaults/noreporttotals
+  if cf_link:active = 1 then 'string fleet_default = "Current"' else 'string fleet_default = "Owned"'
+;
+run/parameterfile
+rreplace fleet_default
+
+/*------------------------------------------------------------------------
+ Count on-order vehicles - setup parameters
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+define
+   date countdate = if invnew:inservicedate <> null then invnew:inservicedate else
+                       if invnew:expectedinservicedate <> null then invnew:expectedinservicedate else
+                         if invnew:deliverydate <> null then invnew:deliverydate else
+                           if invnew:expecteddeliverydate <> null then invnew:expecteddeliverydate else todaysdate - 366
+
+list/domain="invnew"/noheadings/hold="onorderraw_hf"
+  
+  invnew:unitnumber
+  invnew:ownedlocationcode/name="avail_loc"
+  countdate
+  invnew:product
+  invnew:invclass
+  1/name="on_ord_own"
+  0/name="on_ord_curr"
+followed by
+  invnew:unitnumber
+  invnew:expecteddeliveryloc
+  countdate
+  invnew:product
+  invnew:invclass
+  0
+  1
+
+sorted by
+  countdate
+  invnew:product
+  invnew:invclass
+
+;
+replace projutil_1.eq
+run/setparameter projutil_1.eq
+
+/*------------------------------------------------------------------------
+ Determine if there are special events occuring
+------------------------------------------------------------------------*/
+ 
+include "projutil_i1.inc"
+
+define
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = specialevents:locationcode,
+    null fill on failure
+
+where 
+  ((specialevents:startdate >= dtsdate and specialevents:startdate <= dtedate) or 
+   (specialevents:enddate >= dtsdate and specialevents:enddate <= dtedate))
+  and (specialevents:locationcode = cLoc or cLoc = "ALL") 
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (specialevents:product = cProduct or cProduct = "ALL")
+  and (specialevents:invclass = cClass or cClass = "ALL")
+
+list/domain="specialevents"/nodetail/nobanner/nodefaults/noendofreport
+  specialevents:code
+end of report
+"number special_events ="+str(count[specialevents:code])
+;
+run/parameterfile=projutil_1
+rreplace special_events
+
+run/parameterfile=projutil_1 projutil_1.eq
+
+/*------------------------------------------------------------------------
+ Count out-fleet vehicles
+------------------------------------------------------------------------*/
+include "projutil_i1.inc"
+
+define 
+    date osdate = if inv:datesold <> null then inv:datesold else
+                       if inv:outservicedate <> null then inv:outservicedate else
+                         if inv:expectedoutservicedate <> null then inv:expectedoutservicedate else todaysdate - 366
+    date countdate = if osdate < dtsdate then dtsdate else osdate
+
+    string avail_loc = inv:ownedlocationcode
+
+list/domain="inv"/noheadings/hold="outfleetraw_hf"
+  inv:unitnumber
+  avail_loc
+  countdate
+  inv:product
+  inv:invclass
+  1/name="outfleetowned"
+  0/name="outfleetcurrent"
+followed by
+  inv:unitnumber
+  avail_loc
+  countdate
+  inv:product
+  inv:invclass
+  0
+  1
+
+sorted by
+  countdate
+  inv:product
+  inv:invclass
+
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ Summarize On Order and Out of Fleet numbers
+------------------------------------------------------------------------*/
+list/domain="onorderraw_hf"/nodetail/hold="onorder_hf"
+  onorderraw_hf:unitnumber 
+  onorderraw_hf:avail_loc 
+  onorderraw_hf:countdate 
+  onorderraw_hf:product 
+  onorderraw_hf:invclass 
+  onorderraw_hf:on_ord_own 
+  onorderraw_hf:on_ord_curr
+
+sorted by
+  onorderraw_hf:avail_loc
+  onorderraw_hf:product
+  onorderraw_hf:countdate
+  onorderraw_hf:invclass 
+
+end of onorderraw_hf:invclass
+  onorderraw_hf:countdate/keyelement=1.4
+  onorderraw_hf:avail_loc/keyelement=1.1
+  onorderraw_hf:product/keyelement=1.2
+  onorderraw_hf:invclass/keyelement=1.3
+  total[onorderraw_hf:on_ord_own,onorderraw_hf:invclass]/name="on_ord_own"
+  total[onorderraw_hf:on_ord_curr,onorderraw_hf:invclass]/name="on_ord_curr"
+;
+run/parameterfile=projutil_1
+
+list/domain="outfleetraw_hf"/nodetail/hold="outfleet_hf"
+  outfleetraw_hf:unitnumber 
+  outfleetraw_hf:avail_loc 
+  outfleetraw_hf:countdate 
+  outfleetraw_hf:product 
+  outfleetraw_hf:invclass 
+  outfleetraw_hf:outfleetowned 
+  outfleetraw_hf:outfleetcurrent
+
+sorted by
+  outfleetraw_hf:avail_loc
+  outfleetraw_hf:product
+  outfleetraw_hf:countdate
+  outfleetraw_hf:invclass 
+
+end of outfleetraw_hf:invclass
+  outfleetraw_hf:countdate/keyelement=1.4
+  outfleetraw_hf:avail_loc/keyelement=1.1
+  outfleetraw_hf:product/keyelement=1.2
+  outfleetraw_hf:invclass/keyelement=1.3
+  total[outfleetraw_hf:outfleetowned,outfleetraw_hf:invclass]/name="outfleetowned"
+  total[outfleetraw_hf:outfleetcurrent,outfleetraw_hf:invclass]/name="outfleetcurrent"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ Retrieve availcount numbers to temp file
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+define
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = availcount:locationcode,
+    null fill on failure
+
+  file onorder_link = access onorder_hf,
+    set onorder_hf:avail_loc=availcount:locationcode,
+    onorder_hf:product=availcount:product,
+    onorder_hf:invclass=availcount:invclass,
+    onorder_hf:countdate=availcount:countdate,
+    one to one,zero fill on failure
+
+  file outfleet_link = access outfleet_hf,
+    set outfleet_hf:avail_loc=availcount:locationcode,
+    outfleet_hf:product=availcount:product,
+    outfleet_hf:invclass=availcount:invclass,
+    outfleet_hf:countdate=availcount:countdate,
+    one to one,zero fill on failure
+
+   number asofhour = if chour = 0 then 24 else chour
+    
+where 
+  ( availcount:countdate <= 
+    dtedate )
+  and (availcount:locationcode = cLoc or cLoc = "ALL")
+      and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (availcount:product = cProduct or cProduct = "ALL")
+  and (availcount:invclass = cClass or cClass = "ALL")
+  and availcount:invclass <> ""
+
+  
+list/domain="availcount"/hold="availcount_hf"
+  availcount:locationcode/keyelement=1.1
+  availcount:product/keyelement=1.2
+  availcount:invclass/keyelement=1.3
+  availcount:countdate/keyelement=1.4
+  availcount:infleetcurrent[asofhour]
+  availcount:infleetowned[asofhour]
+  onorder_link:on_ord_curr/width=11
+  onorder_link:on_ord_own/width=11
+  availcount:onrent[asofhour]
+  outfleet_link:outfleetcurrent/width=11
+  outfleet_link:outfleetowned/width=11
+
+sorted by
+  availcount:locationcode
+  availcount:product 
+  availcount:invclass
+  availcount:countdate
+
+;
+run/parameterfile=projutil_1 
+
+/*------------------------------------------------------------------------
+ Retrieve inv class
+------------------------------------------------------------------------*/
+
+define
+  string cd1 = replace(str(availcount_hf:invclass)," ","_")  -- remove special characters for field definition
+  string cd2 = replace(str(cd1),"-","_")  
+  string cd3 = replace(str(cd2),"$","_") 
+  string cd4 = replace(str(cd3),"%","_")  
+  string cd5 = replace(str(cd4),"/","_")  
+  string cd6 = replace(str(cd5),"\","_")  
+  string cd7 = replace(str(cd6),"!","_")  
+  string cd8 = replace(str(cd7),"@","_")  
+  string cd9 = replace(str(cd8),"#","_")  
+  string cd10 = replace(str(cd9),"^","_")  
+  string cd11 = replace(str(cd10),"=","_")  
+  string cd12 = replace(str(cd11),"&","_")  
+  string cd13 = replace(str(cd12),"`","_")  
+  string cd14 = replace(str(cd13),"~","_") 
+  string cd15 = replace(str(cd14),"*","_") 
+  string cd16 = replace(str(cd15),"(","_") 
+  string cd17 = replace(str(cd16),")","_") 
+  string cd18 = replace(str(cd17),"+","_") 
+  string cd19 = replace(str(cd18),"<","_") 
+  string cd20 = replace(str(cd19),">","_") 
+  string cd21 = replace(str(cd20),"?","_") 
+  string cd22 = replace(str(cd21),"{","_") 
+  string cd23 = replace(str(cd22),"}","_")
+  string cd24 = replace(str(cd23),"[","_")
+  string cd25 = replace(str(cd24),"]","_")
+  string cd26 = replace(str(cd25),"|","_") 
+  string cd27 = replace(str(cd26),":","_")
+  string cd28 = replace(str(cd27),";","_")
+  string cd29 = replace(str(cd28),".","_")
+
+  string cd_final = replace(str(cd29),"*","_")
+
+  file seq_ord = access invclass,
+   set invclass:invclass=availcount_hf:invclass,
+   one to one, null fill on failure
+
+  string sort_break =  str(seq_ord:classsequence)+str(availcount_hf:invclass)
+
+list/domain="availcount_hf"/nodetail/hold="invclass_hf"
+  availcount_hf:invclass
+
+sorted by
+  sort_break
+
+end of sort_break
+  cd_final/name="invclass"
+;
+;
+run/parameterfile=projutil_1 
+/*------------------------------------------------------------------------
+ Detail line formatting
+------------------------------------------------------------------------*/
+
+list/domain="invclass_hf"/nobanner/nodefaults/noendofreport
+  "ut_final:net_num_"+invclass_hf:invclass+"/decimalplaces=0"
+;
+run/parameterfile=projutil_1
+rreplace topdetail
+
+list/domain="invclass_hf"/nobanner/nodefaults/noendofreport
+  "ut_final:net_num_"+invclass_hf:invclass+"/decimalplaces=0/align=ut_final:net_num_"+invclass_hf:invclass
+;
+run/parameterfile=projutil_1
+rreplace detail1
+
+list/domain="invclass_hf"/nobanner/nodefaults/noendofreport
+  "(ut_final:net_num_"+invclass_hf:invclass+"*100)/mask='zz9.9%'/align=ut_final:net_num_"+invclass_hf:invclass
+;
+run/parameterfile=projutil_1
+rreplace detail2
+
+list/domain="invclass_hf"/nobanner/nodefaults/noendofreport
+  "'"+invclass_hf:invclass+"'/align=ut_final:net_num_"+invclass_hf:invclass
+;
+run/parameterfile=projutil_1
+rreplace inv_headers
+
+/*------------------------------------------------------------------------
+ On Rent count
+------------------------------------------------------------------------*/
+
+sum/domain="availcount_hf"/hold="ut_final"
+  availcount_hf:on_rent/decimalplaces=4/name="net_num"
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  1/name="sort_order"
+  availcount_hf:countdate
+  "OnRent"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ On Rent count grand total
+------------------------------------------------------------------------*/
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+  availcount_hf:on_rent/decimalplaces=4/name="net_num"
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  2/name="sort_order"
+  date("")/name="countdate"
+  "OnRent"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ In Fleet Current count
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then 
+  availcount_hf:in_flt_curr
+else
+  availcount_hf:in_flt_own/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  1/name="sort_order"
+  availcount_hf:countdate
+  "infleet"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ In Fleet count grand total
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then 
+  availcount_hf:in_flt_curr
+else
+  availcount_hf:in_flt_own/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  2/name="sort_order"
+  date("")/name="countdate"
+  "infleet"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ On Order count
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then
+  availcount_hf:on_ord_curr
+else
+  availcount_hf:on_ord_own/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  1/name="sort_order"
+  availcount_hf:countdate
+  "onorder"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ On Order count grand total
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then
+  availcount_hf:on_ord_curr
+else
+  availcount_hf:on_ord_own/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  2/name="sort_order"
+  date("")/name="countdate"
+  "onorder"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ Out Fleet count
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then
+  availcount_hf:outfleetcurrent
+else
+  availcount_hf:outfleetowned/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  1/name="sort_order"
+  availcount_hf:countdate
+  "outfleet"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ Out Fleet count grand total
+------------------------------------------------------------------------*/
+
+include "projutil_i1.inc"
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+if cfleet = "Current" then
+  availcount_hf:outfleetcurrent
+else
+  availcount_hf:outfleetowned/decimalplaces=4/name="net_num"
+
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  2/name="sort_order"
+  date("")/name="countdate"
+  "outfleet"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+
+/*------------------------------------------------------------------------
+ UT calculation
+------------------------------------------------------------------------*/
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+  availcount_hf:on_rent \div availcount_hf:in_flt_curr/decimalplaces=4/name="net_num"
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  1/name="sort_order"
+  availcount_hf:countdate
+  "Util"/width=20/name="Status"
+;
+run/parameterfile=projutil_1
+/*------------------------------------------------------------------------
+ UT calculation grand total
+------------------------------------------------------------------------*/
+
+sum/domain="availcount_hf"/hold="ut_final"/append
+  availcount_hf:on_rent \div availcount_hf:in_flt_curr/decimalplaces=4/name="net_num"
+across
+  availcount_hf:invclass/total/singletotal/width=20
+by
+  2/name="sort_order"
+  date("")/name="countdate"
+  "Util"/width=20/name="Status"
+;
+run/parameterfile=projutil_1 
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "projutil_i1.inc"
+include "special_events.cq"
+
+   
+where (ut_final:countdate >= dtsdate and ut_final:countdate <= dtedate) or sort_order=2
+
+list/domain="ut_final"/noheadings/nobanner/pageof/noreporttotals/pagelength=70/needs=10/title="Projected Utilization Report"
+if ut_final:status = "OnRent" then {
+  "On Rent:" 
+  include "topdetail.cq"
+  ut_final:net_num_total/decimalplaces=0
+}
+followed by
+if ut_final:status = "infleet" then {
+  str(cfleet)+" In-Fleet:"
+  include "detail1.cq"
+  ut_final:net_num_total/decimalplaces=0/align=ut_final:net_num_total
+}
+followed by
+if ut_final:status = "onorder" then {
+  "Expected In-Fleet:"
+  include "detail1.cq"
+  ut_final:net_num_total/decimalplaces=0/align=ut_final:net_num_total
+}
+followed by
+if ut_final:status = "outfleet" then {
+  "Expected Out-Fleet:"
+  include "detail1.cq"
+  ut_final:net_num_total/decimalplaces=0/align=ut_final:net_num_total
+}
+followed by
+if ut_final:status = "Util" then {
+  "Utilization:" 
+  include "detail2.cq"
+  (ut_final:net_num_total*100)/mask="zz9.9%"/align=ut_final:net_num_total
+}
+
+sorted by
+  ut_final:sort_order
+  ut_final:countdate
+
+top of ut_final:countdate
+ if ut_final:sort_order = 1 then {
+  "Date: " + str(ut_final:countdate)
+  include "inv_headers.cq"
+  "Total"/align=ut_final:net_num_total  
+ } else {
+  ""/page/newline
+  "Grand Total"
+  include "inv_headers.cq"
+  "Total"/align=ut_final:net_num_total
+ }
+
+end of ut_final:countdate
+  ""/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate) + " as of "+str(chour)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct)+ "   Classes: " + str(cClass)/newline
+  "Calculate UT% by: " + str(cfleet)
+  if special_events > 0 then str(special_events)+" Special Events Occur During this Date Range" else ""/newline
+  if todaysdate - start_date > 1 then "*** Data is "+str(todaysdate-start_date)+" days old - Please run updater. ***" else ""/newline
+  end box/newlines=4
+
+;
+replace projutil.eq
+run/parameterfile=projutil_1 projutil.eq
+rrepl projutil
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view projutil
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Projected Utilization Report" -- Report Title
+   string rptname1    = "projutil" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "projutil_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

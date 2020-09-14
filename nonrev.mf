@@ -1,0 +1,253 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Non Revenue Movement Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/21/2018
+Modified:
+
+Notes:
+$Workfile: nonrev.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/nonrev.mf $
+$Revision: 2 $
+$History: nonrev.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+""
+;
+run/parameterfile
+rrepl nonrev_i2
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  string cdate = parameter prompt "Select by: " valid "Date Out","Date In/Due" default "Date Out"
+  date dtsdate = parameter prompt "Start Date: " default todaysdate-7
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cselect = parameter prompt "Ticket Status: " valid "Open","Closed","ALL" default "ALL"
+  string ctickets = range parameter prompt "Enter Ticket# Range (Start..End or ALL): " default ALL
+  string cdetails = parameter/uppercase prompt "Print Details? " valid "Y","N" default "N"
+  string cnotes = parameter/uppercase prompt "Print Notes? " valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by: " valid "Ticket#","Driver Name","Date","Unit#" default "Ticket#"
+
+;
+replace nonrev_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "nonrev_i1.inc"
+
+define
+
+  file invtrx_link = access invtrx,
+   set invtrx:invid=nonrev:invid,
+   one to one,generic, null fill on failure
+
+  string csort_str = if csort =  "Date" then cdate else csort
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = nonrev:locationcodeout,
+    null fill on failure
+
+  string key_str = str(nonrev:ticketnumber)
+
+  file notes_link = access dialogue,
+   set type = 10,dialogue:key = key_str,
+   one to many,reverse, null fill on failure
+
+  date date_in = if nonrev:ticketstatus = 2 then nonrev:datein else nonrev:datedue
+  number time_in = if nonrev:ticketstatus = 2 then nonrev:timein else nonrev:timedue
+  string loc_in = if nonrev:ticketstatus = 2 then nonrev:locationcodein else nonrev:locationdue
+  string tick_stat = if nonrev:ticketstatus = 1 then "Open" else "Closed"
+ 
+where 
+  ((((nonrev:dateout >= dtsdate and nonrev:dateout <= dtedate) or nonrev:dateout = null) and cdate = "Date Out") or
+  (((nonrev:datedue >= dtsdate and nonrev:datedue <= dtedate) or nonrev:datedue = null) and cdate = "Date In/Due" and nonrev:ticketstatus = 1) or
+  (((nonrev:datein >= dtsdate and nonrev:datein <= dtedate) or nonrev:datein = null) and cdate = "Date In/Due" and nonrev:ticketstatus = 2)) and
+  ((nonrev:ticketstatus  = 1 and cselect = "Open") or
+  (nonrev:ticketstatus = 2 and cselect = "Closed") or cselect = "ALL") and
+  (nonrev:ticketnumber = ctickets or ctickets = "ALL") and
+  (nonrev:product = cProduct or cProduct = "ALL" ) and
+  (nonrev:locationcodeout = cLoc or cLoc = "ALL") and
+  (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+
+list/domain="nonrev"/nobanner/pageof/title="Non-Revenue Movement Report"/noreporttotals/noheadings
+  nonrev:ticketnumber 
+  tick_stat 
+  nonrev:driver /displaywidth=30
+  nonrev:locationcodeout /displaywidth=10
+  nonrev:dateout /displaywidth=8
+  nonrev:timeout /displaywidth=5
+  nonrev:odometerout /displaywidth=8
+  nonrev:gaslevelout /displaywidth=4
+  "      "
+  loc_in/displaywidth=10
+  date_in/displaywidth=8
+  time_in /displaywidth=5
+  nonrev:odometerin /displaywidth=8
+  nonrev:gaslevelin /displaywidth=4
+  "     "
+  nonrev:unitnumber/name="a"
+
+followed by if (cdetails = "Y" and nonrev:duedetails <> "") then {
+  "Details:"
+  box/width=100/fill/noblanklines/column=10
+  nonrev:duedetails
+  end box/newline
+  } 
+
+followed by if (cnotes = "Y" and (notes_link:summary <> "" or notes_link:notes <> "")) then {
+  "Notes:"
+  notes_link:summary/column=10/displaywidth=100/newline
+  box/width=100/fill/noblanklines/column=10
+  notes_link:notes
+  end box/newline
+  } 
+
+sorted by
+
+  if csort = "Driver Name" then nonrev:driver 
+  if csort =  "Date" and cdate = "Date Out" then nonrev:dateout 
+  if csort =  "Date" and cdate = "Date In/Due" then date_in 
+  if csort = "Unit#" then nonrev:unitnumber 
+  nonrev:ticketnumber
+
+include "nonrev_i2.cq"
+ 
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Ticket Range: "+str(ctickets)+"    "+str(cselect)+" Tickets by "+str(csort_str)/newline
+  str(cdate)+" Range: "+str(dtsdate)+" to "+str(dtedate)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  end box /newline=4
+
+  "------------------- Out -------------------"/align=nonrev:locationcodeout/width=40/left
+  "-------------------- In -------------------"/align=loc_in/width=40/left/newline
+
+ 
+  "Ticket#"/align=nonrev:ticketnumber 
+  "Status"/align=tick_stat 
+  "Driver"/align=nonrev:driver 
+  "Location"/align=nonrev:locationcodeout 
+  "Date"/align=nonrev:dateout 
+  "Time"/align=nonrev:timeout 
+  "Odom"/align=nonrev:odometerout 
+  "Fuel"/align=nonrev:gaslevelout 
+  "Location"/align=loc_in
+  "Date"/align=date_in
+  "Time"/align=time_in
+  "Odom"/align=nonrev:odometerin 
+  "Fuel"/align=nonrev:gaslevelin 
+  "Unit"/align=a/newline
+
+end of report
+  ""/newline
+  "Total Records: "+str(count[nonrev:ticketnumber,report])
+
+;
+replace nonrev_1.eq
+replace nonrev.eq
+run/setparameter nonrev_1.eq
+
+/*------------------------------------------------------------------------
+ Dynamically create Top Of section
+------------------------------------------------------------------------*/
+include "nonrev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Unit#" then {
+'top of nonrev:unitnumber'/newline
+  '""/newline'/newline
+  '"Unit: "'/newline
+  'nonrev:unitnumber'/newline
+  'invtrx_link:licensenumber'/newline
+  'invtrx_link:licensest'/newline
+  'invtrx_link:year'/newline
+  'invtrx_link:make'/newline
+  'invtrx_link:model/newline'/newline
+}
+;
+run/parameterfile=nonrev_1
+rrepl nonrev_i2
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+run/parameterfile=nonrev_1 nonrev.eq
+
+rrepl nonrev
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view nonrev
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Non Revenue Movement Report" -- Report Title
+   string rptname1    = "nonrev" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "nonrev_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,312 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Contract Average Rate Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: rarate.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rarate.mf $
+$Revision: 2 $
+$History: rarate.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+
+define
+  date dtsdate = parameter  prompt "Starting Open Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Open Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cstatus = multivalue parameter prompt "Contract Status' or 'ALL': " valid "Open","Closed","ALL" default "ALL"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace rarate_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "rarate_i1.inc"
+
+list/domain="dummy"/noheadings/nobanner/nodefaults
+
+dtsdate
+dtedate
+str(cloc)
+clocgroup
+str(cproduct)
+str(cstatus)
+csummary
+
+;
+replace rarate_1.eq
+run/setparameter rarate_1.eq
+
+
+/*------------------------------------------------------------------------
+ Summary or detail?
+------------------------------------------------------------------------*/
+include "rarate_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+
+run/parameterfile=rarate_1
+rrepl "rarate_i2"
+
+/*------------------------------------------------------------------------
+ RA selection and revenue day calculation
+------------------------------------------------------------------------*/
+
+include "rarate_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm:commonid,
+    one to many,generic,
+    null fill on failure
+
+  file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number tot_actdays = if (rrm:datein - rrm:dateout) = 0 then 1 else (rrm:datein - rrm:dateout)
+
+  string cstat = switch(rrm:rastatus)
+    case 1,2 : "Open"
+    case 3   : "Closed"
+    default  : "Other" 
+
+
+ where 
+  ( rrm:dateout >= 
+    dtSdate
+  and rrm:dateout <= 
+    dtEdate )
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and rrm:rastatus one of 1,2,3
+  and (cstat = cstatus or cstatus = "ALL")
+  
+   
+sum/domain="rrm"/hold="rrm_hf"
+  rental_link:totaltpm/heading="TM"
+  rental_link:rentaldiscountamt/heading="discount"
+  tot_revdays
+ 
+by
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber/name="ra_number"/keyelement=2.1
+  rrm:locationcodeout
+  rrm:dateout
+  rrm:rentedasclass
+  rrm:rastatus
+
+
+;
+run/parameterfile=rarate_1 
+
+/*------------------------------------------------------------------------
+ Summarize misc sales by RA
+------------------------------------------------------------------------*/
+define
+ 
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+sum/domain="rrm_hf"/hold="sales_hf"
+if rcmift_link:rev=1 and rcmift_link:type < 50 then   rcmift_link:total
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ra_number
+
+;
+run/parameterfile=rarate_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "rarate_i1.inc"
+define
+
+  file sales_link = access sales_hf,
+    set sales_hf:commonid=rrm_hf:commonid,
+    one to one,zero fill on failure
+
+  number nettm = rrm_hf:totaltpm - rrm_hf:rentaldiscountamt
+  number tot_sales = nettm + sales_link:total
+
+  number tm_avg = round(nettm divide rrm_hf:tot_revdays,2)
+  number tot_avg = round(tot_sales divide rrm_hf:tot_revdays,2)
+
+  string rrm_stat = switch(rrm_hf:rastatus)
+   case 2 : "Open"
+   case 3 : "Closed"
+   default : "Unknown"
+
+list/domain="rrm_hf"/nobanner/pageof/title="Average Rates Report"/noreporttotals/noheadings/pagelength=70 include "rarate_i2.cq"
+
+  rrm_hf:ra_number/displaywidth=10
+  rrm_stat/displaywidth=6
+  rrm_hf:rentedasclass/displaywidth=10
+  rrm_hf:tot_revdays/displaywidth=5
+  nettm/displaywidth=12
+  sales_link:total/displaywidth=12
+  tot_sales/displaywidth=12
+  tm_avg/displaywidth=12
+  tot_avg/displaywidth=12
+
+sorted by
+   rrm_hf:locationcodeout
+   rrm_hf:rentedasclass
+   rrm_hf:ra_number
+
+top of rrm_hf:locationcodeout
+  rrm_hf:locationcodeout/align=rrm_hf:ra_number/heading="Location"
+
+end of rrm_hf:rentedasclass
+""/newline
+  rrm_hf:rentedasclass/align=rrm_hf:rentedasclass/heading="Totals for"
+  count[rrm_hf:ra_number,rrm_hf:rentedasclass]/align=rrm_hf:ra_number/heading="# RA"
+  total[rrm_hf:tot_revdays,rrm_hf:rentedasclass]/align=rrm_hf:tot_revdays
+  total[nettm,rrm_hf:rentedasclass]/align=nettm
+  total[sales_link:total,rrm_hf:rentedasclass]/align=sales_link:total
+  total[tot_sales,rrm_hf:rentedasclass]/align=tot_sales
+  round(total[nettm,rrm_hf:rentedasclass] divide total[rrm_hf:tot_revdays,rrm_hf:rentedasclass],2)/align=tm_avg
+  round(total[tot_sales,rrm_hf:rentedasclass] divide total[rrm_hf:tot_revdays,rrm_hf:rentedasclass],2)/align=tot_avg
+""/newline
+
+end of rrm_hf:locationcodeout
+""/newline
+  rrm_hf:locationcodeout/align=rrm_hf:rentedasclass/heading="Totals for"
+  count[rrm_hf:ra_number,rrm_hf:locationcodeout]/align=rrm_hf:ra_number/heading="# RA"
+  total[rrm_hf:tot_revdays,rrm_hf:locationcodeout]/align=rrm_hf:tot_revdays
+  total[nettm,rrm_hf:locationcodeout]/align=nettm
+  total[sales_link:total,rrm_hf:locationcodeout]/align=sales_link:total
+  total[tot_sales,rrm_hf:locationcodeout]/align=tot_sales
+  round(total[nettm,rrm_hf:locationcodeout] divide total[rrm_hf:tot_revdays,rrm_hf:locationcodeout],2)/align=tm_avg
+  round(total[tot_sales,rrm_hf:locationcodeout] divide total[rrm_hf:tot_revdays,rrm_hf:locationcodeout],2)/align=tot_avg
+""/newline
+
+end of report
+""/newline
+  "# RA: "+str(count[rrm_hf:ra_number,report])
+  ""/align=rrm_hf:tot_revdays/heading="Report Totals"
+  count[rrm_hf:ra_number,report]/align=rrm_hf:ra_number/heading="# RA"
+  total[rrm_hf:tot_revdays,report]/align=rrm_hf:tot_revdays
+  total[nettm,report]/align=nettm
+  total[sales_link:total,report]/align=sales_link:total
+  total[tot_sales,report]/align=tot_sales
+  round(total[nettm,report] divide total[rrm_hf:tot_revdays,report],2)/align=tm_avg
+  round(total[tot_sales,report] divide total[rrm_hf:tot_revdays,report],2)/align=tot_avg
+""/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) 
+  "Status: " + str(cstatus)/displaywidth=100/newline
+  end box /newline=4
+
+  "Net T&M"/align=tm_avg
+  "Total"/align=tot_avg/newline
+ 
+  "RA Number"/align=rrm_hf:ra_number
+  "Status"/align=rrm_stat
+  "Class"/align=rrm_hf:rentedasclass
+  "Days"/align=rrm_hf:tot_revdays
+  "Net T&M"/align=nettm
+  "Other"/align=sales_link:total
+  "Total"/align=tot_sales
+  "Average"/align=tm_avg
+  "Average"/align=tot_avg/newline
+
+
+;
+replace rarate.eq
+run/parameterfile=rarate_1 rarate.eq
+rrepl rarate
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rarate
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Contract Average Rate Report" -- Report Title
+   string rptname1    = "rarate" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rarate_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

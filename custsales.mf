@@ -1,0 +1,494 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Customer Sales Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/5/2018
+Modified:
+
+Notes:
+$Workfile: custsales.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/custsales.mf $
+$Revision: 2 $
+$History: custsales.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string ccustrange = range parameter prompt "Customer Last Name Range (Start..End or ALL): " default ALL
+  date dtsdaterent = parameter prompt "Last Rental Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedaterent = parameter Prompt "Last Rental Ending Date"  error "Error: End date < Start date" if dtEdaterent < dtSdaterent default todaysdate
+  date dtsdateclose = parameter prompt "Contracts Closed Starting Date" default dateadd(todaysdate,-1,0)
+  date dtedateclose = parameter Prompt "Contracts Closed Ending Date"  error "Error: End date < Start date" if dtEdateclose < dtSdateclose default todaysdate
+  number crentals = range parameter prompt "Enter # Rentals Range (Min..Max or ALL): " default ALL
+  string cctype[1024] = multivalue parameter prompt "Company Type:" valid "Body Shop","Corp-Cust","Corporate","Insurance",
+      "Renter","Repair Shop","Tour","Vendor","Other" default "ALL"
+  string csort = parameter prompt "Sorted by: " valid "Customer","Company Type" default "Customer"
+;
+replace custsales_i1.inc
+
+/*------------------------------------------------------------------------
+ Gather contract information and charges
+------------------------------------------------------------------------*/
+
+include "custsales_i1.inc"
+
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+   file rcmift_link = access rcmift,
+    set rcmift:commonid=rrm:commonid,
+    one to many, generic,
+    null fill on failure
+
+   file renter_link = access renter,
+    set renter:renterid=rrm:renterid,
+    one to one, generic,null fill on failure
+
+
+
+where (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and 
+      rrm:rastatus = 3 and
+      (rrm:datein >= dtsdateclose and rrm:datein <= dtedateclose)
+ 
+
+
+list/domain="rrm"/hold="custsales2_hf"
+  rrm:commonid/width=11/keyelement=1.1
+  rrm:ranumber/width=20
+  rrm:renterid/width=10
+  renter_link:company/width=60
+  rrm:dateout/width=10
+  rrm:locationcodeout/width=25
+  rcmift_link:type/width=11
+  rcmift_link:total/width=14/decimalplaces=2/name="total_amt"
+  rcmift_link:rev/width=4
+
+;
+replace custsales_1.eq
+run/setparameter custsales_1.eq
+
+run/parameterfile=custsales_1 custsales_1.eq
+
+/*------------------------------------------------------------------------
+ Create sort section dynamically
+------------------------------------------------------------------------*/
+include "custsales_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Company Type" then {
+'sorted by'/newline
+  'custsales4_hf:company'/newline
+  'cust_name'/newline
+
+'end of custsales4_hf:company'/newline
+  '""/newline'/newline
+  'str(custsales4_hf:company) +" Totals: "'/newline
+  'total[custsales4_hf:numra,custsales4_hf:company]/align=custsales4_hf:numra'/newline
+  'total[custsales4_hf:tottpm,custsales4_hf:company]/align=custsales4_hf:tottpm'/newline
+  'total[custsales4_hf:totcdw,custsales4_hf:company]/align=custsales4_hf:totcdw'/newline
+  'total[custsales4_hf:totupg,custsales4_hf:company]/align=custsales4_hf:totupg'/newline
+  'total[custsales4_hf:totpec,custsales4_hf:company]/align=custsales4_hf:totpec'/newline
+  'total[custsales4_hf:totpac,custsales4_hf:company]/align=custsales4_hf:totpac'/newline
+  'total[custsales4_hf:totsli,custsales4_hf:company]/align=custsales4_hf:totsli'/newline
+  'total[custsales4_hf:totfuel,custsales4_hf:company]/align=custsales4_hf:totfuel'/newline
+  'total[custsales4_hf:totother,custsales4_hf:company]/align=custsales4_hf:totother'/newline
+  'total[tot_rev,custsales4_hf:company]/align=tot_rev/newline'/newline
+}
+else {
+'sorted by'/newline
+  'cust_name'/newline
+}
+;
+run/parameterfile=custsales_1
+rrepl custsales_i2
+
+/*------------------------------------------------------------------------
+ Add dummy records for place holding of all rev types
+------------------------------------------------------------------------*/
+     
+list/domain="rrm"/maxrecords=1/hold="custsales2_hf"/append
+  rrm:commonid/width=11/keyelement=1.1
+  rrm:ranumber/width=20
+  0/name="renterid"/width=10
+  ""/name="company"/width=60
+  rrm:dateout/width=10
+  rrm:locationcodeout/width=25
+  2/width=11/name="type"
+  0/width=14/decimalplaces=2/name="total_amt"
+  0/width=4/name="rev"
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  3/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  4/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  5/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  8/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  10/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  2/width=11
+  0/width=14
+  0/width=4
+followed by
+  rrm:commonid
+  rrm:ranumber
+  0/width=10
+  ""/width=60
+  rrm:dateout
+  rrm:locationcodeout
+  99/width=11
+  0/width=14
+  0/width=4
+
+;
+run/parameterfile=custsales_1 
+
+
+/*------------------------------------------------------------------------
+ Summarize revenue items 
+------------------------------------------------------------------------*/
+
+define
+
+  string chgtype = switch(custsales2_hf:type)
+    case 2 : "CDW"
+    case 3 : "PAC"
+    case 4 : "PEC"
+    case 5 : "SLI"
+    case 8 : "UPG"
+    case 10,11,12 : "Fuel"
+    default : "Other"
+
+
+sum/domain="custsales2_hf"/hold="custsales3_hf"
+  custsales2_hf:total_amt
+
+across chgtype/showall
+
+by
+  custsales2_hf:locationcodeout
+  custsales2_hf:renterid
+  custsales2_hf:company
+  custsales2_hf:ranumber
+  custsales2_hf:dateout
+  custsales2_hf:commonid/keyelement=1.1
+
+;
+run/parameterfile=custsales_1 
+
+/*------------------------------------------------------------------------
+ Consolidate revenue by customer for final report output
+------------------------------------------------------------------------*/
+
+define
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=custsales3_hf:commonid,
+   one to one, zero fill on failure
+
+  number tpm = rental_link:totaltpm - rental_link:rentaldiscountamt
+
+where custsales3_hf:renterid <> 0
+
+list/domain="custsales3_hf"/nodetail/hold="custsales4_hf"
+  custsales3_hf:renterid
+  custsales3_hf:company
+  custsales3_hf:ranumber/hidden
+  tpm
+  custsales3_hf:total_amt_cdw
+  custsales3_hf:total_amt_pac
+  custsales3_hf:total_amt_other
+  custsales3_hf:total_amt_pec
+  custsales3_hf:total_amt_sli
+  custsales3_hf:total_amt_upg
+  custsales3_hf:total_amt_fuel
+  custsales3_hf:dateout
+
+sorted by 
+custsales3_hf:renterid
+custsales3_hf:dateout
+
+
+end of custsales3_hf:renterid
+  custsales3_hf:renterid/keyelement=1.1
+  custsales3_hf:company/keyelement=2.1
+  custsales3_hf:locationcodeout
+  total[tpm]/name="tottpm"
+  total[custsales3_hf:total_amt_cdw,custsales3_hf:renterid]/name="totcdw"
+  total[custsales3_hf:total_amt_pac,custsales3_hf:renterid]/name="totpac"
+  total[custsales3_hf:total_amt_other,custsales3_hf:renterid]/name="totother"
+  total[custsales3_hf:total_amt_pec,custsales3_hf:renterid]/name="totpec"
+  total[custsales3_hf:total_amt_sli,custsales3_hf:renterid]/name="totsli"
+  total[custsales3_hf:total_amt_upg,custsales3_hf:renterid]/name="totupg"
+  total[custsales3_hf:total_amt_fuel,custsales3_hf:renterid]/name="totfuel"
+  count[custsales3_hf:ranumber,custsales3_hf:renterid]/name="numra"
+  custsales3_hf:dateout/name="lastrental"
+
+;
+run/parameterfile=custsales_1 
+
+/*------------------------------------------------------------------------
+ Convert company type to DB values
+------------------------------------------------------------------------*/
+
+include "custsales_i1.inc"
+define
+
+  number num_params = countfields(str(cctype),",")  
+
+  file i_counter = access counter,
+    set min=1,max=num_params
+
+  string cctypestr = subfield(str(cctype),",",i_counter:position)
+  
+  string cctypedesc = switch(cctypestr)
+     case "Body Shop"    : "B"
+     case "Corp-Cust"    : "P"  
+     case "Corporate"    : "C"
+     case "Insurance"    : "I"
+     case "Renter"       : "N"
+     case "Repair Shop"  : "R"
+     case "Tour"         : "T"
+     case "Vendor"       : "V"
+     case "Other"        : "Other"
+     case "ALL"          : "ALL"
+  
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if i_counter:position <= num_params then
+   subfield(str(cctype),",",i_counter:position)/hidden
+   if i_counter:position = 1 then '"'+cctypedesc+'"' else ',"'+cctypedesc+'"'/concatenate
+;
+run/parameterfile=custsales_1 
+rrepl comp_type
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "custsales_i1.inc"
+
+define
+
+   file renter_link = access renter,
+    set renter:renterid=custsales4_hf:renterid,
+    one to one, generic,null fill on failure
+
+   file company_link = access company,
+    set company:company=custsales4_hf:company,
+    one to one, null fill on failure
+
+   string TypeDescr = switch(company_link:type)
+              case "B" : "Body Shop"
+              case "P" : "Corp-Cust"
+              case "C" : "Corporate"
+              case "I" : "Insurance" 
+              case "N" : "Renter"
+              case "R" : "Repair Shop"
+              case "T" : "Tour"
+              case "V" : "Vendor"
+              case "O" : "Other"
+              default  : ""   
+
+   number tot_rev = custsales4_hf:tottpm+custsales4_hf:totcdw+custsales4_hf:totupg+custsales4_hf:totpec
+                    +custsales4_hf:totpac+custsales4_hf:totsli+custsales4_hf:totfuel+custsales4_hf:totother
+
+   string cust_name = str(renter_link:customerlastname)+", "+str(renter_link:customerfirstname)
+
+where (custsales4_hf:lastrental >= dtsdaterent and custsales4_hf:lastrental <= dtedaterent) and
+      (custsales4_hf:numra = crentals) and
+      (company_link:type one of include "comp_type.cq" or cctype = "ALL") and
+      (renter_link:customerlastname = ccustrange or ccustrange = "ALL")
+
+
+
+list/domain="custsales4_hf"/nobanner/pageof/title="Customer Sales Report"/duplicates/noreporttotals/noheadings
+  cust_name/displaywidth=30
+  if csort = "Company Type" then {
+    custsales4_hf:company/displaywidth=20
+    TypeDescr/displaywidth=10
+  }
+  custsales4_hf:lastrental
+  custsales4_hf:numra
+  custsales4_hf:tottpm
+  custsales4_hf:totcdw
+  custsales4_hf:totupg
+  custsales4_hf:totpec
+  custsales4_hf:totpac
+  custsales4_hf:totsli
+  custsales4_hf:totfuel
+  custsales4_hf:totother
+  tot_rev/newline
+
+
+include "custsales_i2.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Last Rental from: "+str(dtsdaterent)+" to "+str(dtedaterent)/newline
+  "Contracts Closed from: "+str(dtsdateclose)+" to "+str(dtedateclose)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Company Types: "+str(cctype)/displaywidth=100/newline
+  if str(crentals) = "ALL" then "Customers with 1 or more rentals" else "Customers with " + str(crentals)+" or more rentals"/newline
+  end box /newline=4
+ 
+  "Renter's Name"/align=cust_name
+  if csort = "Company Type" then {
+    "Company"/align=custsales4_hf:company
+    "Type"/align=TypeDescr
+  }
+  "Last Rental"/align=custsales4_hf:lastrental
+  "Rentals"/align=custsales4_hf:numra
+  "T&M"/align=custsales4_hf:tottpm
+  "CDW"/align=custsales4_hf:totcdw
+  "UPG"/align=custsales4_hf:totupg
+  "PEC"/align=custsales4_hf:totpec
+  "PAC"/align=custsales4_hf:totpac
+  "SLI"/align=custsales4_hf:totsli
+  "Fuel"/align=custsales4_hf:totfuel
+  "Other"/align=custsales4_hf:totother
+  "Total"/align=tot_rev/newline
+
+
+
+end of report
+  ""/newline
+  "Report Totals: "
+  total[custsales4_hf:numra,report]/align=custsales4_hf:numra
+  total[custsales4_hf:tottpm,report]/align=custsales4_hf:tottpm
+  total[custsales4_hf:totcdw,report]/align=custsales4_hf:totcdw
+  total[custsales4_hf:totupg,report]/align=custsales4_hf:totupg
+  total[custsales4_hf:totpec,report]/align=custsales4_hf:totpec
+  total[custsales4_hf:totpac,report]/align=custsales4_hf:totpac
+  total[custsales4_hf:totsli,report]/align=custsales4_hf:totsli
+  total[custsales4_hf:totfuel,report]/align=custsales4_hf:totfuel
+  total[custsales4_hf:totother,report]/align=custsales4_hf:totother
+  total[tot_rev,report]/align=tot_rev/newline
+
+;
+replace custsales.eq
+run/parameterfile=custsales_1 custsales.eq
+rrepl custsales
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view custsales
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Customer Sales Report" -- Report Title
+   string rptname1    = "custsales" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "custsales_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

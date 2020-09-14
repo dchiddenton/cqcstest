@@ -1,0 +1,257 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Claim Reminder Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 
+Modified:
+
+Notes:
+$Workfile: claimrem.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/claimrem.mf $
+$Revision: 2 $
+$History: claimrem.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"ALL"'
+   ',"'+employee:employeelastname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:statlist,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if itemnumber=1 then '"ALL"'
+if i_counter:position <= num_params then
+   ',"'+subfield(claimsetup:statlist,",",i_counter:position)+'"'
+
+top of report
+'string cstatus[8192] = multivalue parameter prompt "Claim Statuses: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_cstatus"
+
+viewpoint native;
+define
+   number num_params = countfields(claimsetup:typelist,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="claimsetup"
+if itemnumber=1 then '"ALL"'
+if i_counter:position <= num_params then
+   ',"'+subfield(claimsetup:typelist,",",i_counter:position)+'"'
+
+top of report
+'string ctypes[8192] = multivalue parameter prompt "Claim Types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_ctypes"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date of Loss: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date of Loss: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_emps.cq"
+  include "param_ctypes.cq"
+  include "param_cstatus.cq"
+  string creminders = multivalue parameter prompt "Print Reminders?" valid "Active","Inactive" default "Active"
+  string csort = parameter prompt "Select by: " valid "Reminder Date","Claim #" default "Reminder Date"
+;
+replace claimrem_i1.inc
+
+/*------------------------------------------------------------------------
+ Dynamic code generations - setup parameters
+------------------------------------------------------------------------*/
+include "claimrem_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Reminder Date" then {
+'sorted by'/newline
+'reminder_link:startdate'/newline
+'claim_num'/newline
+
+'end of reminder_link:startdate'/newline
+'  ""/newline'/newline
+'"Reminders for "+str(reminder_link:startdate)+": "+str(count[claim_num,reminder_link:startdate])/newline'/newline
+} else {
+'sorted by'/newline
+'claim_num'/newline
+'reminder_link:startdate'/newline
+}
+;
+replace claimrem_1.eq
+run/setparameter claimrem_1.eq
+
+run/parameterfile=claimrem_1 claimrem_1.eq
+rrepl claimrem_i2
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "claimrem_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = claim:rentingloc,
+    null fill on failure
+
+
+  file vehicle_link = access claimvehicle,
+   set claimvehicle:commonid=claim:commonid,
+   one to one, generic, null fill on failure
+
+  string commid = str(claim:commonid)
+
+  file reminder_link = access reminder,
+   set reminder:parentid=commid,
+   one to many, null fill on failure
+
+  string claim_num = str(claim:claimnumdol)+"-"+str(claim:claimnumunit)+"-"+str(claim:claimnumseq)
+
+where --(claim:type = ctypes or ctypes = "ALL") and
+      (claim:stat = cstatus or cstatus = "ALL") and
+      (claim:rentingloc = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and
+      (claim:workingemp = cemps or cemps = "ALL") and
+      (claim:dol >= dtsdate and claim:dol <= dtedate) and
+      (vehicle_link:product = cproduct or cproduct = "ALL") and
+      ((creminders = "Active" and reminder_link:completed = 0) 
+       or (creminders = "Inactive" and reminder_link:completed = 1)
+       or reminder_link:parentid = null)
+  
+
+list/domain="claim"/nobanner/pageof/title="Claim Reminder Report"/duplicates/noreporttotals/noheadings  
+claim_num/displaywidth=30
+
+  str(reminder_link:startdate)+" "+str(reminder_link:starttime,"99.99")/displaywidth=15/name="b"
+  reminder_link:action/displaywidth=20/name="c"
+  if reminder_link:completed = 1 then "Yes" else "No"/displaywidth=5/centre/name="d"
+  reminder_link:employeenumber/displaywidth=10/name="e"
+
+box/width=40/nofill
+  if reminder_link:parentid <> null then reminder_link:detail else "Open Claim with No Reminder"/name="f"
+end box
+
+include "claimrem_i2.cq"
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "Product(s): " + str(cproduct)
+  if cLocgroup <> "" then "  Location group: " + str(cLocGroup) else "  Locations: " + str(cLoc)/displaywidth=100/newline
+  "Managed by: " + str(cemps)/newline
+  "Type: "+str(ctypes) +"  Status: "+str(cstatus)/displaywidth=100/newline
+  end box/newlines=4
+
+"Claim #"/align=claim_num
+"Start Date/Time"/align=b
+"Action"/align=c
+"Completed"/align=d
+"Emp#"/align=e
+"Detail"/align=f/newline
+
+end of report
+""/newline
+"Total Reminders: "+str(count[claim_num,report])
+;
+replace claimrem.eq
+run/parameterfile=claimrem_1 claimrem.eq
+rrepl claimrem
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view claimrem
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Claim Reminder Report" -- Report Title
+   string rptname1    = "claimrem" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "claimrem_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

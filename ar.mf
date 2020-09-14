@@ -1,0 +1,579 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Accounts Receivable Aging Report
+  Author: David Chiddenton
+  $Revision: 5 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/13/2017
+Modified:
+
+Notes:
+$Workfile: ar.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/ar.mf $
+$Revision: 5 $
+$History: ar.mf $
+ * 
+ * *****************  Version 5  *****************
+ * User: Dchidden     Date: 1/14/20    Time: 1:45p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fix Excel export output issues
+ * 
+ * *****************  Version 4  *****************
+ * User: Dchidden     Date: 12/23/19   Time: 3:55p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added company address option to output
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 12/04/19   Time: 10:36a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add Excel formatting output.  Also change non-deposit payment selection
+ * logic.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+viewpoint native;
+
+viewpoint native;
+
+define
+   sales_rep = str(employee:employeefirstname) + " " + str(employee:employeelastname)
+
+
+where employee:groups contains "Sales Reps"
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+sales_rep+'"' else
+   ',"'+sales_rep+'"'
+
+sorted by
+   sales_rep
+top of report
+'string csalesrep[8192] = multivalue parameter prompt "Sales Reps: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_rep"
+
+ /*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define  
+  date dtsdate = parameter prompt "Start Date: " default dateadd(todaysdate,0,-1)
+  date dtedate = parameter prompt "End Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate
+  date dtdate = Parameter prompt "As of: " default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  string cctype[1024] = multivalue parameter prompt "Company Type:" valid "Body Shop","Corp-Cust","Corporate","Insurance",
+      "Renter","Repair Shop","Tour","Vendor","Other" default "ALL"
+  string ccompany [8192] =  range parameter prompt "Companies (First..Last): "  default "ALL"
+  include "param_rep.cq"
+  string ccdetail = parameter/uppercase prompt "Company Addresses?" valid "Y","N" default "N"
+  string cdetail = parameter/uppercase prompt "Renter Detail?" valid "Y","N" default "N"
+  string cbalance = parameter/uppercase prompt "Skip Zero Balances?" valid "Y","N" default "N"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace ar_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve AR payment records
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "ar_i1.inc"
+
+
+where 
+  ( paymentline:datereceived >= 
+    dtSDate
+  and paymentline:datereceived <= 
+    dtEDate )
+
+
+list/domain="paymentline"/hold="ar_pmt_hf"
+  paymentline:datereceived
+  paymentline:reference
+  paymentline:amount*-1/name="amount"
+  paymentline:paymentid/keyelement=1.1
+
+;
+replace ar_1.eq
+run/setparameter ar_1.eq
+
+run/parameterfile=ar_1 ar_1.eq
+
+/*------------------------------------------------------------------------
+ Summary or Detail
+------------------------------------------------------------------------*/
+include "ar_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+run/parameterfile=ar_1
+rrepl "ar_i2"
+;
+run/parameterfile=ar_1 
+
+/*------------------------------------------------------------------------
+ Retrieve invoice records and combine with AR payment records
+------------------------------------------------------------------------*/
+
+include "ar_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = payments:rptloccode,
+    null fill on failure
+
+  file pl_to_pmt = access ar_pmt_hf,
+    set ar_pmt_hf:paymentid=payments:paymentid, one to many,
+    zero fill on failure
+
+where 
+  payments:datepaid=null and payments:company <> "" and
+  (payments:rptdate >= dtSDate   and payments:rptdate <= dtEDate)
+  and (payments:rptloccode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+
+
+
+list/domain="payments"/noheadings/hold="ar_comb_hf"
+if  (((payments:deposit=1 and payments:paiddeposit = 1) or payments:deposit = 0)
+  and payments:datepaid = null  
+  and paymentstype:paytype =  3) then {
+  payments:paymentamount
+  payments:ranumber/keyelement=1.1
+  payments:invoicenumber
+  payments:company/keyelement=3.1 
+  payments:commonid/keyelement=2.1
+  payments:paymentid
+  payments:datereceived
+  payments:datereceived/name="original_date"
+  str(payments:invoicenumber)/width=60/name="reference"
+  str(payments:ponumber)/name="po_num"
+  "Invoice"/width=20/name="source"
+}
+followed by
+if  (((payments:deposit=1 and payments:paiddeposit = 1) or payments:deposit = 0)
+  and payments:datepaid = null  
+  and paymentstype:paytype =  3) then {
+if pl_to_pmt:amount <> 0 then {
+  pl_to_pmt:amount
+  payments:ranumber
+  payments:invoicenumber
+  payments:company
+  payments:commonid
+  pl_to_pmt:paymentid
+  pl_to_pmt:datereceived
+  payments:datereceived
+  pl_to_pmt:reference
+  ""
+  "Payment"/width=20
+}
+}
+sorted by 
+   payments:ranumber
+   payments:invoicenumber
+
+;
+run/parameterfile=ar_1 
+
+
+/*------------------------------------------------------------------------
+ Calculate balance totals
+------------------------------------------------------------------------*/
+viewpoint native;
+ 
+
+list/domain="ar_comb_hf"/nodetail/hold="ar_balance"
+
+  ar_comb_hf:paymentamount 
+  ar_comb_hf:paymentid
+  ar_comb_hf:company 
+
+sorted by
+  ar_comb_hf:company
+  ar_comb_hf:paymentid
+  
+end of ar_comb_hf:paymentid
+  total[ar_comb_hf:paymentamount]/name="balance"
+  ar_comb_hf:paymentid/keyelement=1.2
+  ar_comb_hf:company /keyelement=1.1
+
+;
+run/parameterfile=ar_1 
+
+/*------------------------------------------------------------------------
+ Combine detail with totals
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+
+  file balance_link = access ar_balance,
+    set ar_balance:company=ar_comb_hf:company,
+    ar_balance:paymentid=ar_comb_hf:paymentid,
+    one to one, zero fill on failure
+
+
+list/domain="ar_comb_hf"/hold="ar_final"
+
+  ar_comb_hf:paymentamount 
+  ar_comb_hf:ranumber 
+  ar_comb_hf:invoicenumber
+  ar_comb_hf:company/keyelement=1.1
+  ar_comb_hf:commonid /width=20
+  ar_comb_hf:paymentid /width=20
+  ar_comb_hf:datereceived 
+  ar_comb_hf:original_date
+  ar_comb_hf:reference 
+  ar_comb_hf:po_num
+  ar_comb_hf:source
+  balance_link:balance
+
+
+sorted by
+  ar_comb_hf:company
+  ar_comb_hf:invoicenumber
+  
+;
+run/parameterfile=ar_1 
+
+/*------------------------------------------------------------------------
+ Create blank dummy record
+------------------------------------------------------------------------*/
+viewpoint native;
+
+where 
+  company:onaccount <> 
+    0
+
+list/domain="company"/hold="ar_final"/append
+  company:onaccount*-1/width=19/decimalplaces=2/name="paymentamount"
+  ""/width=20/name="ranumber"
+  ""/width=40/name="invoicenumber"
+  company:company /width=60/keyelement=1.1
+  0/width=20/name="commonid"
+  0/width=20/name="paymentid"
+  todaysdate/name="datereceived"
+  todaysdate/name="original_date"
+  ""/width=60/name="reference"
+  ""/width=30/name="po_num"
+  "On Account"/width=20/name="source"
+  0/width=19/decimalplaces=2/name="balance"
+
+;
+run/parameterfile=ar_1 
+
+/*------------------------------------------------------------------------
+ Convert company type to DB values
+------------------------------------------------------------------------*/
+
+include "ar_i1.inc"
+define
+
+  number num_params = countfields(str(cctype),",")  
+
+  file i_counter = access counter,
+    set min=1,max=num_params
+
+  string cctypestr = subfield(str(cctype),",",i_counter:position)
+  
+  string cctypedesc = switch(cctypestr)
+     case "Body Shop"    : "B"
+     case "Corp-Cust"    : "P"  
+     case "Corporate"    : "C"
+     case "Insurance"    : "I"
+     case "Renter"       : "N"
+     case "Repair Shop"  : "R"
+     case "Tour"         : "T"
+     case "Vendor"       : "V"
+     case "Other"        : "Other"
+     case "ALL"          : "ALL"
+  
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if i_counter:position <= num_params then
+   subfield(str(cctype),",",i_counter:position)/hidden
+   if i_counter:position = 1 then '"'+cctypedesc+'"' else ',"'+cctypedesc+'"'/concatenate
+;
+run/parameterfile=ar_1 
+rrepl comp_type
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "ar_i1.inc"
+
+define
+
+   file rrm_link = access rrm,
+    set rrm:commonid=ar_final:commonid,
+    one to one, generic, null fill on failure
+
+   file company_link = access company,
+     set company:company=ar_final:company,
+     one to one, generic, null fill on failure
+
+  file emp_link = access employee,
+    set employee:employeenumber=company_link:salesrep,
+    one to one, null fill on failure
+
+   number sort_order = switch(ar_final:source)
+     case "On Account" : 0
+     case "Invoice"    : 1
+     case "Payment"    : 2
+
+   string sales_rep = str(emp_link:employeefirstname) + " " + str(emp_link:employeelastname)
+
+   number inv_age = dtDate - ar_final:original_date
+
+where (sales_rep = csalesRep or csalesRep = "ALL")
+     and (company_link:type one of include "comp_type.cq" or cctype = "ALL")
+     and ((ar_final:company = cCompany) or cCompany = "ALL")
+     and (((ar_final:balance <> 0 or (sort_order = 0 and ar_final:paymentamount <> 0)) and cBalance = "Y") or cBalance = "N")
+
+
+list/domain="ar_final"/noheadings/nobanner/pageof/pagelength=80/pagewidth=220/title="A/R Aging Report" include "ar_i2.cq"
+
+  ar_final:ranumber/noduplicates/displaywidth=12/name="a"
+  ar_final:datereceived/name="b"
+  ar_final:reference /displaywidth=12/noduplicates/name="c"
+  ar_final:po_num /displaywidth=12/name="d"
+  ar_final:source/displaywidth=20/name="e"
+  ar_final:paymentamount/name="f" 
+  if sort_order = 1 then ar_final:balance else 0/zerosuppress/name="ff"
+  if sort_order = 1 then { 
+  if inv_age < 31 then ar_final:balance/name="g" else 0
+  if (inv_age > 30 and inv_age < 61) then ar_final:balance/name="h" else 0
+  if (inv_age > 60 and inv_age < 91) then ar_final:balance/name="i" else 0
+  if (inv_age > 90 and inv_age < 121) then ar_final:balance/name="j" else 0
+  if inv_age > 120 then ar_final:balance/name="k" else 0
+}
+
+followed by
+
+if cDetail = "Y" then {
+  rrm_link:customerfirstname + " " + rrm_link:customerlastname /align=b
+  rrm_link:locationcodeout /align=d
+}  
+sorted by ar_final:company/total/heading="@"
+  ar_final:ranumber
+  sort_order
+
+top of ar_final:company
+  ""/newline
+  "Customer: " + str(ar_final:company)  + "    Account#: " + str(company_link:arcust)
+  + "     Credit Limit: " + str(company_link:creditlimit,"zzz,zzz9.99") + "        Phone: " 
+  + str(company_link:phonenumber,"(999) 999-9999") + "     Sales Rep: " + sales_rep/displaywidth=120/newline
+ if ccdetail = "Y" then {
+  "Address: "+trim(str(company_link:address1))+" "+trim(str(company_link:address2))+" "+trim(str(company_link:city))+
+   " "+trim(str(company_link:state))+" "+trim(str(company_link:zipcode))/displaywidth=120
+  }
+  ""/newline
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "As of Date: " + str(dtdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Skip Zero Balances? " + str(cbalance)/newline
+  end box/newlines=4
+
+"RA Number"/align=a
+"Date"/align=b
+"Reference"/align=c
+"PO #"/align=d
+"Source"/align=e
+"Comp Total"/align=f
+"Balance"/align=ff
+"Current"/align=g
+"31-60 Days"/align=h
+"61-90 Days"/align=i
+"91-120 Days"/align=j
+"Over 120 Days"/align=k/newline
+if (cDetail = "Y" and csummary = "Detail") then {
+"Customer Name"/align=b
+"Location"/align=d/newline
+}
+
+;
+replace ar.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel format
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "ar_i1.inc"
+
+define
+
+   file rrm_link = access rrm,
+    set rrm:commonid=ar_final:commonid,
+    one to one, generic, null fill on failure
+
+   file company_link = access company,
+     set company:company=ar_final:company,
+     one to one, generic, null fill on failure
+
+  file emp_link = access employee,
+    set employee:employeenumber=company_link:salesrep,
+    one to one, null fill on failure
+
+   number sort_order = switch(ar_final:source)
+     case "On Account" : 0
+     case "Invoice"    : 1
+     case "Payment"    : 2
+
+   string sales_rep = str(emp_link:employeefirstname) + " " + str(emp_link:employeelastname)
+
+   number inv_age = dtDate - ar_final:original_date
+
+   string comp_address =   trim(str(company_link:address1))+" "+trim(str(company_link:city))+
+   " "+trim(str(company_link:state))+" "+trim(str(company_link:zipcode))
+
+where (sales_rep = csalesRep or csalesRep = "ALL")
+     and (company_link:type one of include "comp_type.cq" or cctype = "ALL")
+     and ((ar_final:company = cCompany) or cCompany = "ALL")
+     and (((ar_final:balance <> 0 or (sort_order = 0 and ar_final:paymentamount <> 0)) and cBalance = "Y") or cBalance = "N")
+
+
+list/domain="ar_final"/noheadings/nobanner/pageof/pagelength=0/noblanklines/title="A/R Aging Report" include "ar_i2.cq"
+  ar_final:company/displaywidth=30/name="aa"
+  if ccdetail = "Y" then comp_address/displaywidth=50/name="aaa"
+  if cSummary = "Detail" then {
+  ar_final:ranumber/noduplicates/displaywidth=12/name="a"
+  ar_final:datereceived/name="b"
+  ar_final:reference /displaywidth=12/noduplicates/name="c"
+  ar_final:po_num /displaywidth=12/name="d"
+  ar_final:source/displaywidth=20/name="e"
+  rrm_link:customerfirstname + " " + rrm_link:customerlastname /name="ee"
+  rrm_link:locationcodeout /name="eee"
+ }
+  ar_final:paymentamount/name="f" 
+  if sort_order = 1 then ar_final:balance else 0/zerosuppress/name="ff"
+  if sort_order = 1 then { 
+  if inv_age < 31 then ar_final:balance/name="g" else 0
+  if (inv_age > 30 and inv_age < 61) then ar_final:balance/name="h" else 0
+  if (inv_age > 60 and inv_age < 91) then ar_final:balance/name="i" else 0
+  if (inv_age > 90 and inv_age < 121) then ar_final:balance/name="j" else 0
+  if inv_age > 120 then ar_final:balance/name="k" else 0
+}
+
+
+sorted by ar_final:company
+  ar_final:ranumber
+  sort_order
+
+top of page
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  "As of Date: " + str(dtdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Skip Zero Balances? " + str(cbalance)/newline
+  end box/newlines=4
+
+"Company"/align=aa
+if ccdetail="Y" then "Address"/align=aaa
+ if cSummary = "Detail" then {
+"RA Number"/align=a
+"Date"/align=b
+"Reference"/align=c
+"PO #"/align=d
+"Source"/align=e
+"Customer Name"/align=ee
+"Location Out"/align=eee
+}
+"Comp Total"/align=f
+"Balance"/align=ff
+"Current"/align=g
+"31-60 Days"/align=h
+"61-90 Days"/align=i
+"91-120 Days"/align=j
+"Over 120 Days"/align=k/newline
+;
+replace ar_xl.eq
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+include "ar_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=ar_1 ar.eq"/newline
+} else {
+"run/xls/parameterfile=ar_1 ar_xl.eq"/newline
+}
+"rrepl ar"/newline
+"view"/newline 
+;
+run/parameterfile=ar_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action[100]      = "Report" -- Post or Report
+   string rptdesc[100]     = "Accounts Receivable Aging Report" -- Report Title
+   string rptname1[100]    = "ar" -- output file1
+   string rptname2[100]    = "ar_xl" -- output file2 if applicable
+   string rptname3[100]    = "" -- output file3 if applicable
+   string parfile[100]     = "ar_1.par" -- parameter.par file
+   string xmlname[100]     = "" -- xml for posting if applicable
+   string exportname[100]  = "" -- posting export file if applicable
+   string startdate[100]   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate[100]     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

@@ -1,0 +1,525 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Location Utilization by Inventory
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 7/14/2017
+Modified:
+
+Notes:
+$Workfile: lubi.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/lubi.mf $
+$Revision: 2 $
+$History: lubi.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Build inventory list from time period for current fleet
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+  string foreign = parameter default "N" Valid "Y","N"
+
+
+  file owned_link = access location,
+   set location:locationcode=inv:ownedlocationcode
+
+
+  
+where inv:inservicedate <= dtEdate
+
+
+list/domain="inv"/hold="inv_hf"
+if (foreign = "Y" or owned_link:owned=1) then {
+  inv:unitnumber
+  inv:invid
+  inv:product
+  inv:year
+  inv:make
+  inv:model
+  inv:invclass
+  dtEdate/name="last_date"
+}
+
+;
+replace lubi_1.eq
+run/setparameter lubi_1.eq
+
+run/parameterfile=lubi_1 lubi_1.eq
+
+/*------------------------------------------------------------------------
+ Build inventory list from time period for sold fleet
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+  string foreign = parameter default "N" Valid "Y","N"
+
+
+  file owned_link = access location,
+   set location:locationcode=invsold:ownedlocationcode
+
+  
+where invsold:inservicedate <= dtEdate and invsold:datesold >= dtSdate
+
+
+list/domain="invsold"/hold="inv_hf"/append
+if (foreign = "Y" or owned_link:owned=1) then {
+  invsold:unitnumber
+  invsold:invid
+  invsold:product
+  invsold:year
+  invsold:make
+  invsold:model
+  invsold:invclass
+  invsold:datesold/name="last_date"
+}
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Obtain the first fleet transaction prior to time period 
+ (status as of midnight on start date)
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+  string act_flag = "A"
+
+  file trans_link = access invtrx,
+   set invtrx:invid=inv_hf:invid,
+   with invtrx:dateout<dtSdate,
+   one to many,reverse,null fill on failure
+
+
+  string trans_loc = if trans_link:locationcodein = "" then trans_link:locationcodeout else
+   if trans_link:datein >= dtSdate then trans_link:locationcodeout else trans_link:locationcodein
+
+  number invstat = if trans_link:locationcodein = "" then trans_link:invstatout
+   else if trans_link:datein >= dtSdate then trans_link:invstatout else trans_link:invstatin
+
+  date trans_date = if trans_link:locationcodein = "" then trans_link:dateout
+   else if trans_link:datein >= dtSdate then trans_link:dateout else trans_link:datein
+
+  number trans_time = if trans_link:locationcodein = "" then trans_link:timeout
+   else if trans_link:datein >= dtSdate then trans_link:timeout else trans_link:timein
+
+  file stat_link = access invstatus,
+   set invstatus:invstatus=invstat,
+   one to one, null fill on failure
+
+  file ra_link = access rrm,
+   set rrm:commonid=trans_link:commonid,
+   one to one, null fill on failure
+
+where trans_link:dateout < dtSdate
+
+
+list/domain="inv_hf"/hold="inv_trx"
+if count[trans_link:invid,trans_link:invid]=1 then {
+  inv_hf:unitnumber
+  inv_hf:invid
+  inv_hf:product
+  inv_hf:year
+  inv_hf:make
+  inv_hf:model
+  inv_hf:invclass
+  trans_date
+  trans_time/width=7/decimalplaces=2
+  trans_loc/width=30
+  trans_link:invstatout/name="trans_stat"
+  stat_link:description
+  trans_link:trxorigin
+  trans_link:ranumber
+  ra_link:customerlastname
+  trans_link:ronumber
+  trans_link:ticketnumber
+  act_flag
+  trans_link:dateout
+  trans_link:datein
+  trans_link:trxdate
+  trans_link:trxtime
+  trans_link:invtrxid
+  inv_hf:last_date
+}
+
+sorted by 
+  trans_link:invid
+  trans_link:trxdate/descending
+  trans_link:trxtime/descending
+  trans_link:invtrxid
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Fill in prior dates to start date with first transaction status 
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+define
+
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+  string act_flag = "C"
+
+  number num_days = (inv_trx:last_date - dtSdate)+1
+
+  file counter_1 = access counter,
+    set counter:min = 0,
+    counter:max = num_days
+
+  
+list/noheadings/domain="inv_trx"/hold="inv_trx2"
+
+  if counter_1:position < num_days then {
+
+  inv_trx:unitnumber
+  inv_trx:invid
+  inv_trx:product
+  inv_trx:year
+  inv_trx:make
+  inv_trx:model
+  inv_trx:invclass
+  dtSdate + counter_1:position/name="trans_date"
+  inv_trx:trans_time
+  inv_trx:trans_loc
+  inv_trx:trans_stat
+  inv_trx:description/width=60/name="description"
+  inv_trx:trxorigin/width=24/name="trxorigin"
+  inv_trx:ranumber
+  inv_trx:customerlastname
+  inv_trx:ronumber
+  inv_trx:ticketnumber
+  act_flag
+  inv_trx:trans_date/name="dateout"
+  inv_trx:trxdate
+  inv_trx:trxtime
+  inv_trx:invtrxid
+  }
+
+sorted by
+  inv_trx:unitnumber/descending
+  inv_trx:trans_date/descending
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Obtain the fleet transaction in the time period 
+------------------------------------------------------------------------*/
+viewpoint native;
+
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+
+
+  string act_flag = "A"
+
+  file trans_link = access invtrx,
+   set invtrx:invid=inv_hf:invid,
+   with (invtrx:dateout >= dtSdate and invtrx:dateout <= dtEdate),
+   one to many, null fill on failure
+
+  file ra_link = access rrm,
+   set rrm:commonid=trans_link:commonid,
+   one to one, null fill on failure
+
+  date trans_date = if trans_link:dateout < dtSdate then dtSdate else trans_link:dateout
+  number trans_time = if trans_link:dateout < dtSdate then 23.59 else trans_link:timeout /width=7/decimalplaces=2
+  string trans_loc =  trans_link:locationcodeout
+  number invstat = trans_link:invstatout 
+
+  file stat_link = access invstatus,
+   set invstatus:invstatus=invstat,
+   one to one, null fill on failure
+
+where trans_link:dateout <> null
+
+list/domain="inv_hf"/hold="inv_trx"/append
+  inv_hf:unitnumber
+  inv_hf:invid
+  inv_hf:product
+  inv_hf:year
+  inv_hf:make
+  inv_hf:model
+  inv_hf:invclass
+  trans_date
+  trans_time
+  trans_loc/width=30
+  invstat/width=11/name="trans_stat"
+  stat_link:description
+  trans_link:trxorigin
+  trans_link:ranumber
+  ra_link:customerlastname
+  trans_link:ronumber
+  trans_link:ticketnumber
+  act_flag
+  trans_link:dateout
+  trans_link:datein
+  trans_link:trxdate
+  trans_link:trxtime
+  trans_link:invtrxid
+  inv_hf:last_date
+
+sorted by 
+  trans_link:invid
+  trans_link:trxdate/descending
+  trans_link:trxtime/descending
+  trans_link:invtrxid
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Obtain the fleet transaction in the time period based on in date 
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+
+
+  string act_flag = "A"
+
+  file trans_link = access invtrx,
+   set invtrx:invid=inv_hf:invid,
+   with (invtrx:datein >= dtSdate and invtrx:datein <= dtEdate),
+   one to many, null fill on failure
+
+  file ra_link = access rrm,
+   set rrm:commonid=trans_link:commonid,
+   one to one, null fill on failure
+
+  date trans_date = if trans_link:datein < dtSdate then dtSdate else trans_link:datein
+  number trans_time = if trans_link:datein < dtSdate then 23.59 else trans_link:timein /width=7/decimalplaces=2
+  string trans_loc = trans_link:locationcodein
+  number invstat = trans_link:invstatin
+
+  file stat_link = access invstatus,
+   set invstatus:invstatus=invstat,
+   one to one, null fill on failure
+
+
+where trans_link:datein <> null
+
+list/domain="inv_hf"/hold="inv_trx"/append
+ 
+  inv_hf:unitnumber
+  inv_hf:invid
+  inv_hf:product
+  inv_hf:year
+  inv_hf:make
+  inv_hf:model
+  inv_hf:invclass
+  trans_date
+  trans_time
+  trans_loc/width=30
+  invstat/width=11/name="trans_stat"
+  stat_link:description
+  trans_link:trxorigin
+  trans_link:ranumber
+  ra_link:customerlastname
+  trans_link:ronumber
+  trans_link:ticketnumber
+  act_flag
+  trans_link:dateout
+  trans_link:datein
+  trans_link:trxdate
+  trans_link:trxtime
+  trans_link:invtrxid
+  inv_hf:last_date
+ 
+sorted by 
+  trans_link:invid
+  trans_link:trxdate/descending
+  trans_link:trxtime/descending
+  trans_link:invtrxid
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Fills in missing dates with information from curent period
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+  string act_flag = if inv_trx:datein = null then "A" else "B"
+  
+  date count_date = inv_trx:trans_date
+  number num_days = inv_trx:last_date - inv_trx:trans_date + 1
+  
+  file counter_1 = access counter,
+    set counter:min = 0,
+    counter:max = num_days
+  
+
+list/noheadings/domain="inv_trx"/hold="inv_trx2"/append
+
+  if counter_1:position < num_days then {
+  if (inv_trx:trans_date <> count_date+counter_1:position) then {
+  inv_trx:unitnumber
+  inv_trx:invid
+  inv_trx:product
+  inv_trx:year
+  inv_trx:make
+  inv_trx:model
+  inv_trx:invclass
+  inv_trx:trans_date + counter_1:position/name="trans_date"
+  inv_trx:trans_time
+  inv_trx:trans_loc
+  inv_trx:trans_stat
+  inv_trx:description
+  inv_trx:trxorigin
+  inv_trx:ranumber
+  inv_trx:customerlastname
+  inv_trx:ronumber
+  inv_trx:ticketnumber
+  act_flag
+  inv_trx:trans_date/name="dateout"
+  inv_trx:trxdate
+  inv_trx:trxtime
+  inv_trx:invtrxid
+   }
+  
+  }
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Combine data
+------------------------------------------------------------------------*/
+viewpoint native;
+
+list/domain="inv_trx"/hold="inv_trx2"/append
+  inv_trx:unitnumber 
+  inv_trx:invid
+  inv_trx:product
+  inv_trx:year
+  inv_trx:make
+  inv_trx:model
+  inv_trx:invclass
+  inv_trx:trans_date 
+  inv_trx:trans_time 
+  inv_trx:trans_loc
+  inv_trx:trans_stat 
+  inv_trx:description 
+  inv_trx:trxorigin 
+  inv_trx:ranumber 
+  inv_trx:customerlastname
+  inv_trx:ronumber 
+  inv_trx:ticketnumber
+  inv_trx:act_flag
+  inv_trx:dateout
+  inv_trx:trxdate
+  inv_trx:trxtime
+  inv_trx:invtrxid
+
+;
+run/parameterfile=lubi_1 
+
+/*------------------------------------------------------------------------
+ Produce final data output
+------------------------------------------------------------------------*/
+viewpoint native;
+
+define
+  date dtSdate = parameter default todaysdate-day(todaysdate)+1
+  date dtEdate = parameter default todaysdate - 1
+
+where inv_trx2:trans_date >= dtsDate and inv_trx2:trans_date <= dtEdate
+
+list/domain="inv_trx2"/nodetail/hold="lubi_hf"
+  inv_trx2:unitnumber
+  inv_trx2:invid 
+  inv_trx2:product
+  inv_trx2:year
+  inv_trx2:make
+  inv_trx2:model
+  inv_trx2:invclass
+  inv_trx2:trans_date 
+  inv_trx2:trans_time 
+  inv_trx2:trans_loc
+  inv_trx2:trans_stat 
+  inv_trx2:description 
+  inv_trx2:trxorigin 
+  inv_trx2:ranumber 
+  inv_trx2:customerlastname
+  inv_trx2:ronumber 
+  inv_trx2:ticketnumber
+  inv_trx2:act_flag
+  inv_trx2:dateout
+  inv_trx2:trxdate
+  inv_trx2:trxtime
+
+
+sorted by
+  inv_trx2:unitnumber
+  inv_trx2:trans_date
+  inv_trx2:act_flag/descending
+  inv_trx2:dateout
+  inv_trx2:trxtime
+  inv_trx2:invtrxid
+  
+  end of inv_trx2:trans_date
+    inv_trx2:unitnumber 
+    inv_trx2:invid 
+    inv_trx2:product
+    inv_trx2:year
+    inv_trx2:make
+    inv_trx2:model
+    inv_trx2:invclass
+    inv_trx2:trans_date 
+    inv_trx2:trans_time 
+    inv_trx2:trans_loc
+    inv_trx2:trans_stat 
+    inv_trx2:description 
+    inv_trx2:trxorigin 
+    inv_trx2:ranumber 
+    inv_trx2:customerlastname
+    inv_trx2:ronumber
+    inv_trx2:ticketnumber
+
+;
+replace lubi.eq
+run/parameterfile=lubi_1 lubi.eq

@@ -1,0 +1,432 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Projected Revenue Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/4/2018
+Modified:
+
+Notes:
+$Workfile: projectrev.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/projectrev.mf $
+$Revision: 2 $
+$History: projectrev.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate+30
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string ctype[1024] = multivalue parameter prompt "Contracts to Include or 'ALL': "  valid "Open Contracts","Closed Contracts","Reservations" default "ALL"
+  string ctour = parameter/uppercase prompt "Deduct tour charges from charge columns?" valid "Y","N" default "N"
+  string crev = parameter/uppercase prompt "Deduct included charges from T&M?" valid "Y","N" default "N"
+  string csort = parameter prompt "Sort by:" valid "Date Out","Class","Location","RA#" default "Date Out"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+
+;
+replace projectrev_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve RRM records and calculate pro-rate factor - setup parameters
+------------------------------------------------------------------------*/
+include "projectrev_i1.inc"
+define
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+ 
+   number ot_hours = system_set:extraactday
+
+   date date_in = if rrm:rastatus=3 then rrm:datein else rrm:datedue
+   number time_in = if rrm:rastatus=3 then rrm:timein else rrm:timedue
+
+   number ot_day = if ((date_in-rrm:dateout>0) and (time_in - rrm:timeout > ot_hours))then 1 else 0 -- 0 if same day 
+
+   number act_days = if date_in - rrm:dateout = 0 then 1 else date_in - rrm:dateout + ot_day
+
+   date dtending = if date_in > dtEDate then dtEDate else date_in
+   date dtstarting = if RRM:DateOut<dtSDate then dtSDate else RRM:DateOut
+   number range_days = if dtEnding = date_in and dtStarting = RRM:DateOut then act_days else
+                          if dtEnding-dtStarting > 0 then dtEnding-dtStarting else 1
+   number pro_rate = range_days divide act_days
+
+   string loc_in = if rrm:rastatus=3 then rrm:locationcodein else rrm:locationcodedue
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = loc_in,
+    null fill on failure
+
+   file inv_link = access InvTrx,
+     set InvTrx:InvTrxID = RRM:InvTrxID,
+      one to one, exact,zero fill on failure
+
+
+where 
+  (rrm:rptloccode = cloc or cloc = "ALL") and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and
+  (rrm:dateout >= dtsdate and rrm:dateout <= dtedate) or (date_in >= dtsdate and date_in <= dtedate) or
+   (rrm:dateout <= dtsdate and date_in >= dtedate)
+  and (rrm:product = cproduct or cproduct = "ALL")
+
+list/domain="rrm"/hold="rrm_hf"
+if (ctype = "Reservations" and rrm:rastatus = 0 and rrm:resstatus = 20) or
+   (ctype = "Open Contracts" and rrm:rastatus = 2) or
+   (ctype = "Closed Contracts" and rrm:rastatus = 3) or
+   (ctype = "ALL" and ((rrm:rastatus = 2 or rrm:rastatus =3) or (rrm:rastatus = 0 and rrm:resstatus =20))) then {
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber 
+  rrm:resnumber 
+  rrm:invclass
+  inv_link:unitnumber
+  rrm:rastatus 
+  rrm:resstatus 
+  rrm:dateout 
+  rrm:datedue 
+  rrm:datein 
+  rrm:rptdate 
+  rrm:locationcodeout 
+  rrm:locationcodedue 
+  rrm:locationcodein 
+  rrm:rptloccode
+  act_days
+  range_days
+  pro_rate
+}
+
+;
+replace projectrev_1.eq
+run/setparameter projectrev_1.eq
+
+run/parameterfile=projectrev_1 projectrev_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve RCMIFT records
+------------------------------------------------------------------------*/
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+list/domain="rrm_hf"/hold="rcmift_hf"
+  rrm_hf:commonid/width=11/keyelement=1.1
+  rcmift_link:type/width=11
+  rcmift_link:code/width=16
+  rcmift_link:total/width=14/decimalplaces=2/name="tot_amt"
+  rcmift_link:rev/width=4
+  rcmift_link:tour/width=4
+;
+run/parameterfile=projectrev_1
+
+/*------------------------------------------------------------------------
+ Create placeholders for missing RCMIFT records
+------------------------------------------------------------------------*/
+list/domain="dummy"/maxrecords=1/hold="rcmift_hf"/append
+  0/width=11/name="commonid"/keyelement=1.1
+  2/width=11/name="type"
+  ""/width=16/name="code"
+  0/width=14/decimalplaces=2/name="tot_amt"
+  0/width=4/name="rev"
+  0/width=4/name="tour"
+followed by
+  0/width=11
+  3/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  4/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  5/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  10/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  51/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  9999/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+;
+run/parameterfile=projectrev_1
+
+/*------------------------------------------------------------------------
+ Create sort logic
+------------------------------------------------------------------------*/
+include "projectrev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+  if csort = "Date Out" then {
+    "rrm_hf:dateout"/newline
+    "ra_num"/newline
+   }
+ if csort = "Location" then {
+    "rrm_hf:locationcodeout/total/count/heading='@'"/newline
+    "ra_num"/newline
+   }
+ if (csort = "Class") then {
+    "rrm_hf:invclass/total/count/heading='@'"/newline
+    "ra_num"/newline
+  }
+  if (csort = "RA#") then {
+    "ra_num"/newline
+  }
+;
+run/parameterfile=projectrev_1
+rrepl "projectrev_i2"
+
+/*------------------------------------------------------------------------
+ Create Top Of logic dynamically
+------------------------------------------------------------------------*/
+include "projectrev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Location" then {
+  "Top of rrm_hf:locationcodeout"/newline
+  "'Location: '+str(rrm_hf:locationcodeout)/newline"/newline
+} else if csort = "Class" then {
+  "Top of rrm_hf:invclass"/newline
+  "'Class: '+str(rrm_hf:invclass)/newline"/newline
+} else {""}
+;
+run/parameterfile=projectrev_1
+rrepl "projectrev_i3"
+
+
+/*------------------------------------------------------------------------
+ Summary or Detail?
+------------------------------------------------------------------------*/
+include "projectrev_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then "/nodetail"  else ""
+;
+run/parameterfile=projectrev_1
+rrepl "projectrev_i4"
+
+/*------------------------------------------------------------------------
+ Summarize RCMIFT records
+------------------------------------------------------------------------*/
+define
+
+string Charge_Type = switch(rcmift_hf:type)
+  case 2 : "CDW"
+  case 3 : "PAC"
+  case 4 : "PEC"
+  case 5 : "SLI"
+  case 10,11 : "Fuel"
+  case 51,52,53 : "Taxes"
+  default : "Other"
+
+
+sum/domain="rcmift_hf"/hold="rcmift2_hf"
+  rcmift_hf:tot_amt
+  if rcmift_hf:rev <> 1 then rcmift_hf:tot_amt/name="incl"
+  if rcmift_hf:rev = 1 and rcmift_hf:tour = 1 then rcmift_hf:tot_amt/name="tour"
+across
+  charge_type/showall/total
+by
+  rcmift_hf:commonid/keyelement=1.1
+
+;
+run/parameterfile=projectrev_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "projectrev_i1.inc"
+define
+
+   file resdb_link = access resdb,
+    set resdb:commonid=rrm_hf:commonid, 
+    one to one, null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+ 
+   file charge_link = access rcmift2_hf,
+    set rcmift2_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+    number dTourNetCDW = if ctour= "N" then charge_link:tot_amt_CDW else charge_link:tot_amt_CDW - charge_link:tour_CDW
+    number dTourNetPAC = if ctour= "N" then charge_link:tot_amt_PAC else charge_link:tot_amt_PAC - charge_link:tour_PAC
+    number dTourNetPEC = if ctour= "N" then charge_link:tot_amt_PEC else charge_link:tot_amt_PEC - charge_link:tour_PEC
+    number dTourNetSLI = if ctour= "N" then charge_link:tot_amt_SLI else charge_link:tot_amt_SLI - charge_link:tour_SLI
+    number dTourNetFuel = if ctour= "N" then charge_link:tot_amt_Fuel else charge_link:tot_amt_Fuel - charge_link:tour_Fuel
+    number dTourNetOth = if ctour= "N" then charge_link:tot_amt_other else charge_link:tot_amt_other - charge_link:tour_other
+
+    number dTourNetFeeTax = if ctour= "N" then charge_link:tot_amt_taxes else charge_link:tot_amt_taxes - charge_link:tour_taxes
+
+-- deduct included charges from buckets, unless they are deduted from T&M
+    number dNetCDW = if crev = "Y" then round(dTourNetCDW*rrm_hf:pro_rate,2) else round((dTourNetCDW - charge_link:incl_CDW)*rrm_hf:pro_rate,2)
+    number dNetPAC = if crev = "Y" then round(dTourNetPAC*rrm_hf:pro_rate,2) else round((dTourNetPAC - charge_link:incl_PAC)*rrm_hf:pro_rate,2)
+    number dNetPEC = if crev = "Y" then round(dTourNetPEC*rrm_hf:pro_rate,2) else round((dTourNetPEC - charge_link:incl_PEC)*rrm_hf:pro_rate,2)
+    number dNetSLI = if crev = "Y" then round(dTourNetSLI*rrm_hf:pro_rate,2) else round((dTourNetSLI - charge_link:incl_SLI)*rrm_hf:pro_rate,2)
+    number dNetFuel = if crev = "Y" then round(dTourNetFuel*rrm_hf:pro_rate,2) else round((dTourNetFuel - charge_link:incl_Fuel)*rrm_hf:pro_rate,2)
+    number dNetOth = if crev = "Y" then round(dTourNetOth*rrm_hf:pro_rate,2) else round((dTourNetOth - charge_link:incl_other)*rrm_hf:pro_rate,2)
+    number dNetFeeTax = if crev = "Y" then round(dTourNetFeeTax*rrm_hf:pro_rate,2) else round((dTourNetFeeTax - charge_link:incl_taxes )*rrm_hf:pro_rate,2)
+
+    number dRAResTMP = if rrm_hf:RAStatus > 0 then rental_link:TotalTPM else resdb_link:TotalTPM
+    number dDiscount = if rrm_hf:RAStatus > 0 then rental_link:rentaldiscountamt else resdb_link:rentaldiscountamt
+
+    number dTotalTPM = if crev = "N" then dRAResTMP else if dRAResTMP - charge_link:incl_total > 0 then dRAResTMP - charge_link:incl_total else 0
+
+    number dTotalTPMRev = if crev = "N" then dTotalTPM else dTotalTPM - charge_link:incl_total
+    number dNetTPM = round((dTotalTPMRev - dDiscount)*rrm_hf:pro_rate,2)
+    number dNetAll = if crev = "Y" then round(charge_link:tot_amt_total*rrm_hf:pro_rate,2) else round((charge_link:tot_amt_total - charge_link:incl_total)*rrm_hf:pro_rate,2)
+    
+    string ra_num = if rrm_hf:rastatus = 0 then rrm_hf:resnumber else rrm_hf:ranumber
+
+
+list/domain="rrm_hf"/nobanner/pageof/title="Projected Revenue Report"/noheadings/duplicates include "projectrev_i4.cq"
+   ra_num/displaywidth=10
+   rrm_hf:invclass/displaywidth=10
+   rrm_hf:unitnumber/displaywidth=10
+   rrm_hf:dateout/displaywidth=12
+   rrm_hf:datedue/displaywidth=12
+   rrm_hf:datein/displaywidth=12
+   rrm_hf:act_days/displaywidth=5
+   rrm_hf:range_days/displaywidth=5
+   dnettpm/displaywidth=12
+   dnetcdw/displaywidth=12
+   dnetpac/displaywidth=12
+   dnetpec/displaywidth=12
+   dnetsli/displaywidth=12
+   dnetfuel/displaywidth=12
+   dnetfeetax/displaywidth=12
+   dnetoth/displaywidth=12
+   dnetall+dnettpm/name="tot_chgs"/displaywidth=12
+ 
+sorted by
+include "projectrev_i2.cq"
+
+include "projectrev_i3.cq"
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Prorated to Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  "Product: " + str(cProduct)+"   "
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  if ctype = "ALL" then "All Contracts/Reservations" else str(ctype)/newline
+  "Tour Deducted: " + str(ctour)+"   Incl Charges Deducted from T&M: "+str(crev)/newline
+  end box /newline=4
+
+   "RA#/Res#"/align=ra_num
+   "Class"/align=rrm_hf:invclass
+   "Unit#"/align=rrm_hf:unitnumber
+   "Date Out"/align=rrm_hf:dateout
+   "Date Due"/align=rrm_hf:datedue
+   "Date In"/align=rrm_hf:datein
+   "Actual"/align=rrm_hf:act_days
+   "Range"/align=rrm_hf:range_days
+   "Net T&M"/align=dnettpm
+   "CDW"/align=dnetcdw
+   "PAC"/align=dnetpac
+   "PEC"/align=dnetpec
+   "SLI"/align=dnetsli
+   "Fuel"/align=dnetfuel
+   "Fees/Taxes"/align=dnetfeetax
+   "Other"/align=dnetoth
+   "Total"/align=tot_chgs/newline
+   "Days"/align=rrm_hf:act_days
+   "Days"/align=rrm_hf:range_days/newline
+
+;
+replace projectrev.eq
+run/parameterfile=projectrev_1 projectrev.eq
+rrepl projectrev
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view projectrev
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Projected Revenue Report" -- Report Title
+   string rptname1    = "projectrev" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "projectrev_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

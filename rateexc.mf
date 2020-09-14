@@ -1,0 +1,309 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Rate Exceptions Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/23/2018
+Modified:
+
+Notes:
+$Workfile: rateexc.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/rateexc.mf $
+$Revision: 2 $
+$History: rateexc.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Check-out Employees: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+;
+run/parameterfile
+rrepl "param_emps"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_emps.cq"
+  string cstatus = multivalue parameter prompt "Contract Status' or 'ALL': " valid "Pending","Open","Closed","Void" default "ALL"
+  string cselect = parameter valid "All contracts","Only contracts with reservations","Only contracts without reservations"  prompt "Contract Selection:" default "All contracts"
+  string cshow = parameter valid "Show all exceptions","Show only exceptions where rate was lowered" prompt "Show Exceptions:" default "Show all exceptions"
+;
+replace rateexc_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve rrm records in range and calculate revenue days
+------------------------------------------------------------------------*/
+
+  include "rateexc_i1.inc"
+
+  string stat_str = switch(rrm:rastatus)
+   case 1 : "Pending" 
+   case 2 : "Open"   
+   case 3 : "Closed"  
+   case 4 : "Void"    
+   default : "Other"
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file res_link = access resdb,
+   set resdb:commonid=rrm:commonid,
+   one to one, generic,zero fill on failure
+
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one,generic,null fill on failure
+
+  file revdays_link = access ratelinera,
+   set ratelinera:commonid=rrm:commonid,
+   one to many,null fill on failure
+
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  file emp_link = access employee,
+   set employee:employeenumber=rental_link:employeenumberout,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+
+
+  
+where 
+
+  (rrm:Product  = cProduct or cProduct = "ALL" ) and
+  (rrm:dateout >= dtSdate and rrm:dateout <= dtEdate)
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (stat_str = cstatus or cstatus = "ALL")
+  and rrm:rastatus > 0 -- no reservations
+
+   
+list/domain="rrm"/nodetail/hold="rateexcp_hf"
+  rrm:commonid
+  res_link:commonid
+  rrm:ranumber
+  rrm:dateout
+  res_link:resnumber
+  res_link:addedbyemployeenumber
+  res_link:ratecode
+  rrm:reservedclass
+  rental_link:employeenumberout
+  emp_name
+  rental_link:ratecode
+  rrm:invclass
+  tot_revdays
+
+sorted by rrm:commonid
+
+end of rrm:commonid
+  rrm:commonid/keyelement=1.1
+  res_link:commonid/name="res_id"
+  rrm:ranumber
+  rrm:dateout
+  res_link:resnumber
+  res_link:addedbyemployeenumber
+  res_link:ratecode/name="ratecoderes"
+  rrm:reservedclass
+  rental_link:employeenumberout
+  emp_name
+  rental_link:ratecode/name="ratecodera"
+  rrm:invclass
+  total[tot_revdays,rrm:commonid]/name="chgdays"
+
+;
+replace rateexc_1.eq
+run/setparameter rateexc_1.eq
+
+run/parameterfile=rateexc_1 rateexc_1.eq
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+  include "rateexc_i1.inc"
+define
+  file rate_link = access ratelinera,
+   set ratelinera:commonid=rateexcp_hf:commonid,
+   one to many,null fill on failure
+
+  string rate_type = if rate_link:units < 24 and rate_link:timeunit = "Hours" then "HR" else
+                     if rate_link:units = 1  and rate_link:timeunit = "Days" then "DA" else
+                     if rate_link:units = 7  and rate_link:timeunit = "Days" then "WK" else
+                     if rate_link:units > 27 and rate_link:timeunit = "Days" then "MO" 
+
+  number rate_orig = rate_link:rateperorig 
+  number rate_res = if rate_link:res = 1 then rate_link:rateper else 0
+  number rate_per = if rate_link:res = 1 then 0 else rate_link:rateper
+
+  string code_flag = if(rateexcp_hf:ratecodera <> rateexcp_hf:ratecoderes and rateexcp_hf:res_id <> 0) then "X" else ""
+  string line_flag = if(rate_link:rateper <> rate_link:rateperorig and rate_link:rateperorig > 0) then "X" else ""
+  number rate_diff = rate_link:rateper - rate_link:rateperorig
+  
+
+
+where ((rateexcp_hf:ratecodera <> rateexcp_hf:ratecoderes and rateexcp_hf:res_id <> 0) or
+      (rate_link:rateper <> rate_link:rateperorig and rate_link:rateperorig > 0) and
+      (rate_diff < 0 or cshow = "Show all exceptions")) and
+      ((rateexcp_hf:res_id <> 0 and cselect = "Only contracts with reservations") or
+       (rateexcp_hf:res_id = 0 and cselect = "Only contracts without reservations") or
+       (cselect = "All contracts")) and
+       (rateexcp_hf:emp_name = cemps or cemps = "ALL")
+
+list/domain="rateexcp_hf"/nobanner/pageof/title="Rate Exception Report"/noreporttotals/noheadings
+  rateexcp_hf:ranumber/displaywidth=10
+  rateexcp_hf:dateout/displaywidth=8
+  rateexcp_hf:resnumber/displaywidth=10
+  rateexcp_hf:addedbyemployeenumber/displaywidth=8
+  rateexcp_hf:ratecoderes/displaywidth=5
+  rateexcp_hf:reservedclass/displaywidth=8
+  rateexcp_hf:employeenumberout/displaywidth=8
+  rateexcp_hf:ratecodera/displaywidth=5
+  rateexcp_hf:invclass/displaywidth=8
+  rateexcp_hf:chgdays/displaywidth=8/center
+  rate_type/displaywidth=4/center
+  rate_res/displaywidth=8
+  rate_orig/displaywidth=8
+  rate_per/displaywidth=8
+  code_flag/displaywidth=8/center
+  line_flag/displaywidth=8/center
+
+
+sorted by
+rateexcp_hf:ranumber
+rate_res
+
+end of rateexcp_hf:ranumber
+""/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) 
+  "    Employee: " + str(cemps)/newline
+  end box /newline=4
+
+  "----- Reservation ----"/align=rateexcp_hf:addedbyemployeenumber/displaywidth=22/left
+  "-----  Contract ------"/align=rateexcp_hf:employeenumberout/displaywidth=22/left
+  "Charged"/align=rateexcp_hf:chgdays
+  "Rate"/align=rate_type
+  "------- Rates -------"/align=rate_per/displaywidth=24
+  "    Changed    "/displaywidth=16/newline
+
+  "RA#"/align=rateexcp_hf:ranumber
+  "Date Out"/align=rateexcp_hf:dateout
+  "Number"/align=rateexcp_hf:resnumber
+  "Emp"/align=rateexcp_hf:addedbyemployeenumber
+  "Rate"/align=rateexcp_hf:ratecoderes
+  "Class"/align=rateexcp_hf:reservedclass
+  "Emp"/align=rateexcp_hf:employeenumberout
+  "Rate"/align=rateexcp_hf:ratecodera
+  "Class"/align=rateexcp_hf:invclass
+  "Days"/align=rateexcp_hf:chgdays
+  "Type"/align=rate_type
+  "Reserved"/align=rate_res
+  "Orig RA"/align=rate_orig
+  "Final Ra"/align=rate_per
+  "Rate Code"/align=code_flag
+  "Rate Line"/align=line_flag/newline
+
+
+
+end of report
+  ""/newline
+  "Total Records: "+str(count[rateexcp_hf:ranumber,report])
+
+;
+replace rateexc.eq
+run/parameterfile=rateexc_1 rateexc.eq
+rrepl rateexc
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view rateexc
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Rate Exceptions Report" -- Report Title
+   string rptname1    = "rateexc" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "rateexc_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

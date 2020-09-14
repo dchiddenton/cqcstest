@@ -1,0 +1,182 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Maintenance Procedure List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/13/2018
+Modified:
+
+Notes:
+$Workfile: maintproclist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/maintproclist.mf $
+$Revision: 2 $
+$History: maintproclist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invmaint"
+if itemnumber=1 then '"'+invmaint:description+'"' else
+   ',"'+invmaint:description+'"'
+
+sorted by
+   invmaint:description
+top of report
+'string proc_list[8192] = multivalue parameter prompt "Maintenance Procedures: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_proclist"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_proclist.cq"
+
+  string sched_list = multivalue parameter prompt "Schedule: "
+   valid "Recurring Date or Mileage",
+         "Recurring Date Only",
+         "Recurring Mileage Only",
+         "Non-Recurring Date or Mileage",
+         "Non-Recurring Date Only",
+         "Non-Recurring Mileage Only",
+         "Non-Recurring Immeadiate",
+         "Recall",
+         "Pending Recall",
+         "To Be Sold" 
+         default ALL
+
+  string notes_flag = parameter/uppercase prompt "Print Notes?" valid "Y","N" default "N"
+
+  string csort = parameter
+    valid "Procedure Type","Description"
+    prompt "Sorted By:"
+    default "Procedure Type"
+;
+replace maintproclist_i1.inc
+/*------------------------------------------------------------------------
+ first procedure - setup parameters
+------------------------------------------------------------------------*/
+include "maintproclist_i1.inc"
+
+define
+ string proc_sched = switch(invmaint:schedule)
+    case 1  : "Recurring Date or Mileage"
+    case 2  : "Recurring Date Only"
+    case 3  : "Recurring Mileage Only"
+    case 4  : "Non-Recurring Date or Mileage"
+    case 5  : "Non-Recurring Date Only"
+    case 6  : "Non-Recurring Mileage Only"
+    case 7  : "Non-Recurring Immeadiate"
+    case 8  : "Recall"
+    case 9  : "Pending Recall"
+    case 10 : "To Be Sold" 
+    default : "N/A"
+
+where (invmaint:description = proc_list or proc_list = "ALL") and
+      (proc_sched = sched_list or sched_list = "ALL")
+
+
+list/domain="invmaint"/noblanklines/nobanner/pageof/title="Maintenance Procedures List"/count
+  invmaint:description 
+  proc_sched/heading="Schedule"
+  invmaint:freqdays/heading="Frequency-Days"
+  invmaint:freqmiles/heading="Frequency - Miles/KM"
+  invmaint:action
+
+followed by
+  if notes_flag = "Y" then {
+  "Notes: "
+  box/width=100/fill/noblanklines
+  invmaint:notes
+  end box
+  " "/newline
+} else {""}
+
+sorted by
+  if csort = "Procedure Type" then invmaint:typeid 
+  invmaint:description
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+   "Schedules: " + str(sched_list)/displaywidth=100/newline
+   "Procedures: " + str(proc_list)/displaywidth=100/newline
+   "Sorted by " + str(csort)/newline
+  end box /newline=4
+
+
+;
+replace maintproclist_1.eq
+run/setparameter maintproclist_1.eq
+
+replace maintproclist.eq
+run/parameterfile=maintproclist_1 maintproclist.eq
+rrepl maintproclist
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view maintproclist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "maintproclist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "maintproclist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

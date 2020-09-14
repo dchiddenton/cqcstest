@@ -1,0 +1,279 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Loaner Vehicle Cycle Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 8/31/2017
+Modified:
+
+Notes:
+$Workfile: loanercycle.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/loanercycle.mf $
+$Revision: 2 $
+$History: loanercycle.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+define
+  file sys_set = access systemsettings,
+    set systemsettings:dbid = ""
+
+where sourcereferrals:sourcecode =  sys_set:dftloanersource
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="sourcereferrals"
+if itemnumber=1 then '"'+sourcereferrals:agentid+'"' else
+   ',"'+sourcereferrals:agentid+'"'
+
+sorted by
+   sourcereferrals:agentid
+top of report
+'string cagent[8192] = multivalue parameter prompt "Advisors: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_advisors"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting out date: " default todaysdate-day(todaysdate)+1 
+  date dtedate = parameter prompt "Ending out date: " default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_advisors.cq"
+  string cratype =  parameter prompt "Open or Closed RAs: " valid "Open","Closed" default "Closed"
+  string csort = parameter prompt "Sort by: " valid "Advisor","Rental Length","RA" default "RA"
+  string csummary = parameter prompt "Summary or Detail?" valid "Detail","Summary" default "Detail";
+
+;
+replace loanercycle_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters 
+------------------------------------------------------------------------*/
+include "loanercycle_i1.inc"
+  
+list/nodefaults/domain="dummy"
+  dtSDate/newline 
+  dtEDate/newline 
+  str(cloc)/newline
+  cLocGroup/newline
+  str(cproduct) /newline
+  cratype /newline
+  str(cagent)/newline
+  csort /newline
+  csummary /newline
+;
+replace loanercycle_1.eq
+run/setparameter loanercycle_1.eq
+
+/*------------------------------------------------------------------------
+ Dynamically setup end of section and summary/detail
+------------------------------------------------------------------------*/
+include "loanercycle_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csort = "Advisor" then {
+'sorted by rrm:agentid'/newline
+'rrm:dateout'/newline
+
+'end of rrm:agentid'/newline 
+  'count[rrm:ranumber,rrm:agentid]/heading="Total Loaners for Advisor " + str(rrm:agentid)'/newline
+  'total[ra_hours,rrm:agentid]/align=c'/newline
+  'total[ra_days,rrm:agentid]/align=d/newline'/newline
+} else if csort = "Rental Length" then {
+'sorted by ra_days/descending'/newline
+'rrm:dateout'/newline
+
+'end of ra_days'/newline 
+  'count[rrm:ranumber,ra_days]/heading="Total Loaners for Length of Rental " + str(ra_days)'/newline
+  'total[ra_hours,ra_days]/align=c'/newline
+  'total[ra_days,ra_days]/align=d/newline'/newline
+} else {
+'sorted by rrm:ranumber'/newline
+}
+;
+
+run/parameterfile=loanercycle_1
+rrepl loanercycle_i2
+
+include "loanercycle_i1.inc"
+
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if csummary = "Summary" then "/nodetail"  else ""
+;
+
+run/parameterfile=loanercycle_1
+rrepl loanercycle_i3
+
+/*------------------------------------------------------------------------
+ Output report
+------------------------------------------------------------------------*/
+ viewpoint native;
+
+include "loanercycle_i1.inc"
+
+define
+
+  number time_now = val(str(systemtime,"hh.mm"))/decimalplaces=2
+  number ra_days = if rrm:rastatus = 3 then (rrm:datein - rrm:dateout) else (todaysdate - rrm:dateout)
+  number ra_hours_bal = if rrm:rastatus = 3 then (rrm:timein - rrm:timeout) else (time_now - rrm:timeout)
+  number ra_hours = round((ra_days * 24) + ra_hours_bal,0)
+  number tot_days = dtedate - dtsdate
+  number we = tot_days div 7
+  number ewe = if weekday(dtedate) < weekday(dtsdate) then 1 else 0
+  number tot_we = we + ewe
+  number work_days = tot_days - (tot_we * 2)
+  
+  file sys_set = access systemsettings,
+    set systemsettings:dbid = ""
+
+  file inv_link = access invtrx,
+   set invtrx:commonid=rrm:commonid,
+   one to one,generic,reverse, null fill on failure
+
+  file renter_link = access renterra,
+   set renterra:commonid=rrm:commonid,
+   one to one, null fill on failure
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  number miles_driven = if (inv_link:odometerin - inv_link:odometerout) < 0 then 0 else (inv_link:odometerin - inv_link:odometerout)
+  
+where 
+  ( rrm:dateout >= 
+    dtsdate
+  and rrm:dateout <= 
+    dtedate )
+  and ((rrm:rastatus = 2 and cratype = "Open") or (rrm:rastatus = 3 and cratype = "Closed"))
+  and (rrm:locationcodeout = cLoc or cLoc ="ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+  and (rrm:sourcecode =  sys_set:dftloanersource or sys_set:dftloanersource = "")
+  and (rrm:agentid = cagent or cagent = "ALL")
+
+list/title="Loaner Vehicle Cycle Report"/pageof/noreporttotals/nobanner/pagelength=70/domain="rrm" include "loanercycle_i3.cq"
+
+  rrm:ranumber 
+  rrm:customerlastname + ", " + rrm:customerfirstname/heading="Renter's Name"/displaywidth=25/name="a" 
+  renter_link:homephonenumber include "phone_mask.cq"
+  renter_link:workphonenumber/heading="Work Phone" include "phone_mask.cq"
+  inv_link:unitnumber/heading="Unit#"/width=10
+  rrm:dateout/name="b" 
+  rrm:timeout 
+  ra_hours/heading="Hours"/width=5/total/name="c" 
+  ra_days/heading="Days"/width=5/total/name="d" 
+  rrm:agentid/heading="Advisor"/displaywidth=10
+  rrm:locationcodeout/heading="Loc Out"
+  rrm:company/heading="Company"/displaywidth=10
+  miles_driven/hidden
+
+include "loanercycle_i2.cq"
+
+end of report 
+  "Grand Total"/newline
+  count[rrm:ranumber]/heading="Total Loaners"
+  total[ra_hours]/align=c
+  total[ra_days]/align=d/newlines=2
+  "Working Days in Period"/align=a
+  work_days/noheading/align=b/right/width=8/newline
+  "Days on Contract"/align=a
+  total[ra_days]/noheading/align=b/right/width=8/newline
+  "Total Contracts in Period"/align=a
+  count[rrm:ranumber]/noheading/align=b/right/width=8/newline
+  "Average Days per Contract"/align=a
+  round(total[ra_days] divide count[rrm:ranumber],1)/noheading/align=b/right/width=8/newline
+  "Total Contract Miles"/align=a
+  running total[miles_driven]/noheading/align=b/right/width=8/newline
+  "Average Miles per Closed Contract"/align=a
+  round(running total[miles_driven] divide count[rrm:ranumber],1)/noheading/align=b/right/width=8/newline
+  "Total Contract Hours"/align=a
+  total[ra_hours]/noheading/align=b/right/width=8/newline
+  "Average Hours per Contract"/align=a
+  round(total[ra_hours] divide count[rrm:ranumber],1)/noheading/align=b/right/width=8
+
+top of page
+   "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  "Product: " + str(cProduct)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Sorted by: "+csort+"   "+ str(cratype)+" Contracts"
+  end box/newline=4
+
+;
+
+replace loanercycle.eq
+run/parameterfile=loanercycle_1 loanercycle.eq
+rrepl loanercycle
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view loanercycle
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Loaner Vehicle Cycle Report" -- Report Title
+   string rptname1    = "loanercycle" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "loanercycle_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

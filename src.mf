@@ -1,0 +1,600 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Source of Business Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 5/23/2018
+Modified:
+
+Notes:
+$Workfile: src.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/src.mf $
+$Revision: 2 $
+$History: src.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="sources"
+if itemnumber=1 then '"'+sources:description+'"' else
+   ',"'+sources:description+'"'
+
+sorted by
+   sources:description
+top of report
+'string csource[10240] = multivalue parameter prompt "Source Codes: "'
+"Valid"
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_sources"
+
+define  -- retieve company base currency
+ file sys_set = access systemsettings,
+    set systemsettings:dbid = ""
+ string base_curr = if sys_set:basecurrency = "" then "N/A" else sys_set:basecurrency
+
+list/domain="dummy"/nodefaults/nobanner/noendofreport
+'"'+base_curr+'"'
+;
+run/parameterfile
+rrepl base_curr
+
+define
+   
+  string base_curr = str(include "base_curr.cq")
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="currencies"
+if itemnumber=1 then '"'+currencies:currency+'"' else
+   ',"'+currencies:currency+'"'
+
+sorted by
+   currencies:currency
+top of report
+'string ccurrency[10240] = parameter prompt "Currency: "'
+"Valid"
+end of report
+if itemnumber = 0 then '"'+base_curr+'"'
+'Default "'+base_curr+'"'
+;
+run/parameterfile
+rrepl "param_currency"
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_sources.cq"
+  string creferrals[10240] = range parameter prompt "Referral Codes (First..Last): " default "ALL"
+  string cagents[10240] = range parameter prompt "Agent IDs (First..Last): " default "ALL"
+  string cselectby[1024] =  parameter prompt "Select by: " valid "Date In","Date Out" default "Date In"
+  include "param_currency.cq"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string csbreak = parameter/uppercase prompt "Page Break after each Source? " valid "Y","N" default "N"
+  string crbreak = parameter/uppercase prompt "Page Break after each Referral? " valid "Y","N" default "N"
+  string caddress = parameter/uppercase prompt "Print Address for each Referral? " valid "Y","N" default "N"
+  string cpost = parameter/uppercase prompt "Post to Financials? " valid "Y","N" default "N"
+;
+replace src_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve applicable contracts for source/referral/agentid
+------------------------------------------------------------------------*/
+
+include "src_i1.inc"
+
+define
+
+   file system_set = access systemsettings,
+    set systemsettings:dbid=""
+ 
+   number ot_hours = system_set:extraactday
+
+   date date_in = if rrm:rastatus=3 then rrm:datein else rrm:datedue
+   number time_in = if rrm:rastatus=3 then rrm:timein else rrm:timedue
+
+   number ot_day = if ((date_in-rrm:dateout>0) and (time_in - rrm:timeout > ot_hours))then 1 else 0 -- 0 if same day 
+
+   number act_days = if date_in - rrm:dateout = 0 then 1 else date_in - rrm:dateout + ot_day
+
+  file alt_locgroup1 = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+  file alt_locgroup2 = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:rptloccode,
+    null fill on failure
+
+  file source_link = access sources,
+    set sources:sourcecode=rrm:sourcecode,
+    one to one,null fill on failure
+ 
+  file referral_link = access sourcereferrals,
+    set sourcereferrals:referralcode=rrm:referralcode,
+    sourcereferrals:agentid=rrm:agentid,
+    one to one,null fill on failure
+
+
+where (((rrm:dateout >= dtSdate and rrm:dateout <= dtEdate) and (cselectby = "Date Out")) or
+       ((rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate) and (cselectby = "Date In"))) and 
+       rrm:product = cproduct and 
+       ((rrm:locationcodeout = cLoc and cselectby = "Date Out") or (rrm:rptloccode = cloc and cselectby = "Date In") or cloc = "ALL") and 
+       (cLocGroup = "" or (cLocGroup = alt_locgroup1:groupname and cselectby = "Date Out") or (cLocGroup = alt_locgroup2:groupname and cselectby = "Date In")) and
+       rrm:rastatus one of 1,2,3
+ 
+
+list/domain="rrm"/hold="rrm_hf"
+if (((rrm:sourcecode = csource or csource = "ALL") and 
+    (rrm:referralcode = creferrals or creferrals = "ALL") and
+    (rrm:agentid = cagents or cagents = "ALL")) and
+    (rrm:rrmcurrency = ccurrency or ccurrency = "" or rrm:rrmcurrency = "")) then {
+rrm:commonid/keyelement=1.1
+rrm:ranumber
+rrm:customerlastname
+rrm:dateout
+rrm:datedue
+rrm:datein
+rrm:rptdate
+rrm:rrmcurrency
+rrm:sourcecode
+rrm:referralcode
+source_link:description
+referral_link:apvend
+referral_link:name/name="referralname"
+referral_link:address1
+referral_link:address2
+referral_link:city
+referral_link:state
+referral_link:zipcode
+referral_link:phone
+referral_link:faxnumber
+referral_link:agentname
+source_link:commissionable
+rrm:agentid
+act_days
+}
+
+;
+replace src_1.eq
+run/setparameter src_1.eq
+
+run/parameterfile=src_1 src_1.eq
+
+/*------------------------------------------------------------------------
+ Setup runtime parameter includes
+------------------------------------------------------------------------*/
+
+include "src_i1.inc"
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csummary = "Summary" then 
+"/nodetail" else ""
+;
+run/parameterfile=src_1
+rrepl "src_i2"
+
+include "src_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if csbreak = "Y" then 
+"/page" else ""
+;
+run/parameterfile=src_1
+rrepl "src_i3"
+
+include "src_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if crbreak = "Y" then 
+"/page" else ""
+;
+run/parameterfile=src_1
+rrepl "src_i4"
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Retrieve rcmift records for all rrm records
+------------------------------------------------------------------------*/
+
+define
+
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+list/domain="rrm_hf"/hold="rcmift_hf"
+  rrm_hf:commonid/width=11/keyelement=1.1
+  rcmift_link:type/width=11
+  rcmift_link:code/width=16
+  rcmift_link:total/width=14/decimalplaces=2/name="tot_amt"
+  rcmift_link:rev/width=4
+  rcmift_link:tmpack/width=4
+;
+run/parameterfile=src_1
+
+/*------------------------------------------------------------------------
+ Create dummy record for missing rcmift records
+------------------------------------------------------------------------*/
+list/domain="dummy"/maxrecords=1/hold="rcmift_hf"/append
+  0/width=11/name="commonid"/keyelement=1.1
+  2/width=11/name="type"
+  ""/width=16/name="code"
+  0/width=14/decimalplaces=2/name="tot_amt"
+  0/width=4/name="rev"
+  0/width=4/name="tmpack"
+followed by
+  0/width=11
+  3/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  4/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  5/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  10/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  51/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+followed by
+  0/width=11
+  9999/width=11
+  ""/width=16
+  0/width=14/decimalplaces=2
+  0/width=4
+  0/width=4
+;
+run/parameterfile=src_1
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Consolidate misc charges/taxes by commonid
+------------------------------------------------------------------------*/
+define
+
+string Charge_Type = switch(rcmift_hf:type)
+  case 2,3,4,5  : "Coverages"
+  case 10,11    : "Fuel"
+  case 51,52,53 : "Taxes"
+  default       : "Other"
+
+where rcmift_hf:tmpack = 0
+
+sum/domain="rcmift_hf"/hold="rcmift2_hf"
+  rcmift_hf:tot_amt
+across
+  charge_type/showall/total
+by
+  rcmift_hf:commonid/keyelement=1.1
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Calculate exchange rate totals
+------------------------------------------------------------------------*/
+include "src_i1.inc"
+
+define
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+   file currency_link = access currencyrates,
+    set currencyrates:currency=ccurrency,
+    currencyrates:date=rental_link:dateadded,
+    one to one, reverse,approximate,zero fill on failure  -- exchange rate based on time of rental added
+
+  number exchrate = if currency_link:exchangerate = 0 then 1 else currency_link:exchangerate
+ 
+   file charge_link = access rcmift2_hf,
+    set rcmift2_hf:commonid=rrm_hf:commonid,
+    one to one, zero fill on failure
+
+   file source_link = access sourcereferrals,
+    set sourcereferrals:sourcecode=rrm_hf:sourcecode,
+    sourcereferrals:referralcode=rrm_hf:referralcode,
+    one to one,generic, null fill on failure
+
+  number cov_tot =  round(charge_link:tot_amt_coverages*exchrate,2)
+  number fuel_tot = round(charge_link:tot_amt_fuel*exchrate,2)
+  number tax_tot = round(charge_link:tot_amt_taxes*exchrate,2)
+  number oth_tot = round(charge_link:tot_amt_other*exchrate,2)
+
+   number net_tm = round((rental_link:totaltime + rental_link:totalmiles - rental_link:rentaldiscountamt)*exchrate,2)
+   number tot_rev = round((net_tm + charge_link:tot_amt_total)*exchrate,2)
+
+   number total_comm = if rrm_hf:commissionable = 0 then 0 else
+                         if source_link:commissiontype = 1 then round(net_tm * (source_link:commissionamount divide 100),2) else
+                         if source_link:commissiontype = 2 then round((tot_rev - tax_tot) * (source_link:commissionamount divide 100),2) else
+                         if source_link:commissiontype = 1 then round(source_link:commissionamount*exchrate,2) else 0
+     
+
+list/domain="rrm_hf"/hold="src_hf"
+  rrm_hf:commonid /keyelement=1.1
+  rrm_hf:ranumber 
+  rrm_hf:customerlastname
+  rrm_hf:dateout 
+  rrm_hf:datedue 
+  rrm_hf:datein 
+  rrm_hf:rptdate 
+  rrm_hf:sourcecode 
+  rrm_hf:description
+  rrm_hf:referralcode 
+  rrm_hf:agentid 
+  rrm_hf:apvend
+  rrm_hf:referralname
+  rrm_hf:address1
+  rrm_hf:address2
+  rrm_hf:city
+  rrm_hf:zipcode
+  rrm_hf:state
+  rrm_hf:phone
+  rrm_hf:faxnumber
+  rrm_hf:agentname
+  rrm_hf:act_days
+  net_tm
+  cov_tot
+  oth_tot
+  fuel_tot
+  tax_tot
+  tot_rev
+  total_comm
+
+sorted by 
+rrm_hf:sourcecode
+rrm_hf:referralcode
+rrm_hf:ranumber
+
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Create XML posting file
+------------------------------------------------------------------------*/
+list/domain="src_hf"/noheadings/xml="srcpost"
+  src_hf:commonid /name="rentaldb_commonid"
+  src_hf:total_comm/name="rentaldb_commissionamt"
+  todaysdate/mask="mm.dd.yy"/name="rentaldb_commissionpdate"
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Create G/L journal
+------------------------------------------------------------------------*/
+define
+   file gl_comm = access glaccts,
+    set glaccts:type=1,glaccts:id="COMM",
+    one to one,null fill on failure
+
+   file gl_ap = access glaccts,
+    set glaccts:type=1,glaccts:id="AP",
+    one to one,null fill on failure
+
+where src_hf:total_comm <> 0
+
+list/domain="src_hf"/noheadings/xml="srcexport"
+
+  src_hf:commonid /name="commonid"
+  gl_comm:glacct /name="glacct"
+  src_hf:total_comm*-1/name="commissionamt"
+  todaysdate/mask="mm.dd.yy"/name="journaldate"
+
+end of report
+  gl_ap:glacct
+  total[src_hf:total_comm]
+  todaysdate/mask="mm.dd.yy"
+
+;
+run/parameterfile=src_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "src_i1.inc"
+
+define
+   date date_disp = if cselectby = "Date In" then src_hf:rptdate else src_hf:dateout
+   string source_disp = str(src_hf:sourcecode)+" - "+str(src_hf:description)
+
+list/domain="src_hf"/nobanner/pageof/title="Source of Business Report"/noheadings/duplicates/noreporttotals include "src_i2.cq"
+  src_hf:ranumber/displaywidth=10
+  src_hf:customerlastname/displaywidth=20
+  date_disp/displaywidth=12
+  src_hf:act_days/displaywidth=5
+  src_hf:net_tm/displaywidth=12
+  src_hf:cov_tot/displaywidth=12
+  src_hf:oth_tot/displaywidth=12
+  src_hf:fuel_tot/displaywidth=12
+  src_hf:tax_tot/displaywidth=12
+  src_hf:tot_rev/displaywidth=12
+  src_hf:total_comm/displaywidth=12
+
+sorted by
+  src_hf:sourcecode include "src_i3.cq"
+  src_hf:referralcode include "src_i4.cq"
+  src_hf:agentid
+  src_hf:ranumber
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+  box/center/column=1
+   "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+   "Product: " + str(cProduct)+"   "
+   "Currency: " + str(ccurrency)/newline
+   if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  end box /newline=4
+
+  "RA#"/align=src_hf:ranumber
+  "Renter"/align=src_hf:customerlastname
+  "Date"/align=date_disp
+  "Days"/align=src_hf:act_days
+  "T&M"/align=src_hf:net_tm
+  "Coverages"/align=src_hf:cov_tot
+  "Other"/align=src_hf:oth_tot
+  "Fuel"/align=src_hf:fuel_tot
+  "Tax"/align=src_hf:tax_tot
+  "Revenue"/align=src_hf:tot_rev
+  "Commission"/align=src_hf:total_comm/newline
+
+top of src_hf:sourcecode
+  "Source: "+source_disp/newline
+top of src_hf:agentid
+  "Referral: "+str(src_hf:referralname)/newline
+  "Agent ID: "+str(src_hf:agentid)+" - "+str(src_hf:agentname)/newline
+if caddress = "Y" then {
+  box/column=9/noblanklines
+    src_hf:address1/newline
+    src_hf:address2/newline
+    src_hf:city+" "+src_hf:state+" "+src_hf:zipcode/newline
+    src_hf:phone/newline
+  end box
+}  
+  
+end of src_hf:agentid
+  ""/newline
+  "Agent Totals: "
+  count[src_hf:ranumber,src_hf:agentid]/align=date_disp
+  total[src_hf:act_days,src_hf:agentid]/align=src_hf:act_days
+  total[src_hf:net_tm,src_hf:agentid]/align=src_hf:net_tm
+  total[src_hf:cov_tot,src_hf:agentid]/align=src_hf:cov_tot
+  total[src_hf:oth_tot,src_hf:agentid]/align=src_hf:oth_tot
+  total[src_hf:fuel_tot,src_hf:agentid]/align=src_hf:fuel_tot
+  total[src_hf:tax_tot,src_hf:agentid]/align=src_hf:tax_tot
+  total[src_hf:tot_rev,src_hf:agentid]/align=src_hf:tot_rev
+  total[src_hf:total_comm,src_hf:agentid]/align=src_hf:total_comm/newline
+
+end of src_hf:referralcode
+  "Referral Totals: "
+  count[src_hf:ranumber,src_hf:referralcode]/align=date_disp
+  total[src_hf:act_days,src_hf:referralcode]/align=src_hf:act_days
+  total[src_hf:net_tm,src_hf:referralcode]/align=src_hf:net_tm
+  total[src_hf:cov_tot,src_hf:referralcode]/align=src_hf:cov_tot
+  total[src_hf:oth_tot,src_hf:referralcode]/align=src_hf:oth_tot
+  total[src_hf:fuel_tot,src_hf:referralcode]/align=src_hf:fuel_tot
+  total[src_hf:tax_tot,src_hf:referralcode]/align=src_hf:tax_tot
+  total[src_hf:tot_rev,src_hf:referralcode]/align=src_hf:tot_rev
+  total[src_hf:total_comm,src_hf:referralcode]/align=src_hf:total_comm/newline
+
+end of src_hf:sourcecode
+  "Source Totals: "
+  count[src_hf:ranumber,src_hf:sourcecode]/align=date_disp
+  total[src_hf:act_days,src_hf:sourcecode]/align=src_hf:act_days
+  total[src_hf:net_tm,src_hf:sourcecode]/align=src_hf:net_tm
+  total[src_hf:cov_tot,src_hf:sourcecode]/align=src_hf:cov_tot
+  total[src_hf:oth_tot,src_hf:sourcecode]/align=src_hf:oth_tot
+  total[src_hf:fuel_tot,src_hf:sourcecode]/align=src_hf:fuel_tot
+  total[src_hf:tax_tot,src_hf:sourcecode]/align=src_hf:tax_tot
+  total[src_hf:tot_rev,src_hf:sourcecode]/align=src_hf:tot_rev
+  total[src_hf:total_comm,src_hf:sourcecode]/align=src_hf:total_comm/newline=2
+
+end of report
+  ""/newline=2
+  "Report Totals: "
+  count[src_hf:ranumber,report]/align=date_disp
+  total[src_hf:act_days,report]/align=src_hf:act_days 
+  total[src_hf:net_tm,report]/align=src_hf:net_tm
+  total[src_hf:cov_tot,report]/align=src_hf:cov_tot
+  total[src_hf:oth_tot,report]/align=src_hf:oth_tot
+  total[src_hf:fuel_tot,report]/align=src_hf:fuel_tot
+  total[src_hf:tax_tot,report]/align=src_hf:tax_tot
+  total[src_hf:tot_rev,report]/align=src_hf:tot_rev
+  total[src_hf:total_comm,report]/align=src_hf:total_comm
+;
+
+replace src.eq
+run/parameterfile=src_1 src.eq
+rrepl src
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+ view src
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+include "src_i1.inc"
+define
+   string action      = if cpost = "Y" then "Post" else "Report" -- Post or Report
+   string rptdesc     = "Source of Business Report" -- Report Title
+   string rptname1    = "src" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "src_1.par" -- parameter.par file
+   string xmlname     = if cpost = "Y" then "srcpost" else "" -- xml for posting if applicable
+   string exportname  = if cpost = "Y" then "srcexport" else "" -- posting export file if applicable
+   string startdate   = if cpost = "Y" then str(dtsdate) else ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = if cpost = "Y" then str(dtedate) else "" -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+if cpost="Y" then xmlname else ""/newline
+if cpost="Y" then exportname else ""/newline
+if cpost="Y" then startdate else ""/newline
+if cpost="Y" then enddate else ""/newline
+;
+run/parameterfile=src_1
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+

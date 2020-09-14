@@ -1,0 +1,436 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2020.
+  All rights reserved.
+
+  Report: Incremental Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/8/2020
+Modified:
+
+Notes:
+$Workfile: kciincr.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/kciincr.mf $
+$Revision: 1 $
+$History: kciincr.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 1/10/20    Time: 3:10p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+viewpoint native;
+define
+   number num_params = countfields(kcictrl:sources,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="kcictrl"
+if i_counter:position <= num_params then
+  if i_counter:position=1 then '"'+subfield(kcictrl:sources,",",i_counter:position)+'"' else
+   ',"'+subfield(kcictrl:sources,",",i_counter:position)+'"'
+
+top of report
+'string csources[8192] = multivalue parameter/noall prompt "Sources: "'
+"Valid "
+
+;
+run/parameterfile
+rrepl "param_sources"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_emps.cq"
+  include "param_sources.cq"
+  string cconsolidate = parameter/uppercase prompt "Consolidate Sources?" valid "Y","N" default "N"
+  string cincltm = parameter/uppercase prompt "Include T&M Charges?" valid "Y","N" default "Y"
+  string cyield = parameter prompt "Calculate by Actual or Charged Days: " valid "Actual","Charged" default "Charged"
+  string csummary = parameter prompt "Detail or Summary? " valid "Detail","Summary" default "Detail"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace kciincr_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve RRM records - setup parameters
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+define
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, zero fill on failure
+
+  file emp_link = access employee,
+   set employee:employeenumber=rental_link:addedbyemployeenumber,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+ 
+where (rrm:rptdate >= dtSdate and rrm:rptdate <= dtEdate) and
+      (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname) and
+      rrm:rastatus=3
+     
+
+list/domain="rrm"/hold="rrm_hf"
+if ((emp_name = cemps or cemps = "ALL")and (rrm:sourcecode = csources) and (rental_link:commonid <> 0)) then {
+  rrm:commonid/keyelement=1.1
+  rrm:dateout
+  rrm:datein
+  rrm:ranumber
+  rrm:locationcodeout
+  rrm:product
+  rrm:sourcecode
+  rrm:customerlastname
+  rrm:rentedasclass
+  rental_link:addedbyemployeenumber
+}
+;
+replace kciincr_1.eq
+run/setparameter kciincr_1.eq
+
+run/parameterfile=kciincr_1 kciincr_1.eq
+
+/*------------------------------------------------------------------------
+ Calculate incremental revenue, rev days, ra count
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+define
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+
+  number rev_days = (rcmift_link:chgdays + (rcmift_link:chgweeks * 7) + (rcmift_link:chgmonths * 30))
+
+  string addedbyemployeenumber = if csummary = "Detail" then rrm_hf:addedbyemployeenumber else "ALL"
+  string sourcecode = if cconsolidate = "N" then rrm_hf:sourcecode else "ALL" 
+
+
+list/domain="rrm_hf"/nodetail/hold="kciincr1_hf"
+if rcmift_link:comm = 1 then {
+  addedbyemployeenumber
+  sourcecode
+  rrm_hf:commonid
+  rcmift_link:code
+  rcmift_link:total
+  rev_days  
+  1/name="ra_count"
+}
+
+sorted by
+  addedbyemployeenumber
+  sourcecode
+  rcmift_link:code
+
+end of rcmift_link:code
+if ((running total[rev_days,rcmift_link:code] <> 0) and (running total[rcmift_link:total,rcmift_link:code] <> 0)) then {
+  addedbyemployeenumber/keyelement=1.1
+  sourcecode/keyelement=1.2
+  rcmift_link:code
+  running total[ra_count,rcmift_link:code]/name="racount"
+  running total[rev_days,rcmift_link:code]/name="revdays"
+  running total[rcmift_link:total,rcmift_link:code]/name="increv"
+}
+;
+run/parameterfile=kciincr_1
+
+/*------------------------------------------------------------------------
+ Calculate T&M, contract days
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+define
+
+  file rarate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   with ratelinera:res=0 and 
+  (ratelinera:type = "Reg" or ratelinera:type = "Ex"),
+   one to many, null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm_hf:commonid,
+    one to one, null fill on failure
+
+  number tot_revdays = if (rarate_link:res = 0 and rarate_link:totunits <>
+    0) then (rarate_link:minsperx div 1440) * rarate_link:totunits else 0
+
+  number tot_actdays = if (rrm_hf:datein - rrm_hf:dateout = 0) then 1 else (rrm_hf:datein - rrm_hf:dateout)
+
+  string addedbyemployeenumber = if csummary = "Detail" then rrm_hf:addedbyemployeenumber else "ALL"
+  string sourcecode = if cconsolidate = "N" then rrm_hf:sourcecode else "ALL"
+
+
+list/domain="rrm_hf"/nodetail/hold="kciincr2_hf"
+  rrm_hf:commonid
+  rarate_link:totcharge
+  if rarate_link:lineno = 1 then rental_link:rentaldiscountamt else 0/name="discount"
+  if rarate_link:lineno = 1 then tot_actdays/name="actdays"
+  tot_revdays
+  1/name="ra_count"
+
+
+sorted by
+ addedbyemployeenumber
+ sourcecode
+
+
+end of sourcecode
+  addedbyemployeenumber/keyelement=1.1
+  sourcecode/keyelement=1.2
+  total[rarate_link:totcharge,sourcecode]-total[discount,sourcecode]/name="nettm"
+  if cyield = "Actual" then total[actdays,sourcecode] else total[tot_revdays,sourcecode]/name="tmrevdays"
+  running total[ra_count,sourcecode]/name="tmracount"
+;
+run/parameterfile=kciincr_1 
+
+/*------------------------------------------------------------------------
+ Combine data and calculate pen% and yield
+------------------------------------------------------------------------*/
+define
+  file tm_link = access kciincr2_hf,
+   set kciincr2_hf:addedbyemployeenumber=kciincr1_hf:addedbyemployeenumber,
+   kciincr2_hf:sourcecode=kciincr1_hf:sourcecode,
+   one to one
+
+list/domain="kciincr1_hf"/noheadings/hold="kciincr_hf"
+  kciincr1_hf:addedbyemployeenumber 
+  kciincr1_hf:sourcecode 
+  kciincr1_hf:code 
+  kciincr1_hf:racount
+  kciincr1_hf:increv
+  kciincr1_hf:revdays 
+  round((kciincr1_hf:racount divide tm_link:tmracount)*100,1)/name="penpct"
+  round((kciincr1_hf:increv divide tm_link:tmrevdays),2)/name="yield"
+  2/name="sortorder"
+
+sorted by
+  kciincr1_hf:addedbyemployeenumber
+  kciincr1_hf:sourcecode
+
+top of kciincr1_hf:sourcecode
+  kciincr1_hf:addedbyemployeenumber 
+  kciincr1_hf:sourcecode
+  "T&M" 
+  tm_link:tmracount
+  tm_link:nettm
+  tm_link:tmrevdays
+  100
+  round((tm_link:nettm divide tm_link:tmrevdays),2)
+  1
+;
+run/parameterfile=kciincr_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+
+define
+  number totdays = if kciincr_hf:sortorder = 1 then kciincr_hf:revdays else 0
+  number totras = if kciincr_hf:sortorder = 1 then kciincr_hf:racount else 0
+
+  file emp_link = access employee,
+   set employee:employeenumber=kciincr_hf:addedbyemployeenumber,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+list/domain="kciincr_hf"/nobanner/pageof/title="Incremental Report"/noheadings/noreporttotals
+
+  if kciincr_hf:sortorder=1 then 
+      if cincltm = "Y" then "Contracts/T&M: " else "Contracts: " else kciincr_hf:code /name="a"/column=10
+  kciincr_hf:racount/displaywidth=8
+  if kciincr_hf:sortorder=2 then kciincr_hf:penpct/mask="ZZ9.9%"/name="b"
+  kciincr_hf:revdays
+ if (cincltm = "Y" or kciincr_hf:sortorder <> 1) then {
+  kciincr_hf:increv /displaywidth=14/decimalplaces=2
+  kciincr_hf:yield /displaywidth=14/decimalplaces=2
+}
+
+sorted by
+  kciincr_hf:addedbyemployeenumber/page
+  kciincr_hf:sourcecode
+  kciincr_hf:sortorder/newlines
+  kciincr_hf:code
+
+top of kciincr_hf:addedbyemployeenumber
+  "Employee: "+str(kciincr_hf:addedbyemployeenumber)+"  "+str(emp_name)/newline
+top of kciincr_hf:sourcecode
+  "Source Code: "+str(kciincr_hf:sourcecode)/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Yield Calculated by: "+str(cyield)+" Days"/newline
+  end box /newline=4
+
+  "Incr Code"/align=a
+  "# Sold"/align=kciincr_hf:racount
+  "Pen. %"/align=b
+  "Days"/align=kciincr_hf:revdays  
+  "Revenue"/align=kciincr_hf:increv 
+  "Yield"/align=yield/newline
+
+end of kciincr_hf:addedbyemployeenumber
+  ""/newline
+  "Total Contracts:"
+  total[totras,kciincr_hf:addedbyemployeenumber]/align=kciincr_hf:racount
+  total[totdays,kciincr_hf:addedbyemployeenumber]/align=kciincr_hf:revdays  
+  total[kciincr_hf:increv,kciincr_hf:addedbyemployeenumber]/align=kciincr_hf:increv
+  round(total[kciincr_hf:increv,kciincr_hf:addedbyemployeenumber] divide total[totdays,kciincr_hf:addedbyemployeenumber],2) /align=kciincr_hf:yield/newline
+
+;
+replace kciincr.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+
+define
+  number totdays = if kciincr_hf:sortorder = 1 then kciincr_hf:revdays else 0
+  number totras = if kciincr_hf:sortorder = 1 then kciincr_hf:racount else 0
+
+  file emp_link = access employee,
+   set employee:employeenumber=kciincr_hf:addedbyemployeenumber,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+list/domain="kciincr_hf"/nobanner/pagelength=0/title="Incremental Report"/noheadings/noreporttotals
+
+  kciincr_hf:addedbyemployeenumber
+  kciincr_hf:sourcecode
+
+  if kciincr_hf:sortorder=1 then "!TM" else kciincr_hf:code /name="a"/column=10
+  kciincr_hf:racount/displaywidth=8
+  if kciincr_hf:sortorder=2 then kciincr_hf:penpct/mask="ZZ9.9%"/name="b"
+  kciincr_hf:revdays
+  kciincr_hf:increv /displaywidth=14/decimalplaces=2
+  kciincr_hf:yield /displaywidth=14/decimalplaces=2
+
+sorted by
+  kciincr_hf:addedbyemployeenumber
+  kciincr_hf:sourcecode
+  kciincr_hf:sortorder
+  kciincr_hf:code
+
+
+top of page
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Yield Calculated by: "+str(cyield)+" Days"/newline
+  end box /newline=4
+
+  "Agent"/align=kciincr_hf:addedbyemployeenumber
+  "Source"/align=kciincr_hf:sourcecode
+  "Incr Code"/align=a
+  "# Sold"/align=kciincr_hf:racount
+  "Pen. %"/align=b
+  "Days"/align=kciincr_hf:revdays  
+  "Revenue"/align=kciincr_hf:increv 
+  "Yield"/align=yield/newline
+;
+replace kciincr_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "kciincr_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=kciincr_1 kciincr.eq"/newline
+} else {
+"run/xls/parameterfile=kciincr_1 kciincr_xl.eq"/newline
+}
+"rrepl kciincr"/newline
+"view"/newline 
+;
+run/parameterfile=kciincr_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "kciincr" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "kciincr_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

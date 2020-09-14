@@ -1,0 +1,516 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Daily Rental Log
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 12/18/2019
+Modified:
+
+Notes:
+$Workfile: kcirntlog.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/kcirntlog.mf $
+$Revision: 2 $
+$History: kcirntlog.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 1/08/20    Time: 10:14a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fixed Excel export sending wrong file output
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 1/03/20    Time: 3:20p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+viewpoint native;
+define
+   number num_params = countfields(kcictrl:sources,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="kcictrl"
+if i_counter:position <= num_params then
+  if i_counter:position=1 then '"'+subfield(kcictrl:sources,",",i_counter:position)+'"' else
+   ',"'+subfield(kcictrl:sources,",",i_counter:position)+'"'
+
+top of report
+'string csources[8192] = multivalue parameter/noall prompt "Sources: "'
+"Valid "
+
+;
+run/parameterfile
+rrepl "param_sources"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_emps.cq"
+  include "param_sources.cq"
+  string cyield = parameter prompt "Calculate Yield by Actual or Charged days: " valid "Actual","Charged" default "Charged"
+  string csort = parameter prompt "Sort by: " valid "RA#","Date Out","Car Class" default "RA#"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace kcirntlog_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve walkup requirements
+------------------------------------------------------------------------*/
+list/domain="kcictrl"/nodefaults/noheadings/nobanner
+  '"'+str(kcictrl:walkupnores)+'"'
+;
+run/parameterfile=kcirntlog_1
+rrepl "wu_nores"
+ 
+list/domain="kcictrl"/nodefaults/noheadings/nobanner
+  '"'+str(kcictrl:walkupsource)+'"'
+;
+run/parameterfile=kcirntlog_1
+rrepl "wu_source"
+
+/*------------------------------------------------------------------------
+ Retrieve yield percentages
+------------------------------------------------------------------------*/
+viewpoint native;
+define
+   number num_params = countfields(kcictrl:chgpctyield,"<001>")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+  string chgyield = subfield(kcictrl:chgpctyield,"<001>",i_counter:position)
+  string chgcode = subfield(chgyield,",",2)
+  string chgpct = subfield(chgyield,",",3)
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/domain="kcictrl"
+if str(chgcode) <> "" then {
+'case "'+trim(str(chgcode))+'" : '+trim(str(chgpct))
+}
+
+
+end of report
+'default : 100'/newline
+;
+run/parameterfile=kcirntlog_1
+rrepl "kcirntlog_i2"
+
+/*------------------------------------------------------------------------
+ Retrieve rrm/rentaldb records - setup parameters
+------------------------------------------------------------------------*/
+include "kcirntlog_i1.inc"
+
+   string wusource = include "wu_source.cq"
+   string wunores = include "wu_nores.cq"
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+
+   file rental_link = access rentaldb,
+    set rentaldb:commonid=rrm:commonid,
+    one to one, null fill on failure
+
+   file res_link = access resdb,
+    set resdb:commonid=rrm:commonid,
+    one to one, zero fill on failure
+
+  file emp_link = access employee,
+   set employee:employeenumber=rental_link:addedbyemployeenumber,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+  string walkup = if ((res_link:commonid = 0 and wunores = "1") or (wusource <> "" and rrm:sourcecode = wusource)) then "Y" else "N"
+ 
+where (rental_link:dateadded >= dtSdate and rental_link:dateadded <= dtEdate) and
+      (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm"/hold="rrm_hf"
+if ((emp_name = cemps or cemps = "ALL")and (rrm:sourcecode = csources)) then {
+  rrm:commonid/keyelement=1.1
+  rrm:dateout
+  rrm:ranumber
+  rrm:locationcodeout
+  rrm:product
+  rrm:sourcecode
+  rrm:customerlastname
+  rrm:rentedasclass
+  rental_link:addedbyemployeenumber
+  walkup
+}
+;
+replace kcirntlog_1.eq
+run/setparameter kcirntlog_1.eq
+
+run/parameterfile=kcirntlog_1 kcirntlog_1.eq
+
+/*------------------------------------------------------------------------
+ Calculate T&M, revdays, daily rate, T&M upgrade
+------------------------------------------------------------------------*/
+ define
+
+  file rarate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   with ratelinera:res=0 and 
+  (ratelinera:type = "Reg" or ratelinera:type = "Ex"),
+   one to many, null fill on failure
+
+  file resrate_link = access ratelinera,
+   set ratelinera:commonid=rrm_hf:commonid,
+   with ratelinera:res=1 and 
+  (ratelinera:type = "Reg" or ratelinera:type = "Ex"),
+   one to many, null fill on failure
+
+  number upgline = if (rarate_link:type = resrate_link:type and rarate_link:minsperx = resrate_link:minsperx) then
+                       if (rarate_link:rateper <> 0 and resrate_link:rateper <> 0 and rarate_link:totunits <> 0) then
+                          if ((rarate_link:rateper - resrate_link:rateper) * rarate_link:totunits) > 0 then 
+                               ((rarate_link:rateper - resrate_link:rateper) * rarate_link:totunits) else 0
+
+  number tot_revdays = if (rarate_link:res = 0 and rarate_link:totunits <>
+    0) then (rarate_link:minsperx div 1440) * rarate_link:totunits else 0
+
+  number rate_day = if (rarate_link:MinsPerX = 1440 and rarate_link:type = "Reg") then rarate_link:rateper
+
+  string tmtype = if rrm_hf:walkup = "N" then "Regular T&M" else "Walkup T&M"
+
+  number ipct = switch(tmtype)
+  include "kcirntlog_i2.cq"
+
+  number ipctup = switch("T&M Upgrade")
+  include "kcirntlog_i2.cq"
+ 
+list/domain="rrm_hf"/nodetails/noheadings/hold="kcirntlog_hf"
+  rrm_hf:commonid 
+  rrm_hf:dateout 
+  rrm_hf:ranumber 
+  rrm_hf:locationcodeout 
+  rrm_hf:product 
+  rrm_hf:sourcecode 
+  rrm_hf:customerlastname 
+  rrm_hf:rentedasclass 
+  rrm_hf:addedbyemployeenumber 
+  rrm_hf:walkup
+  rarate_link:type
+  rarate_link:res
+  rarate_link:rateper
+  rarate_link:MinsPerX
+  rarate_link:totunits
+  rarate_link:totcharge
+  resrate_link:type
+  resrate_link:res
+  resrate_link:rateper
+  resrate_link:MinsPerX
+  resrate_link:totunits
+  resrate_link:totcharge
+  tot_revdays
+  rate_day
+  upgline
+
+sorted by
+  rrm_hf:commonid
+
+end of rrm_hf:commonid
+  rrm_hf:commonid /keyelement=1.1
+  rrm_hf:dateout 
+  rrm_hf:ranumber 
+  rrm_hf:locationcodeout 
+  rrm_hf:product 
+  rrm_hf:sourcecode 
+  rrm_hf:customerlastname 
+  rrm_hf:rentedasclass 
+  rrm_hf:addedbyemployeenumber 
+  rrm_hf:walkup
+  round(total[rarate_link:totcharge,rrm_hf:commonid]*(ipct divide 100),2)/name="comm_tm"
+  total[tot_revdays,rrm_hf:commonid]/name="revdays"
+  minimum[rate_day,rrm_hf:commonid]/name="rateday"
+  round(total[upgline,rrm_hf:commonid]*(ipctup divide 100),2)/name="comm_upgrade"
+  total[upgline,rrm_hf:commonid]/name="tmupgrade"
+;
+run/parameterfile=kcirntlog_1
+
+/*------------------------------------------------------------------------
+ Add up misc charges
+------------------------------------------------------------------------*/
+define
+  file rcmift_link = access rcmift,
+   set rcmift:commonid=rrm_hf:commonid,
+   one to many, null fill on failure
+ 
+  number ipct = switch(rcmift_link:code)
+  include "kcirntlog_i2.cq"
+
+  number misc_rev = round(rcmift_link:total * (ipct divide 100),2)
+
+
+list/domain="rrm_hf"/nodetail/hold="rcmift_hf"
+if rcmift_link:comm = 1 then {
+  rrm_hf:commonid
+  misc_rev
+}
+
+sorted by
+  rrm_hf:commonid
+
+end of rrm_hf:commonid
+  rrm_hf:commonid/keyelement=1.1
+  total[misc_rev,rrm_hf:commonid]/name="comm_miscrev"
+;
+run/parameterfile=kcirntlog_1 
+
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "kcirntlog_i1.inc"
+define
+   file miscchg = access rcmift_hf,
+    set rcmift_hf:commonid=kcirntlog_hf:commonid,
+    one to one, null fill on failure
+
+  file emp_link = access employee,
+   set employee:employeenumber=kcirntlog_hf:addedbyemployeenumber ,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+   number yield_rev = (miscchg:comm_miscrev + kcirntlog_hf:comm_tm + kcirntlog_hf:comm_upgrade)
+
+   number yield = round(yield_rev divide kcirntlog_hf:revdays,2)
+
+   string emp_title = if kcirntlog_hf:walkup="Y" then "Employee: " + str(kcirntlog_hf:addedbyemployeenumber) +"  "+str(emp_name) + "     Walk-Up Rentals" else
+                           "Employee: " + str(kcirntlog_hf:addedbyemployeenumber) +"  "+str(emp_name)
+
+list/domain="kcirntlog_hf"/nobanner/pageof/title="Daily Rental Log"/duplicates/noreporttotals/noheadings
+
+  kcirntlog_hf:dateout/displaywidth=8 
+  kcirntlog_hf:ranumber /displaywidth=15
+  kcirntlog_hf:sourcecode /displaywidth=20
+  kcirntlog_hf:customerlastname /displaywidth=20
+  kcirntlog_hf:rentedasclass /displaywidth=10
+  kcirntlog_hf:revdays /displaywidth=5
+  yield_rev /displaywidth=14
+  yield/displaywidth=8
+  kcirntlog_hf:rateday /displaywidth=8
+  kcirntlog_hf:tmupgrade /displaywidth=8
+
+
+sorted by 
+  kcirntlog_hf:walkup 
+  kcirntlog_hf:addedbyemployeenumber 
+  if csort = "Date Out" then kcirntlog_hf:dateout
+  if csort = "Car Class" then kcirntlog_hf:rentedasclass
+  kcirntlog_hf:ranumber
+
+top of kcirntlog_hf:addedbyemployeenumber 
+  emp_title/newline
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Yield Calculated by: " + str(cyield)
+  end box /newline=4
+
+  "Date Out"/align=kcirntlog_hf:dateout 
+  "RA#"/align=kcirntlog_hf:ranumber 
+  "Source"/align=kcirntlog_hf:sourcecode 
+  "Last Name"/align=kcirntlog_hf:customerlastname 
+  "Class"/align=kcirntlog_hf:rentedasclass 
+  "Days"/align=kcirntlog_hf:revdays 
+  "Comm Rev"/align=yield_rev
+  "Yield"/align=yield
+  "T&M Rate"/align=kcirntlog_hf:rateday 
+  "T&M Upgrade"/align=kcirntlog_hf:tmupgrade/newline
+
+
+end of kcirntlog_hf:addedbyemployeenumber 
+  ""/newline
+  "Total Records: "+str(count[kcirntlog_hf:ranumber,kcirntlog_hf:addedbyemployeenumber])/align=kcirntlog_hf:dateout 
+  total[kcirntlog_hf:revdays,kcirntlog_hf:addedbyemployeenumber]/align=kcirntlog_hf:revdays
+  total[yield_rev,kcirntlog_hf:addedbyemployeenumber]/align=yield_rev
+  round(total[yield_rev,kcirntlog_hf:addedbyemployeenumber] divide total[kcirntlog_hf:revdays,kcirntlog_hf:addedbyemployeenumber],2)/align=yield/newline
+
+
+end of report 
+  ""/newline
+  "Report Total (RA#s): "+str(count[kcirntlog_hf:ranumber,report])+"      Avg LOR: "+
+      str(round(total[kcirntlog_hf:revdays,report] divide count[kcirntlog_hf:ranumber,report],1))/align=kcirntlog_hf:dateout 
+  total[kcirntlog_hf:revdays,report]/align=kcirntlog_hf:revdays
+  total[yield_rev,report]/align=yield_rev
+  round(total[yield_rev,report] divide total[kcirntlog_hf:revdays,report],2)/align=yield/newline
+
+;
+replace kcirntlog.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+
+include "kcirntlog_i1.inc"
+define
+   file miscchg = access rcmift_hf,
+    set rcmift_hf:commonid=kcirntlog_hf:commonid,
+    one to one, null fill on failure
+
+  file emp_link = access employee,
+   set employee:employeenumber=kcirntlog_hf:addedbyemployeenumber ,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+   number yield_rev = (miscchg:comm_miscrev + kcirntlog_hf:comm_tm + kcirntlog_hf:comm_upgrade)
+
+   number yield = round(yield_rev divide kcirntlog_hf:revdays,2)
+
+list/domain="kcirntlog_hf"/nobanner/nopageheadings/title="Daily Rental Log"/duplicates/noreporttotals/noheadings/pagelength=0
+
+  kcirntlog_hf:addedbyemployeenumber /displaywidth=10
+  emp_name /displaywidth=20
+  kcirntlog_hf:walkup /displaywidth=5
+  kcirntlog_hf:dateout/displaywidth=8 
+  kcirntlog_hf:ranumber /displaywidth=15
+  kcirntlog_hf:sourcecode /displaywidth=20
+  kcirntlog_hf:customerlastname /displaywidth=20
+  kcirntlog_hf:rentedasclass /displaywidth=10
+  kcirntlog_hf:revdays /displaywidth=5
+  yield_rev /displaywidth=14
+  yield/displaywidth=8
+  kcirntlog_hf:rateday /displaywidth=8
+  kcirntlog_hf:tmupgrade /displaywidth=8
+
+
+sorted by 
+  kcirntlog_hf:walkup 
+  kcirntlog_hf:addedbyemployeenumber 
+  if csort = "Date Out" then kcirntlog_hf:dateout
+  if csort = "Car Class" then kcirntlog_hf:rentedasclass
+  kcirntlog_hf:ranumber
+
+top of report
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Yield Calculated by: " + str(cyield)
+  end box /newline=4
+
+  "Employee#"/align=kcirntlog_hf:addedbyemployeenumber
+  "Employee Name"/align=emp_name
+  "Walkup?"/align=kcirntlog_hf:walkup
+  "Date Out"/align=kcirntlog_hf:dateout 
+  "RA#"/align=kcirntlog_hf:ranumber 
+  "Source"/align=kcirntlog_hf:sourcecode 
+  "Last Name"/align=kcirntlog_hf:customerlastname 
+  "Class"/align=kcirntlog_hf:rentedasclass 
+  "Days"/align=kcirntlog_hf:revdays 
+  "Comm Rev"/align=yield_rev
+  "Yield"/align=yield
+  "T&M Rate"/align=kcirntlog_hf:rateday 
+  "T&M Upgrade"/align=kcirntlog_hf:tmupgrade
+
+
+end of report 
+  ""/newline
+  "Report Total (RA#s): "+str(count[kcirntlog_hf:ranumber,report])+"      Avg LOR: "+
+      str(round(total[kcirntlog_hf:revdays,report] divide count[kcirntlog_hf:ranumber,report],1))/align=kcirntlog_hf:dateout 
+  total[kcirntlog_hf:revdays,report]/align=kcirntlog_hf:revdays
+  total[yield_rev,report]/align=yield_rev
+  round(total[yield_rev,report] divide total[kcirntlog_hf:revdays,report],2)/align=yield/newline
+;
+replace kcirntlog_xl.eq
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+include "kcirntlog_i1.inc"
+
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=kcirntlog_1 kcirntlog.eq"/newline
+} else {
+"run/xls/parameterfile=kcirntlog_1 kcirntlog_xl.eq"/newline
+}
+"rrepl kcirntlog"/newline
+"view"/newline 
+;
+run/parameterfile=kcirntlog_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+ 
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Daily Rental Log" -- Report Title
+   string rptname1    = "kcirntlog" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "kcirntlog_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

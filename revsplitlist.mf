@@ -1,0 +1,182 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Rev Split Matrix List
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 4/22/2019
+Modified:
+
+Notes:
+$Workfile: revsplitlist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/revsplitlist.mf $
+$Revision: 2 $
+$History: revsplitlist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="revmat"
+if itemnumber=1 then '"'+revmat:name+'"' else
+   ',"'+revmat:name+'"'
+
+sorted by
+   revmat:name
+top of report
+'string crevmat[8192] = multivalue parameter prompt "Select Split Martix: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_revmat"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_revmat.cq"
+  string ctype = parameter prompt "Select Type: " valid "ALL","Away From","Back To","Local","One-Way","Towards" default "ALL"
+
+;
+replace revsplitlist_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "revsplitlist_i1.inc"
+
+define
+   string mat_type = switch(revmat:type)
+    case 1 : "Away From"
+    case 2 : "Back To"
+    case 3 : "Local"
+    case 4 : "One-Way"
+    case 5 : "Towards"
+    default :  "N/A"
+
+ string charge_type = switch(revmat:revtype)
+    case 1  : "Misc Charge"
+    case 2  : "CDW"
+    case 3  : "PAC"
+    case 4  : "PEC"
+    case 5  : "SLI"
+    case 6  : "AD"
+    case 7  : "UD"
+    case 8  : "Upgrade"
+    case 9  : "Drop Chg"
+    case 10 : "Fuel"
+    case 11 : "Ppd. Gas"
+    case 13 : "FF Recovery Fee"
+    case 14 : "Equipment Charge" 
+    case 15 : "Delivery Fee"
+    case 50 : "Misc Fees"
+    case 51 : "Taxes"  -- Sales Tax
+    case 52 : "Taxes"  -- Federal Tax
+    case 53 : "Taxes"  -- Other Tax
+    case 62 : "T&M"
+    case 64 : "Misc Charge"
+    default  : ""  
+
+   file revhead_link = access revhead,
+    set revhead:revid=revmat:revid,
+    one to one,exact,null fill on failure
+
+where  (revmat:name = crevmat or crevmat = "ALL")
+       and (mat_type = ctype or ctype = "ALL")
+
+list/domain="revmat"/nobanner/noreporttotals/pagelength=70/duplicates/pageof/title="Rev Split Matrix List"
+  charge_type
+  revmat:revcode
+  revmat:pctrent/heading="Renting"/name="a"
+  revmat:pctown/heading="Owning"/name="b"
+  revmat:pctin/heading="Check In"/name="c"
+
+sorted by 
+  revmat:name
+
+top of revmat:name
+  revmat:name
+  mat_type/heading="Type"/newline
+  revhead_link:locrent/noheading/align=a
+  revhead_link:locown/noheading/align=b
+  revhead_link:locin/noheading/align=c/newline
+
+end of revmat:name
+ ""/page
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Matrix Name Range: " + str(crevmat)/newline
+  "Type(s): " + str(ctype)
+  end box /newline=4
+;
+replace revsplitlist_1.eq
+replace revsplitlist.eq
+run/setparameter revsplitlist_1.eq
+
+run/parameterfile=revsplitlist_1 revsplitlist.eq
+rrepl revsplitlist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view revsplitlist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Rev Split Matrix List" -- Report Title
+   string rptname1    = "revsplitlist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "revsplitlist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

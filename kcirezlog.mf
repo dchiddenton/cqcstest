@@ -1,0 +1,495 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2020.
+  All rights reserved.
+
+  Report: Daily Reservation Log
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/6/2020
+Modified:
+
+Notes:
+$Workfile: kcirezlog.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/kcirezlog.mf $
+$Revision: 1 $
+$History: kcirezlog.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 1/08/20    Time: 9:32a
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="employee"
+if itemnumber=1 then '"'+employee:employeelastname+', '+employee:employeefirstname+'"' else
+   ',"'+employee:employeelastname+', '+employee:employeefirstname+'"'
+
+sorted by
+   employee:employeelastname
+top of report
+'string cemps[8192] = multivalue parameter prompt "Employees to Include: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_emps"
+
+viewpoint native;
+define
+   number num_params = countfields(kcictrl:sources,",")  
+
+   file i_counter = access counter,
+    set min=1,max=num_params
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="kcictrl"
+if i_counter:position <= num_params then
+  if i_counter:position=1 then '"'+subfield(kcictrl:sources,",",i_counter:position)+'"' else
+   ',"'+subfield(kcictrl:sources,",",i_counter:position)+'"'
+
+top of report
+'string csources[8192] = multivalue parameter/noall prompt "Sources: "'
+"Valid "
+
+;
+run/parameterfile
+rrepl "param_sources"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_emps.cq"
+  include "param_sources.cq"
+  string cyield = parameter prompt "Calculate by Actual or Charged Days: " valid "Actual","Charged" default "Charged"
+  string csort = parameter prompt "Sort by: " valid "Location","Date Reserved","Pickup Date","Car Class","Employee" default "Employee"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+;
+replace kcirezlog_i1.inc
+
+
+/*------------------------------------------------------------------------
+ Retrieve rrm/resdb records - setup parameters
+------------------------------------------------------------------------*/
+include "kcirezlog_i1.inc"
+
+
+   file rrm_link = access rrm,
+    set rrm:commonid=resdb:commonid,
+    one to one, zero fill on failure
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm_link:locationcodeout,
+    null fill on failure
+
+  file emp_link = access employee,
+   set employee:employeenumber=resdb:addedbyemployeenumber,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+ 
+where (resdb:dateadded >= dtSdate and resdb:dateadded <= dtEdate) and
+      (rrm:product = cproduct or cproduct = "ALL") and
+      (rrm:locationcodeout = cloc or cloc = "ALL") and
+      (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="resdb"/hold="resdb_hf"
+if ((emp_name = cemps or cemps = "ALL")and (rrm_link:sourcecode = csources) and
+   (rrm_link:product = cproduct or cproduct = "ALL") and
+   (rrm_link:locationcodeout = cloc or cloc = "ALL") and
+   (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)) then {
+  rrm_link:commonid/keyelement=1.1
+  resdb:dateout
+  resdb:datedue
+  resdb:dateadded
+  rrm_link:resnumber
+  rrm_link:locationcodeout
+  rrm_link:product
+  rrm_link:sourcecode
+  rrm_link:customerlastname
+  rrm_link:reservedclass
+  resdb:addedbyemployeenumber
+}
+;
+replace kcirezlog_1.eq
+run/setparameter kcirezlog_1.eq
+
+run/parameterfile=kcirezlog_1 kcirezlog_1.eq
+
+/*------------------------------------------------------------------------
+ Calculate T&M, revdays, daily rate
+------------------------------------------------------------------------*/
+define
+
+  file resrate_link = access ratelinera,
+   set ratelinera:commonid=resdb_hf:commonid,
+   with ratelinera:res=1 and 
+  (ratelinera:type = "Reg" or ratelinera:type = "Ex"),
+   one to many, null fill on failure
+
+  number tot_revdays = if (resrate_link:res = 1 and resrate_link:totunits <>
+    0) then (resrate_link:minsperx div 1440) * resrate_link:totunits else 0
+
+  number tot_actdays = if (resdb_hf:datedue - resdb_hf:dateout) = 0 then 1 else (resdb_hf:datedue - resdb_hf:dateout)
+
+  number rate_day = if (resrate_link:MinsPerX = 1440 and resrate_link:type = "Reg") then resrate_link:rateper
+ 
+list/domain="resdb_hf"/nodetails/noheadings/hold="kcirezlog_hf"
+  resdb_hf:commonid 
+  resdb_hf:dateout 
+  resdb_hf:dateadded
+  resdb_hf:resnumber
+  resdb_hf:locationcodeout 
+  resdb_hf:product 
+  resdb_hf:sourcecode 
+  resdb_hf:customerlastname 
+  resdb_hf:reservedclass 
+  resdb_hf:addedbyemployeenumber 
+  resrate_link:type
+  resrate_link:res
+  resrate_link:rateper
+  resrate_link:MinsPerX
+  resrate_link:totunits
+  resrate_link:totcharge
+  tot_revdays
+
+  rate_day
+
+sorted by
+  resdb_hf:commonid
+
+end of resdb_hf:commonid
+  resdb_hf:commonid /keyelement=1.1
+  resdb_hf:dateout 
+  resdb_hf:dateadded
+  resdb_hf:resnumber
+  resdb_hf:locationcodeout 
+  resdb_hf:product 
+  resdb_hf:sourcecode 
+  resdb_hf:customerlastname 
+  resdb_hf:reservedclass 
+  resdb_hf:addedbyemployeenumber 
+  total[resrate_link:totcharge,resdb_hf:commonid]/name="nettm"
+  total[tot_revdays,resdb_hf:commonid]/name="revdays"
+  tot_actdays
+  minimum[rate_day,resdb_hf:commonid]/name="rateday"
+;
+run/parameterfile=kcirezlog_1
+
+/*------------------------------------------------------------------------
+ Create sort/subtotal routine
+------------------------------------------------------------------------*/
+
+include "kcirezlog_i1.inc"
+
+list/domain="dummy"/nodefaults/nobanner
+
+if csort = "Location" then {
+
+'sorted by -- Location'/newline
+'  kcirezlog_hf:locationcodeout '/newline
+'  kcirezlog_hf:addedbyemployeenumber'/newline
+'  kcirezlog_hf:resnumber'/newline
+''/newline
+'top of kcirezlog_hf:locationcodeout '/newline
+'  "Location: "+str(kcirezlog_hf:locationcodeout)/newline'/newline
+''/newline
+'end of kcirezlog_hf:locationcodeout '/newline
+'  ""/newline'/newline
+'  "Total Reservations: "+str(count[kcirezlog_hf:resnumber,kcirezlog_hf:locationcodeout])+"      Avg LOR: "+'/newline
+'      str(round(total[calcdays,kcirezlog_hf:locationcodeout] divide count[kcirezlog_hf:resnumber,kcirezlog_hf:locationcodeout],1))/align=kcirezlog_hf:addedbyemployeenumber '/newline
+'  total[calcdays,kcirezlog_hf:locationcodeout]/align=calcdays'/newline
+'  round(total[kcirezlog_hf:nettm,kcirezlog_hf:locationcodeout] divide total[calcdays,kcirezlog_hf:locationcodeout],2)/align=dda'/newline
+'  total[kcirezlog_hf:nettm,kcirezlog_hf:locationcodeout]/align=kcirezlog_hf:nettm/newline'/newline
+''/newline
+
+} else if csort = "Date Reserved" then {
+
+'sorted by -- Date Reserved'/newline
+'  kcirezlog_hf:dateadded'/newline
+'  kcirezlog_hf:addedbyemployeenumber'/newline
+'  kcirezlog_hf:resnumber'/newline
+''/newline
+'top of kcirezlog_hf:dateadded '/newline
+'  "Date Reserved: "+str(kcirezlog_hf:dateadded)/newline'/newline
+''/newline
+'end of kcirezlog_hf:dateadded'/newline
+'  ""/newline'/newline
+'  "Total Reservations: "+str(count[kcirezlog_hf:resnumber,kcirezlog_hf:dateadded])+"      Avg LOR: "+'/newline
+'      str(round(total[calcdays,kcirezlog_hf:dateadded] divide count[kcirezlog_hf:resnumber,kcirezlog_hf:dateadded],1))/align=kcirezlog_hf:addedbyemployeenumber '/newline
+'  total[calcdays,kcirezlog_hf:dateadded]/align=calcdays'/newline
+'  round(total[kcirezlog_hf:nettm,kcirezlog_hf:dateadded] divide total[calcdays,kcirezlog_hf:dateadded],2)/align=dda'/newline
+'  total[kcirezlog_hf:nettm,kcirezlog_hf:dateadded]/align=kcirezlog_hf:nettm/newline'/newline
+''/newline
+
+} else if csort = "Pickup Date" then {
+
+'sorted by -- Pickup Date'/newline
+'  kcirezlog_hf:dateout'/newline
+'  kcirezlog_hf:addedbyemployeenumber'/newline
+'  kcirezlog_hf:resnumber'/newline
+''/newline
+'top of kcirezlog_hf:dateout '/newline
+'  "Pickup Date: "+str(kcirezlog_hf:dateout)/newline'/newline
+''/newline
+'end of kcirezlog_hf:dateout'/newline
+'  ""/newline'/newline
+'  "Total Reservations: "+str(count[kcirezlog_hf:resnumber,kcirezlog_hf:dateout])+"      Avg LOR: "+'/newline
+'      str(round(total[calcdays,kcirezlog_hf:dateout] divide count[kcirezlog_hf:resnumber,kcirezlog_hf:dateout],1))/align=kcirezlog_hf:addedbyemployeenumber '/newline
+'  total[calcdays,kcirezlog_hf:dateout]/align=calcdays'/newline
+'  round(total[kcirezlog_hf:nettm,kcirezlog_hf:dateout] divide total[calcdays,kcirezlog_hf:dateout],2)/align=dda'/newline
+'  total[kcirezlog_hf:nettm,kcirezlog_hf:dateout]/align=kcirezlog_hf:nettm/newline'/newline
+''/newline
+
+} else if csort = "Car Class" then {
+
+'sorted by -- Car Class'/newline
+'  kcirezlog_hf:reservedclass '/newline
+'  kcirezlog_hf:addedbyemployeenumber'/newline
+'  kcirezlog_hf:resnumber'/newline
+''/newline
+'top of kcirezlog_hf:reservedclass  '/newline
+'  "Reserved Car Class: "+str(kcirezlog_hf:reservedclass )/newline'/newline
+''/newline
+'end of kcirezlog_hf:reservedclass '/newline
+'  ""/newline'/newline
+'  "Total Reservations: "+str(count[kcirezlog_hf:resnumber,kcirezlog_hf:reservedclass ])+"      Avg LOR: "+'/newline
+'      str(round(total[calcdays,kcirezlog_hf:reservedclass ] divide count[kcirezlog_hf:resnumber,kcirezlog_hf:reservedclass ],1))/align=kcirezlog_hf:addedbyemployeenumber '/newline
+'  total[calcdays,kcirezlog_hf:reservedclass ]/align=calcdays'/newline
+'  round(total[kcirezlog_hf:nettm,kcirezlog_hf:reservedclass ] divide total[calcdays,kcirezlog_hf:reservedclass ],2)/align=dda'/newline
+'  total[kcirezlog_hf:nettm,kcirezlog_hf:reservedclass ]/align=kcirezlog_hf:nettm/newline'/newline
+} else {
+
+'sorted by -- Employee'/newline
+'  kcirezlog_hf:addedbyemployeenumber '/newline
+'  kcirezlog_hf:resnumber'/newline
+''/newline
+'top of kcirezlog_hf:addedbyemployeenumber '/newline
+'  emp_title/newline'/newline
+''/newline
+'end of kcirezlog_hf:addedbyemployeenumber '/newline
+'  ""/newline'/newline
+'  "Total Reservations: "+str(count[kcirezlog_hf:resnumber,kcirezlog_hf:addedbyemployeenumber])+"      Avg LOR: "+'/newline
+'      str(round(total[calcdays,kcirezlog_hf:addedbyemployeenumber] divide count[kcirezlog_hf:resnumber,kcirezlog_hf:addedbyemployeenumber],1))/align=kcirezlog_hf:addedbyemployeenumber '/newline
+'  total[calcdays,kcirezlog_hf:addedbyemployeenumber]/align=calcdays'/newline
+'  round(total[kcirezlog_hf:nettm,kcirezlog_hf:addedbyemployeenumber] divide total[calcdays,kcirezlog_hf:addedbyemployeenumber],2)/align=dda'/newline
+'  total[kcirezlog_hf:nettm,kcirezlog_hf:addedbyemployeenumber]/align=kcirezlog_hf:nettm/newline'/newline
+''/newline
+}
+;
+run/parameterfile=kcirezlog_1
+rrepl "kcirezlog_2"
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "kcirezlog_i1.inc"
+define
+
+  file emp_link = access employee,
+   set employee:employeenumber=kcirezlog_hf:addedbyemployeenumber ,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+  string emp_title = "Employee: " + str(kcirezlog_hf:addedbyemployeenumber) +"  "+str(emp_name)
+
+  number calcdays = if cyield = "Actual" then kcirezlog_hf:tot_actdays else kcirezlog_hf:revdays
+  number dda = round(kcirezlog_hf:nettm divide calcdays,2)
+
+list/domain="kcirezlog_hf"/nobanner/pageof/title="Daily Reservation Log"/duplicates/noheadings/noreporttotals
+
+  kcirezlog_hf:addedbyemployeenumber/displaywidth=8
+  kcirezlog_hf:resnumber /displaywidth=15
+  kcirezlog_hf:dateadded/displaywidth=8
+  kcirezlog_hf:dateout/displaywidth=8 
+  kcirezlog_hf:reservedclass /displaywidth=10
+  calcdays /displaywidth=5 
+  dda/displaywidth=14/decimalplaces=2
+  kcirezlog_hf:nettm/displaywidth=14/decimalplaces=2
+  kcirezlog_hf:customerlastname /displaywidth=20
+
+
+
+
+include "kcirezlog_2.cq"
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Length of Rental Calculated by: "+str(cyield)/newline
+  end box /newline=4
+
+  "Employee"/align=kcirezlog_hf:addedbyemployeenumber
+  "Reservation #"/align=kcirezlog_hf:resnumber 
+  "Date Reserved"/align=kcirezlog_hf:dateadded
+  "Pickup Date"/align=kcirezlog_hf:dateout 
+  "Class"/align=kcirezlog_hf:reservedclass 
+  "Days (LOR)"/align=calcdays
+  "Daily $ Avg"/align=dda
+  "Net T&M"/align=kcirezlog_hf:nettm
+  "Renter Name"/align=kcirezlog_hf:customerlastname /newline
+
+
+end of report 
+  ""/newline
+  "Report Total (#Res): "+str(count[kcirezlog_hf:resnumber,report])+"      Avg LOR: "+
+      str(round(total[calcdays,report] divide count[kcirezlog_hf:resnumber,report],1))/align=kcirezlog_hf:addedbyemployeenumber 
+  total[calcdays,report]/align=calcdays
+  round(total[kcirezlog_hf:nettm,report] divide total[calcdays,report],2)/align=dda
+  total[kcirezlog_hf:nettm,report]/align=kcirezlog_hf:nettm/newline
+;
+replace kcirezlog.eq
+
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+include "kcirezlog_i1.inc"
+define
+
+  file emp_link = access employee,
+   set employee:employeenumber=kcirezlog_hf:addedbyemployeenumber ,
+   one to one, null fill on failure
+
+  string emp_name = str(emp_link:employeelastname) + ", " + str(emp_link:employeefirstname)
+
+  string emp_title = "Employee: " + str(kcirezlog_hf:addedbyemployeenumber) +"  "+str(emp_name)
+
+  number calcdays = if cyield = "Actual" then kcirezlog_hf:tot_actdays else kcirezlog_hf:revdays
+  number dda = round(kcirezlog_hf:nettm divide calcdays,2)
+
+list/domain="kcirezlog_hf"/nobanner/pagelength=0/title="Daily Reservation Log"/duplicates/noheadings/noreporttotals
+
+  kcirezlog_hf:addedbyemployeenumber/displaywidth=8
+  kcirezlog_hf:locationcodeout/displaywidth=10
+  kcirezlog_hf:resnumber /displaywidth=15
+  kcirezlog_hf:dateadded/displaywidth=8
+  kcirezlog_hf:dateout/displaywidth=8 
+  kcirezlog_hf:reservedclass /displaywidth=10
+  calcdays /displaywidth=5 
+  dda/displaywidth=14/decimalplaces=2
+  kcirezlog_hf:nettm/displaywidth=14/decimalplaces=2
+  kcirezlog_hf:customerlastname /displaywidth=20
+
+
+sorted by 
+  if csort =  "Location" then kcirezlog_hf:locationcodeout
+  if csort =  "Date Reserved" then kcirezlog_hf:dateadded
+  if csort =  "Pickup Date" then kcirezlog_hf:dateout
+  if csort =  "Car Class"   then kcirezlog_hf:reservedclass
+  kcirezlog_hf:addedbyemployeenumber
+  kcirezlog_hf:resnumber
+
+
+top of page
+
+ box/center/column=1
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)/newline
+  "Length of Rental Calculated by: "+str(cyield)/newline
+  end box /newline=4
+
+  "Employee"/align=kcirezlog_hf:addedbyemployeenumber
+  "Location Out"/align=kcirezlog_hf:locationcodeout
+  "Reservation #"/align=kcirezlog_hf:resnumber 
+  "Date Reserved"/align=kcirezlog_hf:dateadded
+  "Pickup Date"/align=kcirezlog_hf:dateout 
+  "Class"/align=kcirezlog_hf:reservedclass 
+  "Days (LOR)"/align=calcdays
+  "Daily $ Avg"/align=dda
+  "Net T&M"/align=kcirezlog_hf:nettm
+  "Renter Name"/align=kcirezlog_hf:customerlastname /newline
+
+
+end of report 
+  ""/newline
+  "Report Total (#Res): "+str(count[kcirezlog_hf:resnumber,report])+"      Avg LOR: "+
+      str(round(total[calcdays,report] divide count[kcirezlog_hf:resnumber,report],1))/align=kcirezlog_hf:addedbyemployeenumber 
+  total[calcdays,report]/align=calcdays
+  round(total[kcirezlog_hf:nettm,report] divide total[calcdays,report],2)/align=dda
+  total[kcirezlog_hf:nettm,report]/align=kcirezlog_hf:nettm/newline
+
+;
+replace kcirezlog_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File
+------------------------------------------------------------------------*/
+include "kcirezlog_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=kcirezlog_1 kcirezlog.eq"/newline
+} else {
+"run/xls/parameterfile=kcirezlog_1 kcirezlog_xl.eq"/newline
+}
+"rrepl kcirezlog"/newline
+"view"/newline 
+;
+run/parameterfile=kcirezlog_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+ 
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Daily Reservation Log" -- Report Title
+   string rptname1    = "kcirezlog" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "kcirezlog_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

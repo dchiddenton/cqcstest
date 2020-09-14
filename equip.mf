@@ -1,0 +1,191 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Equipment List
+  Author: Chris Wroblewski
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/13/2017
+Modified:
+
+Notes:
+$Workfile: equip.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/equip.mf $
+$Revision: 3 $
+$History: equip.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 12/10/19   Time: 10:28a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Fix formatting file link
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:53a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="equiptype"
+if itemnumber=1 then '"'+equiptype:equiptype+'"' else
+   ',"'+equiptype:equiptype+'"'
+
+sorted by
+   equiptype:equiptype
+top of report
+'string cequiptypes[8192] = multivalue parameter prompt "Equipment types: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_equiptypes"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="invstatus"
+if itemnumber=1 then '"'+invstatus:description+'"' else
+   ',"'+invstatus:description+'"'
+
+sorted by
+   invstatus:description
+top of report
+'string cestatus[1024] = multivalue parameter prompt "Equipment Statuses: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_estatus"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_equiptypes.cq"
+  string cequip[ 1024 ] = range parameter  prompt "Equipment # (start..End) or ALL:"  default "ALL"
+  include "param_estatus.cq"
+  string clistby=parameter prompt "List by: " valid "Type/Asset ID","Make/Model","Serial Number" default "Type/Asset ID"
+;
+replace equip_i1.inc
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+include "equip_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = equip:locationcode,
+    null fill on failure
+
+  file alt_invid = access inv,
+    set inv:invid = equip:invid,
+    null fill on failure
+
+  file alt_invstatus = access invstatus,
+    set invstatus:invstatus = equip:equipstatus
+
+where
+  (equip:Equiptype = cequiptypes or cequiptypes ="All")
+  and (equip:locationcode = cloc or cloc ="All")
+  and (alt_invstatus:description = cestatus or cestatus ="ALL")
+  and (clocgroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (equip:assetid = cEquip or cequip = "ALL")
+
+list/duplicates/nobanner/pageof/Title="Equipment List"/domain="equip"
+  equip:equiptype/displaywidth=10/heading="Type" 
+  equip:assetid/displaywidth=10
+  equip:locationcode/displaywidth=10
+  alt_invstatus:description/displaywidth=15/heading="Status"
+  equip:make/displaywidth=10/heading="Make" 
+  equip:model/displaywidth=20
+  equip:equipcolor/displaywidth=10
+  equip:serialnumber/displaywidth=30
+  equip:counter/decimalplaces=0/nototal 
+  equip:ownedlocationcode/displaywidth=10/heading="Owning Loc"
+  alt_invid:unitnumber/displaywidth=10/heading="Assigned to Unit#"
+
+sorted by 
+  switch(clistby)
+  case "Type/Asset ID" : equip:assetid
+  case "Make/Model" : equip:make
+  case "Serial Number" : equip:serialnumber 
+  default : equip:assetid
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if cequip = "ALL" then "All Equipment" else "Equipment Range: "+str(cequip)/displaywidth=100/newline
+  if clocgroup <> "" then "Location group: " + str(clocgroup) else "Location(s): " + str(cLoc)/displaywidth=100/newline
+  "Equipment Type(s): " + str(cequiptypes)
+  end box /newlines=4
+
+end of report
+  ""/newline
+  "Total Records: "+ str(count[equip:assetid])/newline
+
+;
+replace equip_1.eq
+replace equip.eq
+run/setparameter equip_1.eq
+
+run/parameterfile=equip_1 equip.eq
+rrepl equip
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view equip
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Equipment List" -- Report Title
+   string rptname1    = "equip" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "equip_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

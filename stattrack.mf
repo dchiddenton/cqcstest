@@ -1,0 +1,339 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Daily Status Tracking Report
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 11/24/2017
+Modified:
+
+Notes:
+$Workfile: stattrack.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/stattrack.mf $
+$Revision: 3 $
+$History: stattrack.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 4/27/20    Time: 1:15p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added Excel output formatting.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_invclass.cq"
+  include "param_invstatus.cq"
+  string inc_foreign = parameter/uppercase prompt "Include Foriegn Vehicles? " valid "Y","N" default "N"
+  string cexcel = parameter/uppercase prompt "Format for Excel?" valid "Y","N" default "N"
+
+;
+replace stattrack_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+viewpoint native;
+include "stattrack_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+   file invtrx_link = access invtrx,
+    set invtrx:product=inv:product,
+    invtrx:unitnumber=inv:unitnumber,
+    one to one,reverse,generic, null fill on failure
+
+   file rrm_link = access rrm,
+    set rrm:ranumber=inv:ranumber,
+    with inv:vehiclestatusowned=2,
+    one to one, generic, null fill on failure
+
+   file ins_link = access ins,
+    set ins:commonid=rrm_link:commonid,
+    one to one,zero fill on failure
+
+   string advisor = if  ins_link:commonid <> 0 then ins_link:approvedby1 else rrm_link:AgentID + " " + rrm_link:ReferralCode
+
+   number ro_num1 = if invtrx_link:datein = null then invtrx_link:ronumber else 0
+   string ro_num = if ro_num1=0 then "" else str(ro_num1)
+  
+
+   file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+
+   number days_idle = todaysdate - invtrx_link:dateout 
+
+   string cust_name = if len(rrm_link:customerfirstname+rrm_link:customerlastname)=null then "" else rrm_link:customerlastname+", "+rrm_link:customerfirstname
+
+        
+where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (str(inv:vehiclestatusowned) = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+
+
+list/domain="inv"/nobanner/pageof/title="Daily Status Tracking Report"/duplicates/noreporttotals/noheadings/pagelength=70 
+ -- inv:invid
+  --invtrx_link:trxorigin
+  inv:unitnumber/displaywidth=15 /name="a"
+  rrm_link:ranumber/displaywidth=10/name="b"
+  ro_num/displaywidth=10/name="c"
+  rrm_link:ServiceOrderNum/displaywidth=10/name="d"
+  inv:serialnumber/displaywidth=20 /name="e"
+  cust_name/width=30/name="f"
+  advisor/width=20/name="g"
+  invtrx_link:DateOut/name="h"
+  invtrx_link:timeout/name="i"
+  days_idle /name="j"
+  stat_desc:description/displaywidth=10/name="k"
+
+
+sorted by
+  inv:locationcode/page
+  inv:unitnumber
+
+top of inv:locationcode
+  "Vehicles currently at location: "+str(inv:locationcode)/newline
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Include Foreign Vehicles: " + str(inc_foreign)
+  end box /newline=4
+
+
+  "Unit" /align=a
+  "RA#" /align=b
+  "Repair Order #"/align=c
+  "Service Order #"/align=d
+  "VIN" /align=e
+  "Customer Name"/align=f
+  "Advisor"/align=g
+  "Date Out"/align=h
+  "Time Out"/align=i
+  "Idle Days" /align=j
+  "Status"/align=k/newlin
+
+end of inv:locationcode
+  ""/newline
+  "Total Records for "+str(inv:locationcode)+": "+str(count[inv:unitnumber,inv:locationcode])
+
+end of report
+  ""/newline
+  "Total Records: "+str(count[inv:unitnumber,report])
+
+;
+replace stattrack_1.eq
+run/setparameter stattrack_1.eq
+replace stattrack.eq
+
+/*------------------------------------------------------------------------
+ Output Report - Excel
+------------------------------------------------------------------------*/
+viewpoint native;
+include "stattrack_i1.inc"
+
+define
+
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file stat_desc = access invstatus,
+    set invstatus:invstatus = inv:vehiclestatusowned,
+    null fill on failure
+
+   file invtrx_link = access invtrx,
+    set invtrx:product=inv:product,
+    invtrx:unitnumber=inv:unitnumber,
+    one to one,reverse,generic, null fill on failure
+
+   file rrm_link = access rrm,
+    set rrm:ranumber=inv:ranumber,
+    with inv:vehiclestatusowned=2,
+    one to one, generic, null fill on failure
+
+   file ins_link = access ins,
+    set ins:commonid=rrm_link:commonid,
+    one to one,zero fill on failure
+
+   string advisor = if  ins_link:commonid <> 0 then ins_link:approvedby1 else rrm_link:AgentID + " " + rrm_link:ReferralCode
+
+   number ro_num1 = if invtrx_link:datein = null then invtrx_link:ronumber else 0
+   string ro_num = if ro_num1=0 then "" else str(ro_num1)
+  
+
+   file location_link = access location,
+    set location:locationcode=inv:ownedlocationcode,
+    one to one, null fill on failure
+
+
+   number days_idle = todaysdate - invtrx_link:dateout 
+
+   string cust_name = if len(rrm_link:customerfirstname+rrm_link:customerlastname)=null then "" else rrm_link:customerlastname+", "+rrm_link:customerfirstname
+
+        
+where 
+ (inv:Product  = cProduct or cProduct = "ALL" )
+  and (inv:invclass = CClass or cClass = "ALL")
+  and (inv:locationcode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)  
+  and (str(inv:vehiclestatusowned) = cstatus or cstatus = "ALL")
+  and (location_link:owned = 1 or inc_foreign = "Y")
+
+
+
+list/domain="inv"/nobanner/pageof/title="Daily Status Tracking Report"/duplicates/noreporttotals/noheadings/pagelength=0 
+ -- inv:invid
+  --invtrx_link:trxorigin
+  inv:locationcode/displaywidth=20/name="aa"
+  inv:unitnumber/displaywidth=15 /name="a"
+  rrm_link:ranumber/displaywidth=10/name="b"
+  ro_num/displaywidth=10/name="c"
+  rrm_link:ServiceOrderNum/displaywidth=10/name="d"
+  inv:serialnumber/displaywidth=20 /name="e"
+  cust_name/width=30/name="f"
+  advisor/width=20/name="g"
+  invtrx_link:DateOut/name="h"
+  invtrx_link:timeout/name="i"
+  days_idle /name="j"
+  stat_desc:description/displaywidth=10/name="k"
+
+
+sorted by
+  inv:locationcode
+  inv:unitnumber
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct) + "   Car Class: " + str(cClass)/newline
+  "Include Foreign Vehicles: " + str(inc_foreign)
+  end box /newline=4
+
+  "Location"/align=aa
+  "Unit" /align=a
+  "RA#" /align=b
+  "Repair Order #"/align=c
+  "Service Order #"/align=d
+  "VIN" /align=e
+  "Customer Name"/align=f
+  "Advisor"/align=g
+  "Date Out"/align=h
+  "Time Out"/align=i
+  "Idle Days" /align=j
+  "Status"/align=k
+
+
+end of report
+  ""/newline
+  "Total Records: "+str(count[inv:unitnumber,report])
+;
+replace stattrack_xl.eq
+
+/*------------------------------------------------------------------------
+ Select Output File - Send to Screen
+------------------------------------------------------------------------*/
+include "stattrack_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+if cexcel = "N" then {
+"run/parameterfile=stattrack_1 stattrack.eq"/newline
+} else {
+"run/xls/parameterfile=stattrack_1 stattrack_xl.eq"/newline
+}
+"rrepl stattrack"/newline
+"view"/newline 
+;
+run/parameterfile=stattrack_1
+rrepl "out_value"
+cli copy/y out_value.cq out_value.mf
+
+run out_value.mf
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Daily Status Tracking Report" -- Report Title
+   string rptname1    = "stattrack" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "stattrack_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

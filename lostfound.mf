@@ -1,0 +1,165 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Lost and Found Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 1/10/2018
+Modified:
+
+Notes:
+$Workfile: lostfound.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/lostfound.mf $
+$Revision: 2 $
+$History: lostfound.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="lostfound"
+if itemnumber=1 then '"'+lostfound:category+'"' else
+   ',"'+lostfound:category+'"'
+
+sorted by
+   lostfound:category
+top of report
+'string ccategory[8192] = multivalue parameter prompt "Categories: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_category"
+
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Enter Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "Enter Ending Date" default todaysdate
+  include "param_category.cq"
+  string crecords = parameter prompt "Records to Show: " valid "ALL","Lost","Found" default "ALL"
+  string cclaimed = parameter/uppercase prompt "Show claimed items?" valid "Y","N" default "N"
+;
+replace lostfound_i1.inc
+/*------------------------------------------------------------------------
+ Setup parameters -Output report
+------------------------------------------------------------------------*/
+viewpoint native;
+
+include "lostfound_i1.inc"
+
+define
+  string claimedstat = if lostfound:claimed = 1 then "Claimed" else "Unclaimed"
+  string lost_flag = if lostfound:lost = 1 then "Lost" else "Found"
+
+
+where 
+  (lostfound:category = ccategory or ccategory = "ALL") and
+  (lostfound:claimed = 0 or cclaimed = "Y") and
+  ((lostfound:lost = 1 and crecords = "Lost") or (lostfound:lost = 0 and crecords = "Found") or crecords = "ALL") and
+  ((lostfound:daterecorded >= dtsdate and lostfound:daterecorded <= dtedate) or lostfound:daterecorded = null)
+ 
+list/domain="lostfound"/duplicates/noheadings/nobanner/pageof/title="Lost and Found Report"
+
+lost_flag/heading="Lost/Found"
+lostfound:daterecorded/heading="Date"
+lostfound:reportedby/displaywidth=25/heading="Reported By"
+if lostfound:claimed = 1 then "Yes" else "No"/heading="Claimed"
+lostfound:locationcode/heading="Location"
+lostfound:unitnumber/heading="Unit#"
+lostfound:description/displaywidth=40/heading="Description"
+
+
+sorted by
+lostfound:claimed
+lostfound:category
+lostfound:lost
+
+top of lostfound:category
+""/newline
+str(claimedstat)+" Category: "+str(lostfound:category)/newline
+
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Categories: "+str(ccategory)+"   reported from: " + str(dtsdate) +" to " + str(dtedate)/displaywidth=100/newline
+  if crecords = "ALL" then {"All lost and found items"/newline} else 
+   if crecords = "Lost" then {"Lost items"/newline} else {"Found items"/newline}
+  if cclaimed = "Y" then "Including Claimed Items" else "Not Including Claimed Items"/newline
+  end box/newlines=4
+  
+end of report
+""/newline
+"Total records: "+str(count[lost_flag,report])
+
+;
+replace lostfound_1.eq
+run/setparameter lostfound_1.eq
+
+replace lostfound.eq
+run/parameterfile=lostfound_1 lostfound.eq
+rrepl lostfound
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view lostfound
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "" -- Report Title
+   string rptname1    = "lostfound" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "lostfound_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,154 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Tour Operators List
+  Author: David Chiddenton
+  $Revision: 3 $;
+  
+/*------------------------------------------------------------------------
+Created: 3/13/2018
+Modified:
+
+Notes:
+$Workfile: tourlist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/tourlist.mf $
+$Revision: 3 $
+$History: tourlist.mf $
+ * 
+ * *****************  Version 3  *****************
+ * User: Dchidden     Date: 10/25/19   Time: 3:30p
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Added conditional ALL default to selection criteria when there are no
+ * records to select.
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:28p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+--where tour:dealership = 0  -- to exclude dealerships in selection
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="tour"
+
+if itemnumber=1 then '"'+tour:code+'"' else
+   ',"'+tour:code+'"'
+
+sorted by
+   tour:code
+top of report
+'string ctour[8192] = multivalue parameter prompt "Tour Operators: "'
+'Valid'
+end of report
+if itemnumber = 0 then ' "ALL" '
+ 'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_tour"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  include "param_tour.cq"
+;
+replace tourlist_i1.inc
+/*------------------------------------------------------------------------
+ Output Report - setup parameters
+------------------------------------------------------------------------*/
+include "tourlist_i1.inc"
+where 
+  (tour:code = ctour or ctour = "ALL")
+
+list/domain="tour"/nobanner/pageof/title="Tour Operators List"/count
+  tour:code 
+  tour:description/displaywidth=20 
+  tour:paymenttype/displaywidth=20 
+  tour:ratecode 
+  tour:company/displaywidth=30 
+  switch (Tour:Dealership)
+     Case 0  :"No"
+     Case 1  :"Yes"
+     Default :"Unknown"/heading="Dealership" 
+  switch (Tour:Taxable)
+     Case 0  :"No"
+     Case 1  :"Yes"
+     Default :"Unknown"/heading="Taxable" 
+  switch (Tour:TMDeduct)
+     Case 0  :"No"
+     Case 1  :"Yes"
+     Default :"Unknown"/heading="Deduct-included-from T&M" 
+  followed by box/noheadings/column=10/duplicates/width=100/fill "Notes: "
+  tour:notes
+  end box
+
+sorted by
+  tour:code
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Tour Operators: " + str(ctour)/displaywidth=100/newline
+  end box /newline=4
+
+;
+replace tourlist_1.eq
+replace tourlist.eq
+run/setparameter tourlist_1.eq
+
+run/parameterfile=tourlist_1 tourlist.eq
+rrepl tourlist
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view tourlist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Tour Operators List" -- Report Title
+   string rptname1    = "tourlist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "tourlist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

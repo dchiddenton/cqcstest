@@ -1,0 +1,443 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Referral Revenue Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/11/2017
+Modified:
+
+Notes:
+$Workfile: referralrev.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/referralrev.mf $
+$Revision: 2 $
+$History: referralrev.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="sources"
+if itemnumber=1 then '"'+sources:description+'"' else
+   ',"'+sources:description+'"'
+
+sorted by
+   sources:description
+top of report
+'string csource[10240] = multivalue parameter prompt "Source Codes: "'
+"Valid"
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_sources"
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="ratehead"
+if itemnumber=1 then '"'+ratehead:ratecode+'"' else
+   ',"'+ratehead:ratecode+'"'
+
+sorted by
+   ratehead:ratecode
+top of report
+'string crates[8192] = multivalue parameter prompt "Rate Codes to Include or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_rates"
+
+where (rtmift:type <> 2 and
+       rtmift:type <> 3 and
+       rtmift:type <> 4 and
+       rtmift:type <> 5 and
+       rtmift:type <> 51 and
+       rtmift:type <> 52 and   
+       rtmift:type <> 53 and
+       rtmift:type <> 10 and
+       rtmift:type <> 11 and
+       rtmift:type <> 12) 
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="rtmift"
+if itemnumber=1 then '"'+rtmift:code+'"' else
+   ',"'+rtmift:code+'"'
+
+sorted by
+   rtmift:code
+top of report
+'string ccode[8192] = multivalue parameter prompt "Other Revenue to Include or ALL: "'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_codes"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter Prompt "Ending Date"  error "Error: End date < Start date" if dtEdate < dtSdate default todaysdate;
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  include "param_sources.cq"
+  string creferral = range parameter prompt "Enter Referral Range (Start..End or ALL): " default ALL
+  string cagent = range parameter prompt "Enter Agent Range (Start..End or ALL): " default ALL
+  include "param_rates.cq"
+  include "param_codes.cq"
+
+;
+replace referralrev_i1.inc
+/*------------------------------------------------------------------------
+ RA selection - setup parameters
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = rrm:locationcodeout,
+    null fill on failure
+  file rental_link = access rentaldb,
+   set rentaldb:commonid=rrm:commonid,
+   one to one, null fill on failure
+  
+where 
+
+  (rrm:datein >= dtSdate and rrm:datein <= dtEdate)
+  and (rrm:locationcodeout = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and (rrm:Product = cProduct or cProduct = "ALL" )
+
+  and rrm:rastatus=3
+    
+list/domain="rrm"/hold = "rrm_hf"
+if ((rrm:sourcecode = csource or csource = "ALL")
+    and (rrm:referralcode = creferral or creferral = "ALL")
+    and (rrm:agentid = cagent or cagent = "ALL")
+    and (rrm:sourcecode <> "" and rrm:referralcode <> "")
+    and (rental_link:ratecode = crates or crates = "ALL")) then {
+  rrm:commonid/keyelement=1.1
+  rrm:ranumber
+  rrm:sourcecode
+  rrm:referralcode
+  rrm:agentid
+  rrm:ponumber
+  rrm:customerlastname
+  rental_link:ratecode
+}
+;
+replace referralrev_1.eq
+run/setparameter referralrev_1.eq
+
+run/parameterfile=referralrev_1 referralrev_1.eq
+
+/*------------------------------------------------------------------------
+ T&M and revenue day calculation
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+
+  file revdays_link = access ratelinera,
+    set ratelinera:commonid = rrm_hf:commonid,
+    one to many,generic,
+    null fill on failure
+  
+  number tot_revdays = if (revdays_link:res = 0 and revdays_link:totunits <> 
+    0) then (revdays_link:minsperx div 1440)  *
+  revdays_link:totunits else 0
+
+  number mileage = rentaldb:totaltpm - rentaldb:totaltime
+     
+sum/domain="rrm_hf"/hold = "revtm_hf"
+  mileage/heading="mileage"
+  rentaldb:totaltime/heading="time"
+  rentaldb:rentaldiscountamt/heading="discount"
+  tot_revdays/heading="rev_days"
+ 
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ranumber/name="ra_number"/keyelement=2.1
+
+;
+run/parameterfile=referralrev_1 
+
+/*------------------------------------------------------------------------
+ Mileage calculation
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+  file invtrx_link = access invtrx,
+   set invtrx:commonid=rrm_hf:commonid,
+   one to many, zero fill on failure
+
+  number miles_driven = invtrx_link:odometerin - invtrx_link:odometerout
+      
+sum/domain="rrm_hf"/hold = "miles_hf"
+  miles_driven
+
+by
+  rrm_hf:commonid/keyelement=1.1
+  rrm_hf:ranumber/name="ra_number"/keyelement=2.1
+
+;
+run/parameterfile=referralrev_1 
+
+
+/*------------------------------------------------------------------------
+ Other income retrieval
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+  file rcmift_link = access rcmift,
+    set rcmift:commonid=rrm_hf:commonid,
+    one to many, zero fill on failure
+
+    
+list/domain="rrm_hf"/hold = "rcmift_hf"
+if ((rcmift_link:rev = 1 and rcmift_link:tmpack = 0) and
+   ((rcmift_link:type one of 2,3,4,5,51,52,53,10,11,12) or (rcmift_link:code = ccode or ccode = "ALL"))) then {
+  rcmift_link:commonid/width=11/keyelement=1.1
+  rcmift_link:code
+  rcmift_link:type
+  rcmift_link:total
+}
+sorted by
+  rrm_hf:commonid
+
+;
+run/parameterfile=referralrev_1 
+
+/*------------------------------------------------------------------------
+ set place holders for null values
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+    
+list/domain="dummy"/maxrecords=1/hold = "rcmift_hf"/append
+  0/heading="commonid"/width=11/keyelement=1.1
+  ""/heading="code"/width=16
+  2/heading="type"/width=11
+  0/heading="total"/width=14/decimalplaces=2
+followed by
+  0/width=11
+  ""/width=16
+  51/width=11
+  0/width=14/decimalplaces=2
+followed by
+  0/width=11
+  ""/width=16
+  10/width=11
+  0/width=14/decimalplaces=2
+followed by
+  0/width=11
+  ""/width=16
+  99/width=11
+  0/width=14/decimalplaces=2
+
+;
+run/parameterfile=referralrev_1 
+
+/*------------------------------------------------------------------------
+ Summarize other income 
+------------------------------------------------------------------------*/
+include "referralrev_i1.inc"
+
+  string chg_type = switch(rcmift_hf:type)
+    case 2,3,4,5  : "Coverages"
+    case 51,52,53 : "Taxes"
+    case 10,11,12 : "Fuel"
+    default       : "Other"
+
+    
+sum/domain="rcmift_hf"/hold = "rcmiftsum_hf"
+  rcmift_hf:total
+
+across
+   chg_type/showall
+by
+  rcmift_hf:commonid/keyelement=1.1
+
+;
+run/parameterfile=referralrev_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+  include "referralrev_i1.inc"  
+
+  file tm_link = access revtm_hf,
+   set revtm_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file miles_link = access miles_hf,
+   set miles_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  file rcmift_link = access rcmiftsum_hf,
+   set rcmiftsum_hf:commonid=rrm_hf:commonid,
+   one to one, zero fill on failure
+
+  number net_tm = tm_link:totaltime+tm_link:mileage-tm_link:rentaldiscountamt
+  number tot_chgs = tm_link:totaltime+tm_link:mileage-tm_link:rentaldiscountamt+
+  rcmift_link:total_coverages+rcmift_link:total_fuel+rcmift_link:total_taxes+rcmift_link:total_other
+
+
+list/domain="rrm_hf"/duplicates/pageof/nobanner/noheadings/noreporttotals/pagelength=70/title="Referral Revenue Report"
+
+rrm_hf:ranumber/displaywidth=10/name="a"
+rrm:ponumber/displaywidth=10/name="b"
+rrm:customerlastname/displaywidth=20/name="c"
+
+net_tm/name="d"
+rcmift_link:total_coverages/name="e"
+rcmift_link:total_fuel/name="f"
+rcmift_link:total_taxes/name="g"
+rcmift_link:total_other/name="h"
+
+tot_chgs/name="i"
+
+tm_link:tot_revdays/displaywidth=5/name="j"
+round(miles_hf:miles_driven divide tm_link:tot_revdays,0)/displaywidth=5/name="k"
+miles_link:miles_driven/displaywidth=8/name="l"
+
+sorted by
+rrm_hf:referralcode
+rrm_hf:agentid
+rrm_hf:ranumber
+
+top of rrm_hf:referralcode
+"Referral: "+rrm_hf:referralcode
+top of rrm_hf:agentid
+"Agent: "+rrm_hf:agentid/newline
+
+
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Date Range: " + str(dtSDate) + " to " + str(dtEdate)/newline
+  if cLocgroup <> "" then "Location group: " + str(cLocGroup) else "Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product: " + str(cProduct)+  "   Rate Codes: "+str(crates)/displaywidth=100/newline
+  "Other Income: "+str(ccode)/displaywidth=100
+  end box/newline=4
+
+  "RA#"/align=a
+  "PO #"/align=b
+  "Customer Name"/align=c
+  "Net T&M"/align=d
+  "Coverages"/align=e
+  "Fuel"/align=f
+  "Taxes"/align=g
+  "Other Income"/align=h
+  "Total"/align=i
+  "Days Charged"/align=j
+  "Mi/Km per Day"/align=k
+  "Mi/Km dirven"/align=l/newline=2
+
+end of rrm_hf:agentid
+""/newline
+str(rrm_hf:agentid)+" Totals:"
+str(running count[rrm_hf:commonid,rrm_hf:agentid])+" Records"/align=c
+running total[net_tm,rrm_hf:agentid]/align=d
+running total[rcmift_link:total_coverages,rrm_hf:agentid]/align=e
+running total[rcmift_link:total_fuel,rrm_hf:agentid]/align=f
+running total[rcmift_link:total_taxes,rrm_hf:agentid]/align=g
+running total[rcmift_link:total_other,rrm_hf:agentid]/align=h
+running total[tot_chgs,rrm_hf:agentid]/align=i
+running total[tm_link:tot_revdays,rrm_hf:agentid]/align=j
+round(running total[miles_link:miles_driven,rrm_hf:agentid] divide running total[tm_link:tot_revdays,rrm_hf:agentid],0)/align=k
+running total[miles_link:miles_driven,rrm_hf:agentid]/align=l/newline
+
+end of rrm_hf:referralcode
+str(rrm_hf:referralcode)+" Totals:"
+str(running count[rrm_hf:commonid,rrm_hf:referralcode])+" Records"/align=c
+running total[net_tm,rrm_hf:referralcode]/align=d
+running total[rcmift_link:total_coverages,rrm_hf:referralcode]/align=e
+running total[rcmift_link:total_fuel,rrm_hf:referralcode]/align=f
+running total[rcmift_link:total_taxes,rrm_hf:referralcode]/align=g
+running total[rcmift_link:total_other,rrm_hf:referralcode]/align=h
+running total[tot_chgs,rrm_hf:referralcode]/align=i
+running total[tm_link:tot_revdays,rrm_hf:referralcode]/align=j
+round(running total[miles_link:miles_driven,rrm_hf:referralcode] divide running total[tm_link:tot_revdays,rrm_hf:referralcode],0)/align=k
+running total[miles_link:miles_driven,rrm_hf:referralcode]/align=l/newline
+
+
+end of report
+"Report Totals:"
+str(running count[rrm_hf:commonid,report])+" Records"/align=c
+running total[net_tm,report]/align=d
+running total[rcmift_link:total_coverages,report]/align=e
+running total[rcmift_link:total_fuel,report]/align=f
+running total[rcmift_link:total_taxes,report]/align=g
+running total[rcmift_link:total_other,report]/align=h
+running total[tot_chgs,report]/align=i
+running total[tm_link:tot_revdays,report]/align=j
+round(running total[miles_link:miles_driven,report] divide running total[tm_link:tot_revdays,report],0)/align=k
+running total[miles_link:miles_driven,report]/align=l/newline=2
+
+;
+replace referralrev.eq
+run/parameterfile=referralrev_1 referralrev.eq
+rrepl referralrev
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view referralrev
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Referral Revenue Report" -- Report Title
+   string rptname1    = "referralrev" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "referralrev_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,232 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Missing Miles Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 2/27/2018
+Modified:
+
+Notes:
+$Workfile: missmiles.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/missmiles.mf $
+$Revision: 2 $
+$History: missmiles.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Starting Date: " default (todaysdate-1) - day(todaysdate-1) + 1;
+  date dtedate = parameter prompt "Ending Date: " error "Error: End date < Start date" if dtedate < dtsdate default todaysdate - 1;
+  include "param_product.cq"
+  string cunits = range parameter prompt "Unit Range: (Start..End) or ALL" default "ALL"
+  number cgap = parameter prompt "Ignore Gaps Less Than X Miles/Kilometers:"  default 10;
+;
+replace missmiles_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve inv tranaction records
+------------------------------------------------------------------------*/
+include "missmiles_i1.inc"
+
+define
+   file invtrx_link = access invtrx,
+    set invtrx:invid=inv:invid,
+    with invtrx:dateout >= dtsdate,
+    sorted by invtrx:dateout,
+    one to many,generic,null fill on failure
+
+   string raro = if invtrx_link:ronumber <> 0 then "RO: "+str(invtrx_link:ronumber) else
+                  if invtrx_link:ticketnumber <> "" then "NR: "+invtrx_link:ticketnumber else
+                    if invtrx_link:ranumber <> "" then "RA: "+invtrx_link:ranumber
+
+where inv:unitnumber = cunits or cunits = "ALL"
+
+
+list/domain="inv"/hold="missmiles_hf"
+if invtrx_link:invtrxid <> 0 then {
+  invtrx_link:product
+  invtrx_link:unitnumber/keyelement=1.1
+  raro
+  invtrx_link:dateout
+  invtrx_link:timeout
+  invtrx_link:locationcodeout
+  invtrx_link:datein
+  invtrx_link:timein
+  invtrx_link:locationcodein
+  invtrx_link:odometerout
+  invtrx_link:odometerin
+  count[invtrx_link:unitnumber]/name="rec_num"/keyelement=1.2
+}
+
+sorted by invtrx_link:unitnumber
+invtrx_link:dateout
+invtrx_link:timeout
+
+;
+replace missmiles_1.eq
+run/setparameter missmiles_1.eq
+
+run/parameterfile=missmiles_1 missmiles_1.eq
+
+/*------------------------------------------------------------------------
+ Compare to previous transaction record and output report
+------------------------------------------------------------------------*/
+include "missmiles_i1.inc"
+
+define
+
+   number prev_rec_num = missmiles_hf:rec_num - 1
+
+   file prev_rec = access missmiles_hf,
+    set missmiles_hf:unitnumber=missmiles_hf:unitnumber,
+    missmiles_hf:rec_num=prev_rec_num
+
+   number prev_odom = if prev_rec:datein = null then prev_rec:odometerout else prev_rec:odometerin
+
+   number igap = if prev_rec:dateout <> null then missmiles_hf:odometerout - prev_odom
+
+where igap >= cgap 
+
+
+list/domain="missmiles_hf"/nobanner/pageof/title="Missing Miles Report"/noreporttotals/noheadings
+
+  prev_rec:product/displaywidth=10
+  prev_rec:unitnumber/displaywidth=10
+  prev_rec:raro
+  prev_rec:dateout
+  prev_rec:timeout/displaywidth=5
+  prev_rec:locationcodeout/displaywidth=10
+  prev_rec:datein
+  prev_rec:timein/displaywidth=5
+  prev_rec:locationcodein/displaywidth=10
+  prev_rec:odometerout
+  prev_rec:odometerin
+ 
+followed by
+if prev_rec:unitnumber <> null then {
+  missmiles_hf:product/align=prev_rec:product
+  missmiles_hf:unitnumber/align=prev_rec:unitnumber
+  missmiles_hf:raro/align=prev_rec:raro
+  missmiles_hf:dateout/align=prev_rec:dateout
+  missmiles_hf:timeout/align=prev_rec:timeout
+  missmiles_hf:locationcodeout/align=prev_rec:locationcodeout
+  missmiles_hf:datein/align=prev_rec:datein
+  missmiles_hf:timein/align=prev_rec:timein
+  missmiles_hf:locationcodein/align=prev_rec:locationcodein
+  missmiles_hf:odometerout/align=prev_rec:odometerout
+  missmiles_hf:odometerin/align=prev_rec:odometerin
+  igap/newline
+ }
+
+
+top of page
+
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+
+  "Date Range: "+str(dtsdate)+" to "+str(dtedate)
+  "    (Excluding gaps up to "+str(cgap)+" miles/km)"/newline
+  "Product: " + str(cProduct) 
+  "    Unit Range: " + str(cunits)/newline
+  end box /newline=4
+
+
+  "Date"/align=prev_rec:dateout
+  "Time"/align=prev_rec:timeout
+  "Location"/align=prev_rec:locationcodeout
+  "Date"/align=prev_rec:datein
+  "Time"/align=prev_rec:timein
+  "Location"/align=prev_rec:locationcodein
+  "Odometer"/align=prev_rec:odometerout
+  "Odometer"/align=prev_rec:odometerin
+  "Missing"/align=igap/newline
+
+  "Product"/align=prev_rec:product
+  "Unit #"/align=prev_rec:unitnumber
+  "RA/RO/NR #"/align=prev_rec:raro
+  "Out"/align=prev_rec:dateout
+  "Out"/align=prev_rec:timeout
+  "Out"/align=prev_rec:locationcodeout
+  "In"/align=prev_rec:datein
+  "In"/align=prev_rec:timein
+  "In"/align=prev_rec:locationcodein
+  "Out"/align=prev_rec:odometerout
+  "In"/align=prev_rec:odometerin
+  "Miles/Kms"/align=igap/newline
+
+
+end of report
+  ""/newline
+  str(count[prev_rec:unitnumber,report])+" transactions with missing miles/kms"
+
+
+;
+replace missmiles.eq
+run/parameterfile=missmiles_1 missmiles.eq
+rrepl missmiles
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view missmiles
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Missing Miles Report" -- Report Title
+   string rptname1    = "missmiles" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "missmiles_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

@@ -1,0 +1,458 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Outstanding Deposits Report
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 6/27/2017
+Modified:
+
+Notes:
+$Workfile: outdeps.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/outdeps.mf $
+$Revision: 2 $
+$History: outdeps.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+ define  
+
+  date dtsdate = parameter prompt "As Of Date: " default todaysdate
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cdateloc = parameter prompt "Select by Date: " valid "Report","Date In" default "Date In"
+  string csummary = parameter prompt "Detail or Summary?" valid "Detail","Summary" default "Detail"
+  string czerobal = parameter/uppercase prompt "Skip Zero Balance Deposits?" valid "Y","N" default "N"
+  string czeropay = parameter/uppercase prompt "Skip Zero Payment Detail?" valid "Y","N" default "N"
+
+;
+replace outdeps_i1.inc
+/*------------------------------------------------------------------------
+ Retrieve reservation records - setup parameters
+------------------------------------------------------------------------*/
+include "outdeps_i1.inc"
+define
+   string ra_res = if rrm:rastatus=0 then rrm:resnumber else rrm:ranumber
+   date comp_date = if cdateloc = "Report" then rrm:rptdate else rrm:datein
+
+where 
+
+  rrm:rastatus = 0 and rrm:resstatus > 0 and (rrm:noshowdate = null or rrm:noshowdate > dtSdate)
+  
+list/domain="rrm"/hold="rrm_hf"
+if  (rrm:product = cproduct or cproduct="ALL") then {
+  rrm:commonid /keyelement=1.1
+  ra_res
+  rrm:customerlastname
+}
+
+;
+replace outdeps_1.eq
+run/setparameter outdeps_1.eq
+
+run/parameterfile=outdeps_1 outdeps_1.eq
+
+/*------------------------------------------------------------------------
+ Select by Date In or Report Date
+------------------------------------------------------------------------*/
+include "outdeps_i1.inc"
+
+list/nodefaults/noheadings/nobanner/domain="dummy"
+
+if cdateloc = "Report" then
+  "(rrm:rastatus > 0 and rrm:rastatus < 4) and (rrm:rptdate = null or rrm:rptdate > dtSdate) and rrm:dateout <= dtSdate  -- date in chosen" else
+
+  "(rrm:rastatus > 0 and rrm:rastatus < 4) and (rrm:datein = null or rrm:datein > dtSdate) and rrm:dateout <= dtSdate  -- report date chosen"
+;
+run/parameterfile=outdeps_1
+rrepl outdeps_i2
+
+/*------------------------------------------------------------------------
+ Retrieve contract records that were rezes at cutoff
+------------------------------------------------------------------------*/
+
+include "outdeps_i1.inc"
+define
+   string ra_res = if rrm:rastatus=0 then rrm:resnumber else rrm:ranumber
+   date comp_date = if cdateloc = "Report" then rrm:rptdate else rrm:datein
+
+where 
+  (rrm:rastatus > 0 and rrm:rastatus < 4) and rrm:resstatus > 0 and (rrm:noshowdate = null or rrm:noshowdate > dtSdate)
+    and rrm:dateout > dtSdate  -- would be res deposits at cutoff date
+  
+list/domain="rrm"/hold="rrm_hf"/append
+if  (rrm:product = cproduct or cproduct="ALL") then {
+  rrm:commonid /keyelement=1.1
+  ra_res
+  rrm:customerlastname
+}
+
+;
+run/parameterfile=outdeps_1 
+
+/*------------------------------------------------------------------------
+ Retrieve contract deposits
+------------------------------------------------------------------------*/
+include "outdeps_i1.inc"
+define
+   string ra_res = if rrm:rastatus=0 then rrm:resnumber else rrm:ranumber
+   date comp_date = if cdateloc = "Report" then rrm:rptdate else rrm:datein
+
+where 
+
+ include "outdeps_i2.cq"
+  
+list/domain="rrm"/hold="rrm_hf"/append
+if  (rrm:product = cproduct or cproduct="ALL") then {
+  rrm:commonid /keyelement=1.1
+  ra_res
+  rrm:customerlastname
+}
+
+;
+run/parameterfile=outdeps_1 
+/*------------------------------------------------------------------------
+ Retrieve payment records for selected rrm records
+------------------------------------------------------------------------*/
+viewpoint native;
+include "outdeps_i1.inc"
+define
+
+   number sort_order = 1
+
+  file pmt_link = access payments,
+   set payments:commonid=rrm_hf:commonid,
+   one to many,null fill on failure
+
+   file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = pmt_link:rptloccode,
+    null fill on failure
+
+where  (pmt_link:rptloccode = cLoc or cLoc = "ALL")
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+
+list/domain="rrm_hf"/hold="deps_hf1"
+if (pmt_link:deposit=1 and pmt_link:paiddeposit=1)  then {
+  sort_order/width=4
+  1/width=4/name="sub_sort"
+  pmt_link:rptloccode/width=20
+  pmt_link:rptdate
+  pmt_link:paymenttype/width=40
+  pmt_link:paymentamount/width=14/decimalplaces=2
+  pmt_link:paymentid/width=11/keyelement=1.1
+  rrm_hf:ra_res
+  rrm_hf:commonid/width=11/keyelement=2.1
+}
+
+sorted by
+  pmt_link:rptloccode
+  pmt_link:rptdate
+  pmt_link:paymenttype
+
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Calculate RA balance
+------------------------------------------------------------------------*/
+ 
+sum/domain="deps_hf1"/hold="depbal_hf"
+deps_hf1:paymentamount
+by 
+deps_hf1:ra_res/keyelement=1.1
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Filter proper deposit records
+------------------------------------------------------------------------*/
+viewpoint native;
+  include "outdeps_i1.inc"
+
+  define
+    file bal_link = access depbal_hf,
+     set depbal_hf:ra_res=deps_hf1:ra_res
+
+  file alt_locgroup = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = deps_hf1:rptloccode,
+    null fill on failure
+
+  number inc_flag = if((czeropay="Y" and deps_hf1:paymentamount=0)or(czerobal="Y" and bal_link:paymentamount=0)) then 0 else 1
+
+where  (deps_hf1:rptloccode = cLoc or cLoc = "ALL" )
+  and (cLocGroup = "" or cLocGroup = alt_locgroup:groupname)
+  and deps_hf1:rptdate <= dtsdate
+
+list/domain="deps_hf1"/hold="deps_hf"
+if inc_flag=1 then {
+  deps_hf1:sort_order 
+  deps_hf1:sub_sort 
+  deps_hf1:rptloccode 
+  deps_hf1:rptdate 
+  deps_hf1:paymenttype 
+  deps_hf1:paymentamount 
+  deps_hf1:paymentid/width=11/keyelement=1.1
+  deps_hf1:ra_res 
+  deps_hf1:commonid/width=11/keyelement=2.1
+}
+
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Calculate location totals by pay type
+------------------------------------------------------------------------*/
+define 
+   number sort_order = 3
+
+sum/domain="deps_hf"/hold="depstot_hf"--/append
+  deps_hf:paymentamount/width=14/decimalplaces=2
+by 
+  sort_order/width=4
+  1/width=4/name="sub_sort"
+  deps_hf:rptloccode/width=20
+  todaysdate/name="rptdate"
+  deps_hf:paymenttype/width=40
+
+end of deps_hf:paymenttype
+  deps_hf:paymentid/width=11/keyelement=1.1
+  deps_hf:ra_res
+  deps_hf:commonid/width=11/keyelement=2.1
+
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Calculate location totals
+------------------------------------------------------------------------*/
+
+define 
+   number sort_order = 3
+
+sum/domain="deps_hf"/hold="depstot_hf"/append
+  deps_hf:paymentamount/width=14/decimalplaces=2
+by 
+  sort_order/width=4
+  2/width=4/name="sub_sort"
+  deps_hf:rptloccode/width=20
+  todaysdate/name="rptdate"
+  "Total Deposits"/width=40/name="paymenttype"
+
+end of deps_hf:rptloccode
+  deps_hf:paymentid/width=11/keyelement=1.1
+  deps_hf:ra_res
+  deps_hf:commonid/width=11/keyelement=2.1
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Calculate grand totals
+------------------------------------------------------------------------*/
+define 
+   number sort_order = 4
+ 
+sum/domain="deps_hf"/hold="depstot_hf"/append
+  deps_hf:paymentamount/width=14/decimalplaces=2
+by 
+  sort_order/width=4
+  1/width=4/name="sub_sort" 
+  "ZZZZZZZZZZZZZZZZZZZZ"/width=20/name="rptloccode"
+  todaysdate/name="rptdate"
+  deps_hf:paymenttype/width=40
+
+end of deps_hf:paymenttype
+  deps_hf:paymentid/width=11/keyelement=1.1
+  deps_hf:ra_res
+  deps_hf:commonid/width=11/keyelement=2.1
+
+end of report
+  sort_order/width=4
+  2/width=4/name="sub_sort"
+  "ZZZZZZZZZZZZZZZZZZZZ"/width=20
+  todaysdate
+  "Total Deposits"/width=40
+  total[deps_hf:paymentamount]/width=14/decimalplaces=2
+  deps_hf:paymentid/width=11
+  deps_hf:ra_res
+  deps_hf:commonid/width=11
+;
+run/parameterfile=outdeps_1
+/*------------------------------------------------------------------------
+ Combine totals with payment data
+------------------------------------------------------------------------*/
+
+list/domain="depstot_hf"/hold="deps_hf"/append
+  depstot_hf:sort_order
+  depstot_hf:sub_sort
+  depstot_hf:rptloccode
+  depstot_hf:rptdate 
+  depstot_hf:paymenttype
+  depstot_hf:paymentamount
+  depstot_hf:paymentid/width=11/keyelement=1.1
+  depstot_hf:ra_res
+  depstot_hf:commonid/width=11/keyelement=2.1
+
+sorted by depstot_hf:ra_res
+
+;
+run/parameterfile=outdeps_1
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+viewpoint native;
+include "outdeps_i1.inc"
+define
+
+   file rrm_link = access rrm,
+    set rrm:commonid=deps_hf:commonid,
+    one to one, null fill on failure
+
+   file pmt_link = access payments,
+    set payments:paymentid=deps_hf:paymentid,
+    one to one, null fill on failure
+
+   file paytype_link = access paymentstype,
+    set paymentstype:paymenttype=pmt_link:paymenttype,
+    one to one, null fill on failure
+
+   file depbal_link = access depbal_hf,
+    set depbal_hf:ra_res=depbal_hf:ra_res,
+    one to one, zero fill on failure
+
+   string ref_string = switch(paytype_link:paytype)
+     case 1 : pmt_link:checknumber
+     case 2 : "XXXXXXXXXXXX"+str(pmt_link:last4,"9999")
+     case 3 : pmt_link:arcust + " " + pmt_link:company
+     case 4 : pmt_link:checknumber
+     default : ""
+
+   number inc_flag = if((czeropay="Y" and pmt_link:paymentamount=0)or(czerobal="Y" and depbal_link:paymentamount=0)) then 0 else 1
+
+
+list/domain="deps_hf"/noreporttotals/nobanner/pageof/pagelength=90/title="Outstanding Deposits Report"
+if (deps_hf:sort_order = 1 and csummary = "Detail"  and inc_flag=1) then {
+  deps_hf:ra_res/heading="RA#/Res#"/displaywidth=12
+  " " + str(rrm_link:customerlastname)/heading="Name"/displaywidth=15
+  pmt_link:recievedbyemployeenumber
+  pmt_link:datereceived
+  rrm_link:dateout/heading="Pickup Date"/duplicates
+  deps_hf:paymenttype/displaywidth=8
+  deps_hf:paymentamount
+  ref_string/displaywidth=20/heading="Reference"  
+  pmt_link:ccauthcode
+  }
+
+
+followed by
+if deps_hf:sort_order = 3 then {
+  deps_hf:paymenttype /noheading
+  deps_hf:paymentamount/noheading
+}
+
+followed by
+if deps_hf:sort_order = 4 then {
+  deps_hf:paymenttype /noheading
+  deps_hf:paymentamount/noheading
+}
+
+sorted by
+  deps_hf:rptloccode 
+ -- deps_hf:rptdate 
+  deps_hf:sort_order
+  deps_hf:sub_sort
+  deps_hf:paymenttype
+  deps_hf:commonid
+  deps_hf:paymentid
+
+top of sort_order
+  if deps_hf:sort_order=3 then {
+""/newline
+"Location Totals"/width=20
+deps_hf:rptloccode/width=30/heading="Location"/newline   
+}
+
+  if deps_hf:sort_order=4 then {
+""/newline
+"Grand Totals"/width=20
+"All Locations"/width=30/heading="Location"/newline   
+}
+
+end of sort_order
+  ""/newline
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "As Of Date: "+str(dtSdate)+"   Product: " + str(cProduct)/newline
+  if cLocgroup <> "" then str(cdateloc) + " Location group: " + str(cLocGroup) else str(cdateloc) + " Locations: " + str(cLoc)/displaywidth=100/newline=2
+  "Location: "+str(deps_hf:rptloccode)
+  end box/newlines=4
+
+;
+replace outdeps.eq
+run/parameterfile=outdeps_1 outdeps.eq
+rrepl outdeps
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view outdeps
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Outstanding Deposits Report" -- Report Title
+   string rptname1    = "outdeps" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "outdeps_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
+

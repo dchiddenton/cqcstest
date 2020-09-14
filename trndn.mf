@@ -1,0 +1,159 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: Turndown Report
+  Author: David Chiddenton
+  $Revision: 1 $;
+  
+/*------------------------------------------------------------------------
+Created: 9/25/2019
+Modified:
+
+Notes:
+$Workfile: trndn.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/trndn.mf $
+$Revision: 1 $
+$History: trndn.mf $
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/25/19    Time: 4:02p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create custom parameters
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+list/nodefaults/nolinks/pagelength=0/noblanklines/noduplicates/domain="turndowncode"
+if itemnumber=1 then '"'+turndowncode:code+'"' else
+   ',"'+turndowncode:code+'"'
+
+sorted by
+   turndowncode:code
+top of report
+'string cturndowncode[8192] = multivalue parameter prompt "Turndown Reason:"'
+"Valid "
+end of report
+'Default "ALL"'
+;
+run/parameterfile
+rrepl "param_turndowncode"
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+  date dtsdate = parameter prompt "Enter Starting Date" default todaysdate-day(todaysdate)+1
+  date dtedate = parameter prompt "Enter Ending Date" default todaysdate
+  string cresrange = range parameter prompt "Res# Range (Start..End or ALL): " default ALL
+  string cnamerange = range parameter prompt "Last Name Range (Start..End or ALL): " default ALL
+  include "param_invclass.cq"
+  include "param_turndowncode.cq"
+  string csort = parameter prompt "Sort By: " valid "Date","Res#","Last Name","Class","Reason" default "Date"
+
+;
+replace trndn_i1.inc
+/*------------------------------------------------------------------------
+ First procedure - setup parameters
+------------------------------------------------------------------------*/
+include "trndn_i1.inc"
+
+where
+     (turndown:DateTD >= dtSDate AND turndown:DateTD <= dtEDate) AND
+     (turndown:ResNumber = cresrange or cresrange = "ALL") AND
+     (turndown:CustomerLastname = cnamerange or cnamerange = "ALL") AND
+     (turndown:ReservedClass = cClass OR cClass = "All") AND
+     (turndown:Code = cturndowncode OR cturndowncode = "All")
+
+list/domain="turndown"/nobanner/pageof/noreporttotals/count/title="Turndown Report"
+
+  turndown:DateTD/displaywidth=10
+  turndown:TimeTD/displaywidth=6
+  turndown:Code/displaywidth=10
+  turndown:ReservedClass/displaywidth=10
+  turndown:ResNumber/displaywidth=10
+  turndown:CustomerLastname/displaywidth=20
+  turndown:CustomerFirstname/displaywidth=10
+  turndown:PaymentType/displaywidth=8
+  turndown:PayInfo/displaywidth=25
+  turndown:EmployeeNumber/displaywidth=8
+if turndown:Notes <> "" then {
+  ""/newline
+  box/width=100/column=1/fill/noblanklines
+  "Notes: " + turndown:Notes
+  end box/newline
+}
+
+sorted by
+  switch(csort)
+    case "Res#"      : turndown:ResNumber
+    case "Last Name" : turndown:CustomerLastname 
+    case "Class"     : turndown:ReservedClass
+    case "Reason"    : turndown:Code
+  turndown:DateTD
+  turndown:TimeTD
+
+
+top of page 
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  "Dates: " + str(dtsdate) +" to " + str(dtedate)/displaywidth=100/newline
+  "Class: " + str(cclass) +"   Reason: "+str(cturndowncode)/displaywidth=100/newline
+  "Res# Range: "+str(cresrange)+"   Name Range: "+str(cnamerange)/displaywidth=100/newline  
+  end box/newlines=4
+;
+
+replace trndn_1.eq
+run/setparameter trndn_1.eq
+
+replace trndn.eq
+
+run/parameterfile=trndn_1 trndn.eq
+
+rrepl trndn
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view trndn
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Turndown Report" -- Report Title
+   string rptname1    = "trndn" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "trndn_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf

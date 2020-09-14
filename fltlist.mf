@@ -1,0 +1,415 @@
+clear echo
+
+description
+
+  Copyright by Bluebird Auto Rental Systems Ltd 2019.
+  All rights reserved.
+
+  Report: 
+  Author: David Chiddenton
+  $Revision: 2 $;
+  
+/*------------------------------------------------------------------------
+Created: 7/8/2019
+Modified:
+
+Notes:
+$Workfile: fltlist.mf $                              
+$Archive: /AutoMate2/Version 5.0/Source/cqcs/fltlist.mf $
+$Revision: 2 $
+$History: fltlist.mf $
+ * 
+ * *****************  Version 2  *****************
+ * User: Dchidden     Date: 9/12/19    Time: 11:52a
+ * Updated in $/AutoMate2/Version 5.0/Source/cqcs
+ * Add revision number to view in About screen
+ * 
+ * *****************  Version 1  *****************
+ * User: Dchidden     Date: 9/11/19    Time: 1:27p
+ * Created in $/AutoMate2/Version 5.0/Source/cqcs
+ * Initial creation
+------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------
+ Retrieve standard parameters and create 
+------------------------------------------------------------------------*/
+
+run/parameterfile parameters.mf
+
+/*------------------------------------------------------------------------
+ Create user interface include file
+------------------------------------------------------------------------*/
+define
+
+  include "param_loc.cq"
+  include "param_locgroup.cq"
+  include "param_product.cq"
+  string cloctype = parameter prompt "Location Selection: " valid "Owned","Current" default "Current"
+  string cUnits[1024]= range parameter prompt "Unit#s (Start..End) or ALL: "  default "ALL"
+  string clistby=parameter prompt "List by: " valid "Unit","Make Model","License","Exp OS Date","Class","VIN" default "Unit"
+  include "param_invstatus.cq"
+  string cvehicles[1024] = multivalue parameter prompt "Vehicles to Include: " valid  "On Order","In Fleet","Unavailable","Sold" default "In Fleet"
+  string lforeign = parameter/uppercase prompt "Include Foreign Vehicles? " Valid "Y","N" default "N"
+  string notes_detail = parameter prompt "Print Notes?" valid "Summary","Detail", "None" default "None"
+
+  string lonorder = if (cvehicles contains "On Order" or cvehicles = "ALL") then "Yes" else "No"
+  string linfleet = if (cvehicles contains "In Fleet" or cvehicles = "ALL")then "Yes" else "No"
+  string lunavail = if (cvehicles contains "Unavailable" or cvehicles = "ALL")then "Yes" else "No"
+  string lsold = if (cvehicles contains "Sold" or cvehicles = "ALL") then "Yes" else "No"
+;
+replace fltlist_i1.inc
+
+/*------------------------------------------------------------------------
+ Retrieve current fleet
+------------------------------------------------------------------------*/
+
+include "fltlist_i1.inc"
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = inv:ownedlocationcode,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=inv:vehiclestatusowned,
+   one to one, null fill on failure
+
+  file ownedloc_link = access location,
+   set location:locationcode=inv:ownedlocationcode,
+   one to one, null fill on failure
+
+  file currentloc_link = access location,
+   set location:locationcode=inv:locationcode,
+   one to one, null fill on failure
+
+  number owned_loc = if cloctype = "Owned" then ownedloc_link:owned else currentloc_link:owned
+
+define cInvType[8] = "Active"
+define lUAStatus = switch(invstat_link:statustype)
+   case 5 : "Yes"
+   default : "No"
+define iStatusCat = switch(lUAStatus+lInFleet+lUnavail)
+   case "NoYesNo" : 2
+   case "NoYesYes" : 2
+   case "YesNoYes" : 3
+   case "YesYesYes" : 3
+   default : 0
+
+where 
+  (inv:Product  = cProduct or cProduct = "ALL" )
+  and
+  (inv:unitnumber = cUnits or cUnits = "ALL")
+  and 
+  ((cloctype = "Owned" and (inv:ownedlocationcode = cLoc or cLoc = "ALL" )) or
+       (cloctype = "Current" and (inv:locationcode = cLoc or cLoc = "ALL")))
+  and ((cloctype = "Owned" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+  and (cStatus = "ALL" or invstat_link:description = cstatus)
+  and ((owned_loc = 1 and lforeign = "N" ) or lforeign = "Y")
+
+      
+list/domain="inv"/hold="fltlist_hf"
+if istatuscat > 0 then { 
+  inv:product/displaywidth=7 
+  inv:unitnumber/heading="Unit"/displaywidth=5 
+  inv:serialnumber/displaywidth=18 
+  inv:invclass/heading="Class"/displaywidth=5 
+  inv:year/mask="9999"
+  inv:make/displaywidth=8 
+  inv:model/displaywidth=9 
+  inv:unitcolor/displaywidth=9 
+  inv:odometer 
+  inv:licensenumber/heading="License"
+  inv:licensest/heading="St"/displaywidth=2 
+  invstat_link:description/displaywidth=7 
+  inv:ranumber/heading="RA/RO/NR #"/displaywidth=12 
+  inv:expectedoutservicedate/heading="Exp OS Date"/mask="MM-DD-YYYY"
+  inv:ownedlocationcode/heading="Owned " 
+  inv:locationcode/heading="Current"
+  owned_loc
+  cInvType
+  iStatusCat
+}
+
+;
+replace fltlist_1.eq
+run/setparameter fltlist_1.eq
+
+run/parameterfile=fltlist_1 fltlist_1.eq
+
+/*------------------------------------------------------------------------
+ Retrieve new fleet
+------------------------------------------------------------------------*/
+
+
+include "fltlist_i1.inc"
+
+  file alt_locgroupE = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invnew:ownedlocationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invnew:expecteddeliveryloc,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=invnew:vehiclestatusowned,
+   one to one, null fill on failure
+
+define cinvType[8] = "New"
+define istatuscat = 1
+
+
+where 
+  (invnew:Product  = cProduct or cProduct = "ALL" )
+  and
+  (invnew:unitnumber = cUnits  or cUnits = "ALL")
+  and 
+  (invnew:expecteddeliveryloc = cLoc or invnew:ownedlocationcode  = cloc or cLoc = "ALL" ) 
+ 
+  and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname or cLocGroup = alt_locgroupe:groupname)
+  and (cStatus = "ALL" or invstat_link:description = cstatus)
+
+      
+list/domain="invnew"/hold="fltlist_hf"/append
+  invnew:product/displaywidth=7 
+  invnew:unitnumber/heading="Unit"/displaywidth=5 
+  invnew:serialnumber/displaywidth=18 
+  invnew:invclass/heading="Class"/displaywidth=5 
+  invnew:year/mask="9999"
+  invnew:make/displaywidth=8 
+  invnew:model/displaywidth=9 
+  invnew:unitcolor/displaywidth=9 
+  invnew:odometer 
+  invnew:licensenumber/heading="License"
+  invnew:licensest/heading="St"/displaywidth=2 
+  invstat_link:description/displaywidth=7 
+  invnew:ranumber/heading="RA/RO/NR #"/displaywidth=12 
+  invnew:expectedoutservicedate/heading="Exp OS Date"/mask="MM-DD-YYYY"
+  if invnew:ownedlocationcode = "" then invnew:expecteddeliveryloc else invnew:ownedlocationcode/name="ownedlocationcode"/heading="Owned " 
+  if invnew:locationcode  = "" then invnew:expecteddeliveryloc else invnew:locationcode/name="locationcode"/heading="Current"
+  0/name="owned_loc"
+  cinvType
+  iStatusCat
+
+;
+run/parameterfile=fltlist_1 
+
+/*------------------------------------------------------------------------
+ Retrieve sold fleet
+------------------------------------------------------------------------*/
+
+include "fltlist_i1.inc"
+
+  file alt_locgroupC = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:locationcode,
+    null fill on failure
+
+  file alt_locgroupO = access locgroup,
+    set locgroup:groupname = clocgroup,
+    locgroup:locationcode = invsold:ownedlocationcode,
+    null fill on failure
+
+  file invstat_link = access invstatus,
+   set invstatus:invstatus=invsold:vehiclestatusowned,
+   one to one, null fill on failure
+
+
+  file ownedloc_link = access location,
+   set location:locationcode=invsold:ownedlocationcode,
+   one to one, null fill on failure
+
+  file currentloc_link = access location,
+   set location:locationcode=invsold:locationcode,
+   one to one, null fill on failure
+
+  number owned_loc = if cloctype = "Owned" then ownedloc_link:owned else currentloc_link:owned
+
+define cInvType[8] = "Sold"
+define iStatusCat = 4
+
+
+where 
+  (invsold:Product  = cProduct or cProduct = "ALL" )
+  and
+  (invsold:unitnumber = cUnits or cUnits = "ALL")
+  and 
+  ((cloctype = "Owned" and (invsold:ownedlocationcode = cLoc or cLoc = "ALL" )) or
+       (cloctype = "Current" and (invsold:locationcode = cLoc or cLoc = "ALL")))
+  and ((cloctype = "Owned" and (cLocGroup = "" or cLocGroup = alt_locgroupo:groupname)) or
+      (cloctype = "Current" and (cLocGroup = "" or cLocGroup = alt_locgroupC:groupname)))
+  and (cStatus = "ALL" or invstat_link:description = cstatus)
+  and ((owned_loc = 1 and lforeign = "N") or lforeign = "Y")
+
+
+
+list/domain="invsold"/append/hold="fltlist_hf"
+  invsold:product/displaywidth=7 
+  invsold:unitnumber/heading="Unit"/displaywidth=5 
+  invsold:serialnumber/displaywidth=18 
+  invsold:invclass/heading="Class"/displaywidth=5 
+  invsold:year/mask="9999"
+  invsold:make/displaywidth=8 
+  invsold:model/displaywidth=9 
+  invsold:unitcolor/displaywidth=9 
+  invsold:odometer 
+  invsold:licensenumber/heading="License" 
+  invsold:licensest/heading="St"/displaywidth=2 
+  invstat_link:description/displaywidth=7 
+  invsold:ranumber/heading="RA/RO/NR #"/displaywidth=12 
+  invsold:expectedoutservicedate/heading="Exp OS Date"/mask=
+"MM-DD-YYYY"
+  invsold:ownedlocationcode/heading="Owned " 
+  invsold:locationcode/heading="Current"
+  owned_loc
+  cInvType
+  iStatusCat
+
+;
+run/parameterfile=fltlist_1 
+
+/*------------------------------------------------------------------------
+ Output Report
+------------------------------------------------------------------------*/
+
+
+include "fltlist_i1.inc"
+
+  string key_str = str(inv:invid)
+
+  file inv_to_notes = access dialogue,
+   set type = 3,dialogue:key = key_str,
+   one to one, null fill on failure
+
+define cbrkTitle = switch(fltlist_hf:istatuscat)
+   case 1 : "On Order Units"
+   case 2 : "In Fleet Units"
+   case 3 : "Unavailable Units"
+   case 4 : "Sold Units"
+
+
+where ((linfleet = "Yes" or lunavail = "Yes") and fltlist_hf:cInvType = "Active")
+  or (lonorder = "Yes" and fltlist_hf:cInvType = "New")
+  or (lsold = "Yes" and fltlist_hf:cInvType = "Sold")
+
+list/domain="fltlist_hf"/title="Fleet List"/nobanner/pagelength=70
+  fltlist_hf:product/displaywidth=7/heading="Product"
+  fltlist_hf:unitnumber/displaywidth=10/heading="Unit" /name="a"
+  fltlist_hf:serialnumber/displaywidth=18/heading="Serial Number"
+  fltlist_hf:invclass/displaywidth=8/heading="Class" 
+  fltlist_hf:year/mask="9999"/heading="Year"
+  fltlist_hf:make/displaywidth=8/heading="Make" 
+  fltlist_hf:model/displaywidth=9/heading="Model" 
+  fltlist_hf:unitcolor/displaywidth=9/heading="Color" 
+  fltlist_hf:odometer/heading="Odometer" 
+  fltlist_hf:licensenumber/heading="License" 
+  fltlist_hf:licensest/displaywidth=2/heading="St" 
+  fltlist_hf:description/displaywidth=10/duplicates/heading="Status" 
+  fltlist_hf:ranumber/displaywidth=12/heading="RA/RO/NR #" 
+  fltlist_hf:expectedoutservicedate/heading="Exp OS Date"/mask="MM-DD-YYYY"
+  fltlist_hf:ownedlocationcode/heading="Owned " 
+  fltlist_hf:locationcode/heading="Current"
+
+  followed by if (notes_detail = "Summary" and inv_to_notes:summary <> "") then {
+  "Summary: " + inv_to_notes:summary/displaywidth=100/newline
+  }
+
+  followed by if (notes_detail = "Detail" and (inv_to_notes:summary <> "" or inv_to_notes:notes <> "")) then {
+  "Summary: " + inv_to_notes:summary/newline
+  box/width=100/fill/noblanklines
+  "Notes: " + inv_to_notes:notes
+  end box/newline
+  }
+
+
+sorted by fltlist_hf:istatuscat/page
+  switch(cListBy)
+  case "Unit" : fltlist_hf:Unitnumber --+ Product
+  case "Make Model" : fltlist_hf:Make --+ Model
+  case "License" : fltlist_hf:Licensenumber --+ Licensest
+  case "Exp OS Date" : str( fltlist_hf:expectedoutservicedate, "YYYY-MM-DD" )
+  case "Class" : fltlist_hf:invclass
+  case "VIN" : fltlist_hf:Serialnumber
+  default : fltlist_hf:Unitnumber --+ Product
+  switch(cListBy)
+  case "Unit" : fltlist_hf:Product
+  case "Make Model" : fltlist_hf:Model
+  case "License" : fltlist_hf:Licensest
+  case "Exp OS Date" : ""
+  case "Class " : ""
+  case "VIN" : ""
+  default : Product
+
+top of page
+ "company_logo.jpg"/image/width=20/left/newline
+
+ box/center/column=1
+  if str(cUnits) = "ALL" then {"All Units"/newline} else {"Unit Range: "+str(cUnits)/displaywidth=100/newline}
+  if cLocgroup <> "" then str(cloctype) +" Location group: " + str(cLocGroup) else str(cloctype) + " Locations: " + str(cLoc)/displaywidth=100/newline
+  "Product(s): " + str(cProduct) 
+  end box/newlines=4
+ 
+top of fltlist_hf:istatuscat
+  cbrktitle/noheading/newline=2
+
+end of fltlist_hf:istatuscat
+  ""/newline
+  str(count[fltlist_hf:unitnumber])+" "+cbrktitle/newline
+
+
+end of report
+  ""/newline
+  str(count[fltlist_hf:unitnumber])+" Total Units"/newline
+
+;
+replace fltlist.eq
+ run/parameterfile=fltlist_1 fltlist.eq
+rrepl fltlist
+
+
+/*------------------------------------------------------------------------
+ Send report to screen
+------------------------------------------------------------------------*/
+view fltlist
+
+/*------------------------------------------------------------------------
+ Prepare for job submission to RW
+------------------------------------------------------------------------*/
+
+define
+   string action      = "Report" -- Post or Report
+   string rptdesc     = "Fleet List" -- Report Title
+   string rptname1    = "fltlist" -- output file1
+   string rptname2    = "" -- output file2 if applicable
+   string rptname3    = "" -- output file3 if applicable
+   string parfile     = "fltlist_1.par" -- parameter.par file
+   string xmlname     = "" -- xml for posting if applicable
+   string exportname  = "" -- posting export file if applicable
+   string startdate   = ""  -- requires: include "parameter.inc" for this value if needed
+   string enddate     = ""  -- requires: include "parameter.inc" for this value if needed
+
+
+list/domain="dummy"/nodefaults/nobanner
+action/newline
+rptdesc/newline
+rptname1/newline
+rptname2/newline
+rptname3/newline
+parfile/newline
+xmlname/newline
+exportname/newline
+startdate/newline
+enddate/newline
+;
+run/parameterfile
+rrepl rwsubmitpar
+run/parameterfile rwsubmitjob.mf
+
